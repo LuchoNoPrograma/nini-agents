@@ -1,8 +1,8 @@
 # codex — OpenAI Codex CLI
 
-**Strategy:** `env` — sets `CODEX_HOME={profileDir}` before launch.
+**Account boundary:** `fileOverlay` — `auth.json` is profile-local; configuration and sessions are shared normal state.
 
-Codex stores everything (auth, config, sessions) under `~/.codex/` by default, but always checks `CODEX_HOME` first. Pointing it at a profile directory gives full account isolation with zero side effects.
+Codex honors `CODEX_HOME`. The adapter points it at a per-profile runtime view where only `auth.json` belongs to the profile and every declared ordinary path links back to the native shared root.
 
 ## Install
 
@@ -10,34 +10,41 @@ Codex stores everything (auth, config, sessions) under `~/.codex/` by default, b
 npm i -g @openai/codex
 ```
 
+Binary discovery: `%APPDATA%\npm\codex.cmd` (Windows), `/usr/local/bin/codex` (macOS), `$HOME/.npm-global/bin/codex` (Linux), then `codex` on PATH.
+
 ## Quickstart
 
 ```bash
 multi-cli new codex/work
+multi-cli launch codex/work        # sign in on first run; auth.json stays profile-local
 multi-cli new codex/personal
-codex-work       # logs into account A on first run
-codex-personal   # logs into account B; both can run simultaneously
+multi-cli launch codex/personal
 ```
 
-## Profile types
+Conversations are shared normal state, so `multi-cli continue` is not needed between schema-v2 profiles (it remains available for legacy profiles).
 
-- **full** *(default)* — fresh `CODEX_HOME`, separate auth/config/sessions/skills.
-- **shared** — symlinks `config.toml`, `skills/`, `agents/`, `prompts/`, `mcp-configs/`, `plugins/` from `~/.codex/`. Only `auth.json` and `sessions/` stay isolated.
+## Account boundary
 
-## Continue a chat across accounts
+- Profile-local credentials: `auth.json` (sole declared credential). Requires Codex file credential storage.
+- Launch env: `CODEX_HOME={runtimeRoot}`.
+- Logout scope: profile.
 
-Rate-limited on one account? Copy the conversation state to a profile logged into another, then resume the same chat.
+## Shared normal state
 
-```bash
-multi-cli continue codex work personal   # copy sessions/history (never auth)
-codex-personal
-codex resume <session-id>                 # codex ≥ 0.30
-```
+Shared root: `%USERPROFILE%\.codex` (Windows), `~/.codex` (macOS/Linux).
 
-Run `codex resume` with no argument to pick from past sessions interactively — no id lookup needed. The id is otherwise the UUID in the rollout filename under `sessions/YYYY/MM/DD/`.
+- Config: `config.toml`, `hooks.json`, `skills/`, `agents/`, `prompts/`, `mcp-configs/`, `plugins/`.
+- Sessions: `sessions/`, `history.jsonl`, `archived_sessions/`, `session_index.jsonl`.
 
-`base` works as either profile name and means `~/.codex`. Default merge keeps newer destination files; `--no-merge` overwrites, `--dry-run` previews.
+## Known limitations
 
-## Verified
+- Requires file-based credential storage (`auth.json`); OS-keychain credential modes are outside this account boundary.
+- Concurrent writers against the shared session store still need the authenticated dual-account E2E pass before any platform can be promoted.
 
-Smoke-tested live against `codex-cli 0.130.0` on Windows.
+## Support
+
+| Windows | macOS | Linux |
+|---|---|---|
+| experimental | experimental | experimental |
+
+`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.

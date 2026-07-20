@@ -1,36 +1,44 @@
-# cursor — Cursor IDE
+# cursor — Cursor Desktop
 
-**Strategy:** `userDataDir` — passes `--user-data-dir={profileDir}` and `--extensions-dir={profileDir}/extensions` on launch.
+**Account boundary:** `inseparable` — desktop credentials, chat state, SQLite global storage, and singleton behavior have no proven narrow split.
 
-Cursor inherits VS Code's launch flags. Each profile gets its own user data dir (settings, auth, recent workspaces, agent state) and its own extensions directory.
+Cursor accepts VS Code-style user-data flags, but per `adapter.json` those flags do not prove separate desktop auth with shared conversations. The account-overlay contract is therefore not claimed.
 
 ## Install
 
 [cursor.com/download](https://cursor.com/download)
 
+Binary discovery: `%LOCALAPPDATA%\Programs\cursor\Cursor.exe` (Windows), `/Applications/Cursor.app` (macOS), `/usr/bin/cursor` or `/opt/Cursor/cursor` (Linux).
+
 ## Quickstart
 
+Unsupported on all platforms; legacy whole-home profiles remain launchable:
+
 ```bash
-multi-cli new cursor/work
-multi-cli new cursor/personal
-cursor-work       # opens a Cursor window logged in as account A
-cursor-personal   # second window, account B — both run side-by-side
+multi-cli launch cursor/<legacy-profile>
 ```
 
-## Profile types
+For a working account boundary, use the Cursor CLI adapter (`cursor-cli`), which isolates via a per-process API key.
 
-- **full** *(default)* — separate user data dir, separate extensions dir.
-- **shared** — symlinks `sandbox.json` and `cli-config.json` from `~/.cursor/`. Auth and workspace state stay isolated.
+## Account boundary
 
-## Continue a chat across accounts
+- Mechanism: `inseparable` — credentials, chat databases, and global storage are not proven separable.
+- Logout scope: user.
+- Concurrency: single instance per OS user (`singletonScope: user`).
 
-Not supported. Cursor keeps chats in SQLite keyed to the workspace path, so they can't be portably copied between profiles. `multi-cli continue cursor …` is therefore unavailable.
+## Shared normal state
 
-## Caveats
+None claimed. `adapter.json` declares no shared, session, or file paths under the native root (`%USERPROFILE%\.cursor` on Windows, `~/.cursor` on macOS/Linux).
 
-- Cursor's cloud sync, if enabled, can re-merge state between profiles. Disable sync per-profile after first login if you want hard isolation.
-- Re-indexing happens once per fresh profile; expect a few seconds of CPU on first launch.
+## Known limitations
 
-## Verified
+- Chat history lives in SQLite keyed to workspace state and cannot be portably shared or copied between profiles.
+- A narrower boundary requires proof that auth, chat databases, and single-instance behavior are separable; until then nothing is shared.
 
-Smoke-tested live against `Cursor 2.0.60` on Windows.
+## Support
+
+| Windows | macOS | Linux |
+|---|---|---|
+| unsupported | unsupported | unsupported |
+
+`unsupported` means multi-cli refuses to claim the account-overlay contract.

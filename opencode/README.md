@@ -1,8 +1,8 @@
 # opencode — OpenCode
 
-**Strategy:** `env` — sets `OPENCODE_CONFIG_DIR={profileDir}` and `OPENCODE_CONFIG={profileDir}/opencode.json`.
+**Account boundary:** `inseparable` — stored provider authentication and runtime data have no proven disjoint profile boundary, so multi-cli refuses the account-overlay contract on every platform.
 
-OpenCode resolves its config and runtime state from these two env vars. Pointing both at the profile dir isolates auth and per-profile customizations.
+OpenCode resolves config from `OPENCODE_CONFIG_DIR` and `OPENCODE_CONFIG`. That relocates configuration, but stored logins and sessions cannot yet be split truthfully; only configuration paths are classified as shareable.
 
 ## Install
 
@@ -10,24 +10,38 @@ OpenCode resolves its config and runtime state from these two env vars. Pointing
 npm i -g opencode-ai
 ```
 
+Binary discovery: `%APPDATA%\npm\opencode.cmd` (Windows), `/usr/local/bin/opencode` (macOS), `$HOME/.npm-global/bin/opencode` (Linux), then `opencode` on PATH.
+
 ## Quickstart
 
+Account-overlay launch fails closed on all platforms. Existing legacy whole-home profiles remain launchable:
+
 ```bash
-multi-cli new opencode/work
-multi-cli new opencode/personal
-opencode-work
-opencode-personal
+multi-cli launch opencode/<legacy-profile>
+multi-cli doctor                      # shows the exact unsupported reason
 ```
 
-## Profile types
+## Account boundary
 
-- **full** *(default)* — separate `opencode.json`, agents, commands, modes, plugins, auth.
-- **shared** — symlinks `agents/`, `commands/`, `modes/`, `plugins/` from `~/.config/opencode/`. Only `auth.json` and per-profile config stay isolated.
+- Mechanism: `inseparable` — per `adapter.json`, "Stored provider authentication and runtime data do not have a proven disjoint profile boundary."
+- Declared launch env: `OPENCODE_CONFIG_DIR={runtimeRoot}`, `OPENCODE_CONFIG={runtimeRoot}/opencode.json`.
+- Logout scope: user — a logout affects the whole OS-user credential state.
 
-## Continue a chat across accounts
+## Shared normal state
 
-Not supported. OpenCode stores sessions and credentials in one shared SQLite database, so conversation state cannot be copied without dragging the wrong account's auth along. `multi-cli continue opencode …` is therefore unavailable.
+Configuration only (a candidate classification, not an isolation claim): `opencode.json`, `tui.json`, `agents/`, `commands/`, `modes/`, `plugins/`, `skills/`, `tools/`, `themes/`.
 
-## Verified
+No session paths are declared shareable, and no profile-local credentials can be carved out today.
 
-Smoke-tested live against `opencode 0.26.8` on Windows.
+## Known limitations
+
+- Stored-login mode cannot run two accounts with a truthful boundary; `multi-cli continue` is unavailable because sessions and credentials are not separable.
+- Direct provider environment credentials may become a `processSecret` candidate later; they are not part of this adapter today.
+
+## Support
+
+| Windows | macOS | Linux |
+|---|---|---|
+| unsupported | unsupported | unsupported |
+
+`unsupported` means multi-cli refuses to claim the account-overlay contract. Legacy whole-home profiles keep their previous behavior.

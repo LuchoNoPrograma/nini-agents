@@ -166,8 +166,8 @@ Describe 'multi-cli continue (codex, real fixtures)' {
             $brokenLauncher = New-BrokenAdapterToolsDir -Scratch $s
             $r = Invoke-Launcher -Scratch $s -Arguments @('continue', 'codex', 'base', 'fresh') -LauncherOverride $brokenLauncher
             $r.ExitCode | Should Be 1
-            $r.StdOut | Should Match 'Adapter bug'
-            $r.StdOut | Should Match 'Refusing to copy credentials'
+            $r.StdOut | Should Match 'Invalid adapter'
+            $r.StdOut | Should Match 'overlaps'
         } finally { Remove-Scratch $s }
     }
 

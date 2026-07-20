@@ -3,8 +3,8 @@
 #
 # Adapter-driven launcher: each supported tool ships an adapter.json describing
 # how to find its binary and how to isolate its state. multi-cli reads the
-# adapter and applies one of four isolation strategies: env, userDataDir,
-# redirectHome, or appdata.
+# adapter and applies its isolation strategy: env, userDataDir, redirectHome,
+# appdata, sandboxUser, or accountOverlay (schema-v2).
 
 set -euo pipefail
 shopt -s nullglob
@@ -12,8 +12,19 @@ shopt -s nullglob
 VERSION="0.1.0"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-TOOLS_DIR="$SCRIPT_DIR"
+TOOLS_DIR="${MULTICLI_TOOLS_DIR:-$SCRIPT_DIR}"
 BASE="${MULTICLI_HOME:-$HOME/MultiCliProfiles}"
+
+# shellcheck source=lib/adapter-validation.sh
+source "$SCRIPT_DIR/lib/adapter-validation.sh"
+# shellcheck source=lib/multicli-runtime.sh
+source "$SCRIPT_DIR/lib/multicli-runtime.sh"
+# shellcheck source=lib/credential-store.sh
+source "$SCRIPT_DIR/lib/credential-store.sh"
+# shellcheck source=lib/transfer.sh
+source "$SCRIPT_DIR/lib/transfer.sh"
+# shellcheck source=lib/migration.sh
+source "$SCRIPT_DIR/lib/migration.sh"
 
 # Skip automatic session seeding when the base state exceeds this size.
 SEED_MAX_BYTES=$((500 * 1024 * 1024))
@@ -25,19 +36,13 @@ SEED_MAX_BYTES=$((500 * 1024 * 1024))
 abort() { echo "Error: $1" >&2; exit 1; }
 warn()  { echo "Warning: $1" >&2; }
 
-# Emit a diagnostic if the adapter.json for a tool is unparseable. Silent on
-# success; called by adapter-reading paths so malformed JSON is never silent.
-assert_adapter_parses() {
-  local apath="$1"
-  [ -f "$apath" ] || return 0
-  jq empty "$apath" >/dev/null 2>&1 || warn "adapter.json failed to parse: $apath"
-}
-
+# Canonical platform name: macos, linux, or windows (Git Bash/MSYS/Cygwin).
+# MULTICLI_PLATFORM overrides detection (tests, cross-platform validation).
 platform() {
   local raw="${MULTICLI_PLATFORM:-$(uname -s)}"
   raw="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
   case "$raw" in
-    darwin|macos|mac|osx) printf 'darwin\n' ;;
+    darwin|macos|mac|osx) printf 'macos\n' ;;
     linux)                printf 'linux\n' ;;
     mingw*|msys*|cygwin*) printf 'windows\n' ;;
     *)                    abort "unsupported platform '$raw'" ;;
@@ -48,6 +53,8 @@ need_jq() {
   command -v jq >/dev/null 2>&1 || abort "jq is required but not installed. Install via: brew install jq / apt install jq"
 }
 
+# jq readers: missing paths/files yield empty output, never a launcher crash
+# (the trailing fallback keeps the exit status clean under `set -o pipefail`).
 json_str() { jq -r "$1 // empty" "$2" 2>/dev/null | tr -d '\r' || echo ""; }
 json_arr() { jq -r "$1 // empty | .[]?" "$2" 2>/dev/null | tr -d '\r' || true; }
 json_obj_keys() { jq -r "$1 // {} | keys[]" "$2" 2>/dev/null | tr -d '\r' || true; }
@@ -70,15 +77,37 @@ list_tool_ids() {
   done
 }
 
-adapter_field() { json_str ".$2" "$(adapter_path "$1")"; }
-
+# Expand the path tokens adapters use for per-OS roots: $HOME/~ everywhere,
+# %USERPROFILE%/%APPDATA%/%LOCALAPPDATA% on Windows only.
 resolve_path_token() {
   local p="$1"
   p="${p//\$HOME/$HOME}"
   p="${p//\~/$HOME}"
+  if [ "$(platform)" = windows ]; then
+    p="${p//%USERPROFILE%/${USERPROFILE:-$HOME}}"
+    p="${p//%APPDATA%/${APPDATA:-}}"
+    p="${p//%LOCALAPPDATA%/${LOCALAPPDATA:-}}"
+  fi
   printf '%s\n' "$p"
 }
 
+# Abort unless the tool's adapter exists and passes semantic validation;
+# every command that touches adapter data goes through this first.
+assert_adapter_valid() {
+  local tool_id="$1" manifest
+  manifest="$(adapter_path "$tool_id")"
+  [ -f "$manifest" ] || abort "Unknown tool '$tool_id'. Run: multi-cli tools"
+  if ! validate_adapter_manifest "$manifest" "$tool_id"; then
+    local validation_error
+    for validation_error in "${ADAPTER_VALIDATION_ERRORS[@]}"; do
+      warn "$tool_id adapter invalid: $validation_error"
+    done
+    abort "Invalid adapter '$tool_id'. Run: multi-cli doctor"
+  fi
+}
+
+# Print the first binary candidate that exists (path or PATH lookup) for the
+# current platform; returns 1 when none resolve. MULTICLI_OVERRIDE_BINARY wins.
 find_adapter_binary() {
   local tool_id="$1"
   [ -n "${MULTICLI_OVERRIDE_BINARY:-}" ] && { printf '%s\n' "$MULTICLI_OVERRIDE_BINARY"; return 0; }
@@ -103,6 +132,8 @@ find_adapter_binary() {
 # Profile addressing
 # =============================================================================
 
+# Parse <tool>/<name> into the TOOL and NAME globals; aborts on any other
+# shape. Name validation is a separate step (validate_name).
 split_profile_spec() {
   local spec="$1"
   [ -z "$spec" ] && abort "Profile required: <tool>/<name>"
@@ -111,6 +142,8 @@ split_profile_spec() {
   NAME="${spec#*/}"
 }
 
+# Abort unless $1 is a safe profile/template name: alnum start, then
+# alnum or hyphen. This is what keeps profile specs inside the storage root.
 validate_name() {
   local name="$1"
   [ -z "$name" ] && abort "Profile name required"
@@ -131,6 +164,12 @@ templates_dir()     { printf '%s/.templates\n' "$BASE"; }
 adapter_system_home() {
   local tool="$1" apath sys_home key
   apath="$(adapter_path "$tool")"
+  if [ "$(json_str '.schemaVersion' "$apath")" = 2 ]; then
+    sys_home="$(json_str ".normalState.root.$(platform)" "$apath")"
+    [ -z "$sys_home" ] && return 1
+    resolve_path_token "$sys_home"
+    return
+  fi
   sys_home="$(json_str '.share.systemHome' "$apath")"
   if [ -z "$sys_home" ]; then
     key="$(json_obj_keys '.isolation.env' "$apath" | head -1)"
@@ -312,6 +351,10 @@ copy_session_paths() {
   done < <(json_arr '.session.paths' "$apath")
 }
 
+# multi-cli continue <tool> <src> <dest>: copy adapter-declared session state
+# between endpoints ('base' = the tool's real home). Merge policy keeps the
+# newer file; credential paths never travel. Schema-v2 tools already share
+# sessions, so this is a no-op message there.
 cmd_continue() {
   local tool="" src="" dst="" no_merge=false dry_run=false
   local positionals=()
@@ -332,8 +375,11 @@ cmd_continue() {
 
   local apath
   apath="$(adapter_path "$tool")"
-  [ -f "$apath" ] || abort "Unknown tool '$tool'. Run: multi-cli tools"
-  assert_adapter_parses "$apath"
+  assert_adapter_valid "$tool"
+  if [ "$(json_str '.schemaVersion' "$apath")" = 2 ]; then
+    echo "$(json_str '.displayName' "$apath") profiles already share conversations through the shared normal state; nothing to continue."
+    return 0
+  fi
   if [ "$(json_str '.session.portable' "$apath")" != true ]; then
     abort "$(json_str '.displayName' "$apath") sessions are not portable: $(json_str '.session.reason' "$apath")"
   fi
@@ -443,7 +489,7 @@ cmd_new() {
   validate_name "$NAME"
   local apath pdir strategy
   apath="$(adapter_path "$TOOL")"
-  [ -f "$apath" ] || abort "Unknown tool '$TOOL'. Run: multi-cli tools"
+  assert_adapter_valid "$TOOL"
   pdir="$(profile_dir "$TOOL" "$NAME")"
   strategy="$(json_str '.isolation.strategy' "$apath")"
 
@@ -453,11 +499,20 @@ cmd_new() {
   if [ -n "$from_template" ]; then
     local tdir="$(templates_dir)/$from_template"
     [ -d "$tdir" ] || abort "Template '$from_template' not found"
+    # Compatibility must be proven before anything is copied; an incompatible
+    # template must not leave a half-created profile behind.
+    if [ "$strategy" = "accountOverlay" ]; then
+      transfer_assert_template_compatible "$tdir" "$apath"
+    fi
     cp -R "$tdir" "$pdir"
-  elif [ "$shared" = true ]; then
+  elif [ "$shared" = true ] && [ "$strategy" != "accountOverlay" ]; then
     create_shared_profile "$TOOL" "$pdir"
   else
     mkdir -p "$pdir"
+  fi
+
+  if [ "$strategy" = "accountOverlay" ]; then
+    runtime_initialize_profile "$apath" "$pdir"
   fi
 
   if [ "$strategy" = "redirectHome" ]; then
@@ -468,12 +523,14 @@ cmd_new() {
 
   [ "$cli" = true ] && touch "$pdir/.cli"
 
-  if [ "$seed" = true ] && [ -z "$from_template" ]; then
+  if [ "$seed" = true ] && [ -z "$from_template" ] && [ "$strategy" != "accountOverlay" ]; then
     seed_profile_from_base "$TOOL" "$pdir" "$shared"
   fi
 
   create_shell_alias "$TOOL" "$NAME"
-  create_shortcut "$TOOL" "$NAME"
+  if [ "$cli" != true ] && [ "$(json_str '.kind' "$apath")" != cli ]; then
+    create_shortcut "$TOOL" "$NAME"
+  fi
 
   local display
   display="$(json_str '.displayName' "$apath")"
@@ -484,6 +541,8 @@ cmd_new() {
   fi
 }
 
+# A --shared profile links the adapter's share.linkable entries from the
+# tool's system home into the profile dir (copy fallback when linking fails).
 create_shared_profile() {
   local tool="$1" pdir="$2"
   local apath sys_home entry src dst
@@ -506,6 +565,8 @@ create_shared_profile() {
   done < <(json_arr '.share.linkable' "$apath")
 }
 
+# Link the adapter's shareFromRealHome dotfiles from the real $HOME into the
+# redirected profile home, leaving existing entries alone.
 set_redirect_home_links() {
   local tool="$1" hdir="$2"
   local apath entry src dst
@@ -531,6 +592,17 @@ cmd_delete() {
   read -r confirm
   [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; return; }
 
+  if [ -f "$pdir/.profile.json" ]; then
+    local apath mechanism env_var profile_id
+    apath="$(adapter_path "$TOOL")"
+    mechanism="$(json_str '.account.mechanism' "$apath" 2>/dev/null || echo '')"
+    if [ "$mechanism" = processSecret ]; then
+      env_var="$(json_str '.account.secret.environmentVariable' "$apath")"
+      profile_id="$(json_str '.profileId' "$pdir/.profile.json")"
+      [ -n "$env_var" ] && [ -n "$profile_id" ] && \
+        mc_cred_clear "$(mc_cred_target "$TOOL" "$profile_id" "$env_var")" 2>/dev/null || true
+    fi
+  fi
   rm -rf "$pdir"
   remove_shell_alias "$TOOL" "$NAME"
   remove_shortcut "$TOOL" "$NAME"
@@ -561,15 +633,68 @@ cmd_clone() {
   local sdir="$(profile_dir "$st" "$sn")" ddir="$(profile_dir "$dt" "$dn")"
   [ -d "$sdir" ] || abort "Source profile '$src' does not exist"
   [ -d "$ddir" ] && abort "Destination profile '$dest' already exists"
+  [ ! -f "$sdir/.profile.json" ] || abort "Cloning schema-v2 profiles requires the transfer implementation; it is not enabled yet."
   cp -R "$sdir" "$ddir"
   create_shell_alias "$dt" "$dn"; create_shortcut "$dt" "$dn"
   echo "Cloned '$src' to '$dest'"
+}
+
+# multi-cli auth set|status|clear: manage a process-secret profile's
+# credential in the OS store, keyed by the profile's stable profileId.
+# 'set' reads the secret from the tty (hidden) or stdin, never from argv.
+cmd_auth() {
+  local action="${1:-}" spec="${2:-}"
+  [ -n "$action" ] && [ -n "$spec" ] || abort "Usage: multi-cli auth <set|status|clear> <tool>/<profile>"
+  split_profile_spec "$spec"
+  validate_name "$NAME"
+  local apath mechanism env_var pdir profile_id target
+  apath="$(adapter_path "$TOOL")"
+  assert_adapter_valid "$TOOL"
+  mechanism="$(json_str '.account.mechanism' "$apath")"
+  [ "$mechanism" = processSecret ] || abort "Tool '$TOOL' does not use a process-secret credential."
+  env_var="$(json_str '.account.secret.environmentVariable' "$apath")"
+  [ -n "$env_var" ] || abort "Adapter '$TOOL' is missing account.secret.environmentVariable."
+  pdir="$(profile_dir "$TOOL" "$NAME")"
+  [ -f "$pdir/.profile.json" ] || abort "Schema-v2 profile '$spec' does not exist."
+  profile_id="$(json_str '.profileId' "$pdir/.profile.json")"
+  target="$(mc_cred_target "$TOOL" "$profile_id" "$env_var")"
+
+  case "$action" in
+    set)
+      local secret
+      if [ -t 0 ]; then
+        read -r -s -p "Enter $env_var for $spec: " secret
+        echo ""
+      else
+        IFS= read -r secret
+      fi
+      mc_cred_set "$target" "$secret"
+      echo "Stored credential for $spec."
+      ;;
+    status)
+      if mc_cred_present "$target"; then
+        echo "Credential present for $spec."
+      else
+        echo "No credential stored for $spec."
+        return 1
+      fi
+      ;;
+    clear)
+      mc_cred_clear "$target"
+      echo "Cleared credential for $spec."
+      ;;
+    *) abort "Usage: multi-cli auth <set|status|clear> <tool>/<profile>" ;;
+  esac
 }
 
 # =============================================================================
 # Aliases & shortcuts
 # =============================================================================
 
+# Write <tool>-<name> (and, if free, <name>) alias scripts into the alias dir.
+# The generated script execs this launcher with the profile spec. Paths are
+# written inside double quotes -- never printf %q, which backslash-escapes
+# spaces that bash then passes through literally inside "...".
 create_shell_alias() {
   local tool="$1" name="$2"
   local adir="$(alias_dir)"
@@ -578,7 +703,7 @@ create_shell_alias() {
   local launcher="$SCRIPT_DIR/multi-cli"
   cat > "$apath" <<ALIAS
 #!/usr/bin/env bash
-exec "$(printf '%q' "$launcher")" launch "$(printf '%q' "$tool/$name")" "\$@"
+exec "$launcher" launch "$tool/$name" "\$@"
 ALIAS
   chmod +x "$apath"
 
@@ -586,7 +711,7 @@ ALIAS
   if [ ! -f "$short_alias" ]; then
     cat > "$short_alias" <<ALIAS
 #!/usr/bin/env bash
-exec "$(printf '%q' "$launcher")" launch "$(printf '%q' "$tool/$name")" "\$@"
+exec "$launcher" launch "$tool/$name" "\$@"
 ALIAS
     chmod +x "$short_alias"
   fi
@@ -603,6 +728,7 @@ remove_shell_alias() {
   fi
 }
 
+# True when the alias dir is on this shell's PATH (exact component match).
 alias_dir_in_path() {
   local d="$(alias_dir)"
   [[ ":$PATH:" == *":$d:"* ]]
@@ -611,7 +737,7 @@ alias_dir_in_path() {
 create_shortcut() {
   local tool="$1" name="$2"
   case "$(platform)" in
-    darwin) create_shortcut_darwin "$tool" "$name" ;;
+    macos) create_shortcut_macos "$tool" "$name" ;;
     linux)  create_shortcut_linux "$tool" "$name" ;;
   esac
 }
@@ -619,7 +745,7 @@ create_shortcut() {
 remove_shortcut() {
   local tool="$1" name="$2"
   case "$(platform)" in
-    darwin)
+    macos)
       local target="$HOME/Applications/multi-cli $tool $name.app"
       [ -d "$target" ] && rm -rf "$target"
       ;;
@@ -632,7 +758,7 @@ remove_shortcut() {
   esac
 }
 
-create_shortcut_darwin() {
+create_shortcut_macos() {
   local tool="$1" name="$2"
   local app_dir="$HOME/Applications/multi-cli $tool $name.app"
   local run_script="$app_dir/Contents/MacOS/run"
@@ -704,13 +830,15 @@ DESKTOP
 # Launch -- strategy dispatch
 # =============================================================================
 
+# multi-cli launch <tool>/<name> [args...]: resolve the adapter, profile and
+# binary, then hand off to the adapter's isolation strategy.
 cmd_launch() {
   local spec="$1"; shift
   local binary_args=("$@")
 
   split_profile_spec "$spec"
   local apath="$(adapter_path "$TOOL")"
-  [ -f "$apath" ] || abort "Unknown tool '$TOOL'. Run: multi-cli tools"
+  assert_adapter_valid "$TOOL"
 
   local pdir="$(profile_dir "$TOOL" "$NAME")"
   [ -d "$pdir" ] || abort "Profile '$spec' does not exist. Create with: multi-cli new $spec"
@@ -729,8 +857,9 @@ cmd_launch() {
   echo "Launching $display profile '$spec' [$strategy]"
 
   case "$strategy" in
-    env)           launch_env           "$TOOL" "$pdir" "$binary" "${binary_args[@]+"${binary_args[@]}"}" ;;
-    userDataDir)   launch_user_data_dir "$TOOL" "$pdir" "$binary" "${binary_args[@]+"${binary_args[@]}"}" ;;
+    env)            launch_env                    "$TOOL" "$pdir" "$binary" "${binary_args[@]+"${binary_args[@]}"}" ;;
+    accountOverlay) runtime_launch_account_overlay "$TOOL" "$pdir" "$binary" "${binary_args[@]+"${binary_args[@]}"}" ;;
+    userDataDir)    launch_user_data_dir           "$TOOL" "$pdir" "$binary" "${binary_args[@]+"${binary_args[@]}"}" ;;
     redirectHome)  launch_redirect_home "$TOOL" "$pdir" "$binary" "${binary_args[@]+"${binary_args[@]}"}" ;;
     appdata)       launch_appdata       "$TOOL" "$pdir" "$binary" "${binary_args[@]+"${binary_args[@]}"}" ;;
     sandboxUser)   launch_sandbox_user  "$TOOL" "$pdir" "$binary" "${binary_args[@]+"${binary_args[@]}"}" ;;
@@ -738,11 +867,14 @@ cmd_launch() {
   esac
 }
 
+# Expand {profileDir} in an adapter-declared env value or argument.
 expand_placeholder() {
   local val="$1" pdir="$2"
   printf '%s\n' "${val//\{profileDir\}/$pdir}"
 }
 
+# env strategy: the whole isolation is the adapter's env map, expanded and
+# set for the child only.
 launch_env() {
   local tool="$1" pdir="$2" binary="$3"; shift 3
   local apath="$(adapter_path "$tool")"
@@ -756,9 +888,11 @@ launch_env() {
     env_cmd+=("$key=$val")
   done < <(json_obj_keys '.isolation.env' "$apath")
 
-  env "${env_cmd[@]}" "$binary" "$@"
+  env "${env_cmd[@]+"${env_cmd[@]}"}" "$binary" "$@"
 }
 
+# userDataDir strategy: pass the adapter's --user-data-dir-style args and
+# point HOME/TMPDIR/XDG at <profile>/_home so nothing leaks to the real home.
 launch_user_data_dir() {
   local tool="$1" pdir="$2" binary="$3"; shift 3
   local apath="$(adapter_path "$tool")"
@@ -774,14 +908,14 @@ launch_user_data_dir() {
   mkdir -p "$hdir" "$tmpdir"
 
   case "$(platform)" in
-    darwin)
+    macos)
       env HOME="$hdir" TMPDIR="$tmpdir" \
           XDG_CONFIG_HOME="$hdir/.config" \
           XDG_DATA_HOME="$hdir/.local/share" \
           XDG_CACHE_HOME="$hdir/.cache" \
           XDG_STATE_HOME="$hdir/.local/state" \
           XDG_RUNTIME_DIR="$tmpdir" \
-          "$binary" "${args[@]}" "$@"
+          "$binary" "${args[@]+"${args[@]}"}" "$@"
       ;;
     linux)
       env HOME="$hdir" TMPDIR="$tmpdir" TEMP="$tmpdir" TMP="$tmpdir" \
@@ -790,15 +924,18 @@ launch_user_data_dir() {
           XDG_CACHE_HOME="$hdir/.cache" \
           XDG_STATE_HOME="$hdir/.local/state" \
           XDG_RUNTIME_DIR="$tmpdir" \
-          "$binary" "${args[@]}" "$@"
+          "$binary" "${args[@]+"${args[@]}"}" "$@"
       ;;
     *)
       env HOME="$hdir" TMPDIR="$tmpdir" \
-          "$binary" "${args[@]}" "$@"
+          "$binary" "${args[@]+"${args[@]}"}" "$@"
       ;;
   esac
 }
 
+# redirectHome strategy: like userDataDir, but the adapter's shareFromRealHome
+# dotfiles are linked into the redirected home first, and any extra isolation
+# env is applied.
 launch_redirect_home() {
   local tool="$1" pdir="$2" binary="$3"; shift 3
   local apath="$(adapter_path "$tool")"
@@ -821,30 +958,32 @@ launch_redirect_home() {
   fi
 
   case "$(platform)" in
-    darwin)
+    macos)
       env HOME="$hdir" TMPDIR="$tmpdir" XDG_CONFIG_HOME="$hdir/.config" \
           XDG_DATA_HOME="$hdir/.local/share" XDG_CACHE_HOME="$hdir/.cache" \
           XDG_STATE_HOME="$hdir/.local/state" XDG_RUNTIME_DIR="$tmpdir" \
-          "${extra_env[@]}" "$binary" "$@"
+          "${extra_env[@]+"${extra_env[@]}"}" "$binary" "$@"
       ;;
     linux)
       env HOME="$hdir" TMPDIR="$tmpdir" TEMP="$tmpdir" TMP="$tmpdir" \
           XDG_CONFIG_HOME="$hdir/.config" XDG_DATA_HOME="$hdir/.local/share" \
           XDG_CACHE_HOME="$hdir/.cache" XDG_STATE_HOME="$hdir/.local/state" \
-          XDG_RUNTIME_DIR="$tmpdir" "${extra_env[@]}" "$binary" "$@"
+          XDG_RUNTIME_DIR="$tmpdir" "${extra_env[@]+"${extra_env[@]}"}" "$binary" "$@"
       ;;
     *)
-      env HOME="$hdir" TMPDIR="$tmpdir" "${extra_env[@]}" "$binary" "$@"
+      env HOME="$hdir" TMPDIR="$tmpdir" "${extra_env[@]+"${extra_env[@]}"}" "$binary" "$@"
       ;;
   esac
 }
 
+# Create the mcli_<name> OS user owning the profile dir (sudo; first launch
+# only). Prints the username.
 create_sandbox_user() {
   local name="$1" pdir="$2"
   local username="mcli_${name}"
 
   case "$(platform)" in
-    darwin)
+    macos)
       if ! dscl . -read /Users/"$username" &>/dev/null; then
         local maxid
         maxid=$(dscl . -list /Users UniqueID | awk '{print $2}' | sort -n | tail -1)
@@ -871,24 +1010,8 @@ create_sandbox_user() {
   printf '%s' "$username"
 }
 
-remove_sandbox_user() {
-  local name="$1"
-  local username="mcli_${name}"
-
-  case "$(platform)" in
-    darwin)
-      if dscl . -read /Users/"$username" &>/dev/null; then
-        sudo dscl . -delete /Users/"$username"
-      fi
-      ;;
-    linux)
-      if id "$username" &>/dev/null; then
-        sudo userdel "$username"
-      fi
-      ;;
-  esac
-}
-
+# sandboxUser strategy: run the binary as the profile's dedicated OS user so
+# kernel-level credential stores (keychain, Secret Service) are per-profile.
 launch_sandbox_user() {
   local tool="$1" pdir="$2" binary="$3"; shift 3
   local apath="$(adapter_path "$tool")"
@@ -896,7 +1019,7 @@ launch_sandbox_user() {
   profile_name="$(basename "$pdir")"
   local username="mcli_${profile_name}"
   case "$(platform)" in
-    darwin)
+    macos)
       if ! dscl . -read /Users/"$username" &>/dev/null; then
         echo "First launch — creating sandbox user (requires sudo)..."
         create_sandbox_user "$profile_name" "$pdir"
@@ -919,8 +1042,8 @@ launch_sandbox_user() {
   fi
 
   case "$(platform)" in
-    darwin)
-      sudo -u "$username" "$binary" "${args[@]}" "$@"
+    macos)
+      sudo -u "$username" "$binary" "${args[@]+"${args[@]}"}" "$@"
       ;;
     linux)
       xhost +si:localuser:"$username" 2>/dev/null || true
@@ -931,10 +1054,10 @@ launch_sandbox_user() {
         WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" \
         XDG_RUNTIME_DIR="/run/user/${uid}" \
         DBUS_SESSION_BUS_ADDRESS="" \
-        "$binary" "${args[@]}" "$@"
+        "$binary" "${args[@]+"${args[@]}"}" "$@"
       ;;
     *)
-      env HOME="$pdir/_home" "$binary" "${args[@]}" "$@"
+      env HOME="$pdir/_home" "$binary" "${args[@]+"${args[@]}"}" "$@"
       ;;
   esac
 }
@@ -960,11 +1083,12 @@ format_bytes() {
   fi
 }
 
+# Human-readable size of a directory tree; "0 B" for anything missing.
 folder_size() {
   local p="$1"
   [ -d "$p" ] || { echo "0 B"; return; }
   local bytes
-  if [ "$(platform)" = "darwin" ]; then
+  if [ "$(platform)" = "macos" ]; then
     bytes="$(du -sk "$p" 2>/dev/null | awk '{print $1 * 1024}')" || bytes=0
   else
     bytes="$(du -sb "$p" 2>/dev/null | awk '{print $1}')" || bytes=0
@@ -1013,7 +1137,8 @@ cmd_tools() {
     local kind strategy status installed color
     kind="$(json_str '.kind' "$apath")"
     strategy="$(json_str '.isolation.strategy' "$apath")"
-    status="$(json_str '.status' "$apath")"
+    status="$(json_str ".support.$(platform).level" "$apath")"
+    [ -z "$status" ] && status="$(json_str '.status' "$apath")"
     [ -z "$status" ] && status="?"
     if find_adapter_binary "$tid" >/dev/null 2>&1; then
       installed="yes"; color="\033[32m"
@@ -1025,6 +1150,7 @@ cmd_tools() {
 }
 
 cmd_doctor() {
+  local deep="${1:-}"
   local errors=0 warnings=0
   echo "multi-cli $VERSION  --  $(platform)"
   echo ""
@@ -1062,7 +1188,40 @@ cmd_doctor() {
       [ -n "$hint" ] && hint="  install: $hint"
       printf '  \033[90m[MISS] %s%s\033[0m\n' "$tid" "$hint"
     fi
+    local support_level support_reason
+    support_level="$(json_str ".support.$(platform).level" "$(adapter_path "$tid")")"
+    support_reason="$(json_str ".support.$(platform).reason" "$(adapter_path "$tid")")"
+    if [ -n "$support_level" ] && [ "$support_level" != verified ]; then
+      printf '         \033[33m%s: %s\033[0m\n' "$support_level" "$support_reason"
+    fi
   done
+
+  if [ "$deep" = "--deep" ]; then
+    echo ""
+    echo "Runtime audit (schema-v2 profiles):"
+    local profile_json pdir runtime rel f
+    if [ -d "$BASE" ]; then
+      for profile_json in "$BASE"/*/*/.profile.json; do
+        [ -f "$profile_json" ] || continue
+        pdir="$(dirname "$profile_json")"
+        runtime="$pdir/.runtime"
+        [ -d "$runtime" ] || continue
+        if [ ! -f "$runtime/.runtime-manifest" ]; then
+          printf '  \033[33m[WARN] %s runtime has no manifest (built before audit support)\033[0m\n' "$pdir"
+          warnings=$((warnings + 1))
+          continue
+        fi
+        while IFS= read -r f; do
+          rel="${f#"$runtime"/}"
+          [ "$rel" = ".runtime-manifest" ] && continue
+          if ! grep -qxF "$rel" "$runtime/.runtime-manifest"; then
+            printf '  \033[33m[WARN] unexpected runtime file %s in %s -- adapter classification defect\033[0m\n' "$rel" "$pdir"
+            warnings=$((warnings + 1))
+          fi
+        done < <(find "$runtime" -type f 2>/dev/null)
+      done
+    fi
+  fi
 
   echo ""
   if [ $errors -eq 0 ] && [ $warnings -eq 0 ]; then
@@ -1107,6 +1266,10 @@ cmd_template() {
       local sdir="$(profile_dir "$TOOL" "$NAME")"
       [ -d "$sdir" ] || abort "Profile '$spec' does not exist"
       validate_name "$tpl_name"
+      if [ -f "$sdir/.profile.json" ]; then
+        transfer_save_template "$(adapter_path "$TOOL")" "$sdir" "$(templates_dir)" "$tpl_name"
+        return 0
+      fi
       local tdir="$(templates_dir)"
       mkdir -p "$tdir"
       local dest="$tdir/$tpl_name"
@@ -1149,6 +1312,10 @@ cmd_export() {
   local sdir="$(profile_dir "$TOOL" "$NAME")"
   [ -d "$sdir" ] || abort "Profile '$spec' does not exist"
   [ -z "$out" ] && out="./$TOOL-$NAME.tar.gz"
+  if [ -f "$sdir/.profile.json" ]; then
+    transfer_export_profile "$(adapter_path "$TOOL")" "$sdir" "$out" "$NAME"
+    return 0
+  fi
   tar -czf "$out" -C "$(dirname "$sdir")" "$(basename "$sdir")"
   echo "Exported '$spec' to $out"
 }
@@ -1164,8 +1331,12 @@ cmd_import() {
   local ddir="$(profile_dir "$TOOL" "$NAME")"
   [ -d "$ddir" ] && abort "Profile '$spec' already exists"
   mkdir -p "$(tool_profiles_dir "$TOOL")"
-  mkdir -p "$ddir"
-  tar -xzf "$archive" -C "$ddir" --strip-components=1
+  if [ "$(json_str '.schemaVersion' "$(adapter_path "$TOOL")")" = 2 ]; then
+    transfer_import_profile "$archive" "$(adapter_path "$TOOL")" "$ddir"
+  else
+    mkdir -p "$ddir"
+    tar -xzf "$archive" -C "$ddir" --strip-components=1
+  fi
   create_shell_alias "$TOOL" "$NAME"
   create_shortcut "$TOOL" "$NAME"
   echo "Imported '$spec'"
@@ -1190,7 +1361,9 @@ COMMANDS
   rename <tool>/<old> <tool>/<new>                      Rename
   delete <tool>/<name>                                  Delete (confirms)
   clone <tool>/<src> <tool>/<dest>                      Clone
+  migrate <tool>/<name> [--dry-run] [--prefer-profile]  Migrate a legacy profile to schema-v2
   continue <tool> <src> <dest> [--no-merge] [--dry-run] Copy session state (src/dest may be 'base')
+  auth set|status|clear <tool>/<profile>                Manage process-secret credentials (OS store)
   template save <tool>/<profile> <name>                 Save as template
   template list | delete <name>                         Manage templates
   export <tool>/<name> [path]                           Export to .tar.gz
@@ -1228,7 +1401,7 @@ _multi_cli_completions() {
   local base="${MULTICLI_HOME:-$HOME/MultiCliProfiles}"
   local script_dir="$(cd "$(dirname "$(command -v multi-cli 2>/dev/null || echo .)")" && pwd)"
   local tools_dir="$script_dir"
-  local cmds="new launch list status rename delete clone continue template export import tools doctor stats completion help version"
+  local cmds="new launch list status rename delete clone migrate continue auth template export import tools doctor stats completion help version"
   local tools="" specs=""
   if [ -d "$tools_dir" ]; then
     for d in "$tools_dir"/*/; do [ -f "$d/adapter.json" ] && tools="$tools $(basename "$d")"; done
@@ -1251,7 +1424,7 @@ COMP
 #compdef multi-cli
 _multi_cli() {
   local -a cmds tools specs
-  cmds=(new launch list status rename delete clone continue template export import tools doctor stats completion help version)
+  cmds=(new launch list status rename delete clone migrate continue auth template export import tools doctor stats completion help version)
   local base="${MULTICLI_HOME:-$HOME/MultiCliProfiles}"
   local script_dir="$(cd "$(dirname "$(command -v multi-cli 2>/dev/null || echo .)")" && pwd)"
   local tools_dir="$script_dir"
@@ -1289,6 +1462,7 @@ shift || true
 
 case "$cmd" in
   new)        cmd_new "$@" ;;
+  auth)       cmd_auth "$@" ;;
   launch)
     spec="${1:-}"; shift || true
     launch_args=()
@@ -1304,12 +1478,13 @@ case "$cmd" in
   rename)     cmd_rename "${1:-}" "${2:-}" ;;
   delete)     cmd_delete "${1:-}" ;;
   clone)      cmd_clone "${1:-}" "${2:-}" ;;
+  migrate)    cmd_migrate "$@" ;;
   continue)   cmd_continue "$@" ;;
   template)   cmd_template "$@" ;;
   export)     cmd_export "$@" ;;
   import)     cmd_import "$@" ;;
   tools)      cmd_tools ;;
-  doctor)     cmd_doctor ;;
+  doctor)     cmd_doctor "${1:-}" ;;
   stats)      cmd_stats ;;
   completion) cmd_completion "${1:-bash}" ;;
   help|--help|-h) cmd_help ;;

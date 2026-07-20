@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "id": "windsurf",
+  "displayName": "Devin Desktop (Windsurf)",
+  "kind": "ide",
+  "binary": {
+    "windows": ["devin-desktop", "surf", "windsurf", "%LOCALAPPDATA%\\Programs\\Devin\\bin\\devin-desktop.cmd"],
+    "macos": ["devin-desktop", "surf", "windsurf"],
+    "linux": ["devin-desktop", "surf", "windsurf"]
+  },
+  "isolation": { "strategy": "accountOverlay", "mode": "detached", "env": {}, "clearEnv": [] },
+  "account": {
+    "mechanism": "osUserCredentialStore",
+    "credentialFiles": [],
+    "credentialPrecedence": ["Devin account or manual API-key login"],
+    "logoutScope": "osUser"
+  },
+  "normalState": {
+    "root": {
+      "windows": "%APPDATA%\\Devin",
+      "macos": "$HOME/Library/Application Support/Devin",
+      "linux": "$HOME/.config/Devin"
+    },
+    "sharedPaths": [],
+    "sessionPaths": [],
+    "filePaths": [],
+    "unsafePaths": []
+  },
+  "concurrency": { "level": "singleWriter", "singletonScope": "unknown" },
+  "support": {
+    "windows": { "level": "experimental", "reason": "Current/legacy data roots, .codeium leakage, auth storage, and multi-instance behavior require OS-user E2E." },
+    "macos": { "level": "unsupported", "reason": "No documented profile auth namespace or concurrent-instance contract." },
+    "linux": { "level": "unsupported", "reason": "No documented profile auth namespace or concurrent-instance contract." }
+  },
+  "install": "https://docs.devin.ai/desktop/getting-started",
+  "versionCommand": ["--version"]
+}

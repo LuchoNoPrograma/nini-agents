@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 2,
+  "id": "copilot-cli",
+  "displayName": "GitHub Copilot CLI",
+  "kind": "cli",
+  "binary": { "windows": ["copilot"], "macos": ["copilot"], "linux": ["copilot"] },
+  "isolation": {
+    "strategy": "accountOverlay",
+    "mode": "foreground",
+    "env": { "COPILOT_HOME": "{sharedStateRoot}" },
+    "clearEnv": ["GH_TOKEN", "GITHUB_TOKEN"]
+  },
+  "account": {
+    "mechanism": "processSecret",
+    "credentialFiles": [],
+    "credentialPrecedence": ["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "copilot-cli keychain", "gh auth token"],
+    "logoutScope": "process",
+    "secret": { "environmentVariable": "COPILOT_GITHUB_TOKEN" }
+  },
+  "normalState": {
+    "root": { "windows": "%USERPROFILE%\\.copilot", "macos": "$HOME/.copilot", "linux": "$HOME/.copilot" },
+    "sharedPaths": [
+      "agents", "copilot-instructions.md", "extensions", "hooks", "ide", "installed-plugins",
+      "instructions", "logs", "lsp-config.json", "mcp-config.json", "permissions-config.json",
+      "plugin-data", "settings.json", "skills"
+    ],
+    "sessionPaths": ["session-state", "command-history-state", "session-store.db"],
+    "filePaths": ["copilot-instructions.md", "lsp-config.json", "mcp-config.json", "permissions-config.json", "settings.json", "session-store.db"],
+    "unsafePaths": ["config.json", "mcp-oauth-config", "mcp-secrets"]
+  },
+  "concurrency": { "level": "multiWriter", "singletonScope": "none" },
+  "support": {
+    "windows": { "level": "experimental", "reason": "Process-token path is documented; shared session database and authenticated dual-account E2E remain pending." },
+    "macos": { "level": "experimental", "reason": "Native authenticated concurrency E2E remains pending." },
+    "linux": { "level": "experimental", "reason": "Native authenticated concurrency E2E remains pending." }
+  },
+  "install": "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli",
+  "versionCommand": ["--version"]
+}

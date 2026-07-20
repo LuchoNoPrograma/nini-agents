@@ -1,0 +1,156 @@
+# Real-world E2E harness (Windows)
+
+A user-like end-to-end test harness for multi-cli that runs against the
+**actually installed** CLI tools on this machine. No mocks, no fixture
+adapters, no fixture binaries: every profile is created and every launch goes
+through the real `multi-cli.ps1` in a child `powershell.exe` process, against
+the real vendor binaries found by the real adapter manifests.
+
+## Run it
+
+```bat
+tests\e2e\windows\Invoke-RealWorldE2E.bat
+```
+
+or with parameters:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/e2e/windows/Invoke-RealWorldE2E.ps1 `
+    -Tool kimi-cli,claude-cli,codex,gemini-cli,commandcode,copilot-cli,grok-cli `
+    -EvidenceDir "$env:TEMP\multi-cli-realworld-evidence"
+```
+
+Exit code `0` = every executed tool passed (explicit skips allowed), `1` = at
+least one assertion failed. A sanitized evidence JSON is written to
+`<EvidenceDir>\realworld-evidence.json` (default
+`%TEMP%\multi-cli-realworld-evidence`).
+
+The Pester gate `tests/RealWorldE2E.Tests.ps1` (discovered by
+`tests/run-pester.ps1`) runs the harness for the always-installed tools
+(kimi-cli, claude-cli, codex, gemini-cli, commandcode) and asserts the
+evidence shows every named assertion passed, or an explicit recorded SKIP
+with a reason. copilot-cli and grok-cli are covered by the harness itself and
+record an explicit SKIP when their binary is absent. Expect ~10-15 minutes
+for the Pester run: it performs real binary launches. The suite removes its
+own evidence directory, harness log, and (via the harness) the sandbox.
+
+## What it does
+
+Per schema-v2 `accountOverlay` adapter, dispatched by the adapter's **real**
+`account.mechanism` (read from `adapter.json` at run time):
+
+### `fileOverlay` — claude-cli, codex, gemini-cli
+
+1. Seed the tool's real shared normal-state root **under the test home**
+   (a session/history file from `sessionPaths` + a config file from
+   `sharedPaths`) *before* building profiles.
+2. Create `account-a` and `account-b` via real `multi-cli new`.
+3. Launch the real binary with the adapter's `versionCommand` via real
+   `multi-cli launch`; assert exit code 0 and that the version output
+   contains the direct binary's version output (proves the real binary ran
+   under the overlay).
+4. Assert the profile's `auth/` credential files are profile-local, not
+   links, and **empty**, while the seeded shared/session content is visible
+   through both profiles' `.runtime` and intact at the shared root.
+5. Assert `.runtime` holds junctions (directories) and hardlinks (files)
+   whose targets point into the shared root (credentials point into the
+   profile's own `auth/`).
+6. Write a session line through profile A's runtime; assert it is visible
+   through profile B's runtime and at the shared root (shared conversations).
+7. `doctor --deep` after clean launches: no unexpected files. Then plant
+   `.runtime\rogue-e2e.txt`, assert doctor flags it, remove it, assert doctor
+   is clean again.
+
+### `processSecret` — kimi-cli, copilot-cli, grok-cli
+
+1. Store per-profile dummy tokens (`dummy-token-account-a`,
+   `dummy-token-account-b`) via the real `multi-cli auth set` with the secret
+   piped on stdin. **Platform note:** on Windows PowerShell 5.1,
+   `Read-Host -AsSecureString` reads the console, not stdin, so a piped
+   secret hangs (verified on this host). The harness probes this once; when
+   the real command cannot be driven it stores the dummy token through the
+   repo's own `MultiCli.CredentialStore` module — the exact Win32 `CredWrite`
+   path `Invoke-Auth` calls — and records `auth-set` with the method used.
+   `auth status`, `auth clear`, and all launches are always the real
+   commands.
+2. Assert real `auth status` reports the credential present.
+3. Launch through a generated `.cmd` shim (passed as
+   `MULTICLI_OVERRIDE_BINARY`) that writes the secret env var
+   (`KIMI_MODEL_API_KEY` / `COPILOT_GITHUB_TOKEN` / `XAI_API_KEY`) to a
+   capture file and then `exec`s the real binary with the version command.
+   Assert the captured value equals the profile's dummy token and that the
+   two profiles receive **different** values.
+4. Real `auth clear` both profiles; assert a subsequent launch fails
+   non-zero with the "no stored credential / auth set" hint.
+
+### `inseparable` — commandcode
+
+The real adapter refuses `launch` by design. The harness asserts the refusal
+(exit non-zero, message cites the whole-home boundary and the
+legacy-isolated guidance) and that no `.runtime` overlay was built. Profile
+creation and the direct binary version are still exercised.
+
+## Safety model
+
+* Sandbox root `%TEMP%\mcli_realworld` holds `home` (a dedicated test
+  USERPROFILE — the operator's real profile is **never** redirected or
+  written), `profiles` (MULTICLI_HOME), `tmp`, `shims`, `captures`.
+* Every child process gets `USERPROFILE`/`HOME`/`APPDATA`/`LOCALAPPDATA`/
+  `TEMP` redirected under the sandbox; a probe child proves it and the
+  result is recorded as the `child-env-sandboxed` safety assertion.
+* Child `PATH` is pre-seeded with the sandbox alias dir so `multi-cli new`
+  never appends to the registry User PATH; the registry User PATH is
+  snapshotted before/after. An added entry referencing the sandbox is a hard
+  failure; churn caused by other processes on a live workstation (this repo's
+  own legacy Pester fixtures append fixture alias dirs to the User PATH) is
+  recorded as a note instead.
+* Real-home marker roots (`.kimi-code`, `.codex`, `.gemini`, `.commandcode`,
+  `.copilot`, `.grok`, `MultiCliProfiles`) are snapshotted (file list +
+  size + mtime hash) before/after and asserted unchanged, with the differing
+  root names reported on failure. `.claude` and `.claude.json` are excluded
+  because this harness may run inside a Claude Code session that
+  legitimately writes its own state there. Note: actively using one of the
+  vendor CLIs *during* a harness run legitimately trips this assertion.
+* All Credential Manager targets written (`multi-cli/<tool>/<profileId>/
+  <var>`) are removed and verified absent in `finally`, including a sweep
+  derived from sandbox profile metadata (covers crashed runs).
+* The sandbox is removed in `finally` (junction-safe deletion that never
+  traverses a reparse point). `-KeepSandbox` keeps it for debugging.
+* Never opens browsers or logins, never sends prompts that consume quota —
+  the only thing ever passed to a real binary is the adapter's
+  `versionCommand`.
+
+## Evidence
+
+`realworld-evidence.json` contains: host OS/PS versions, per-tool
+`status` (`pass`/`skip`/`fail`), `skipReason`, `mechanism`,
+`binaryVersion`, and the named `assertions` with pass/fail and short
+details; safety assertions; harness notes. Before writing, all sandbox,
+`%TEMP%`, and user-profile paths are replaced by tokens and the JSON is
+secret-scanned (tokens, bearer strings, `sk-*`, even the dummy token values
+are excluded — token assertions compare in memory and record only the
+boolean).
+
+## Known real-world findings recorded by this harness
+
+* **codex** (`0.144.1`): every launch (even `--version`) writes apply-patch
+  helper files `tmp/arg0/codex-arg0<random>/{.lock,applypatch.bat,
+  apply_patch.bat}` into the runtime root, which `doctor --deep` flags as
+  undeclared runtime files. Recorded via the vendor-transient allowlist;
+  any *other* unexpected file still fails the assertion.
+* **gemini-cli** (`0.42.0`): every launch leaves a transient
+  `.gemini/projects.json.<guid>.tmp` under the runtime root, also flagged
+  by `doctor --deep`. Allowlisted the same way (the allowlist is applied as
+  a union because every `doctor` run scans the whole shared MULTICLI_HOME,
+  including earlier tools' profiles).
+* **codex/gemini home discovery**: outside an overlay launch, these tools
+  locate the home directory via the Windows Known Folder API, not
+  `USERPROFILE`. A bare direct run therefore writes into the operator's
+  real `~/.codex` / `~/.gemini` even with `USERPROFILE` redirected. The
+  harness's direct control runs (used for the version-match baseline) point
+  the adapter's isolation env vars (`CODEX_HOME`, `GEMINI_CLI_HOME`, ...)
+  at a sandbox scratch dir so nothing escapes the sandbox.
+* **Windows PowerShell 5.1**: `multi-cli auth set` cannot be driven via
+  redirected stdin (`Read-Host -AsSecureString` reads the console). The
+  harness probes, falls back to the same CredWrite code path, and records
+  the fallback in the evidence notes.

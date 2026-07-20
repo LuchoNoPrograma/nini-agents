@@ -1,29 +1,46 @@
 {
+  "schemaVersion": 2,
   "id": "opencode",
   "displayName": "OpenCode",
   "kind": "cli",
   "binary": {
     "windows": ["%APPDATA%\\npm\\opencode.cmd", "%APPDATA%\\npm\\opencode", "opencode"],
-    "macos":   ["/usr/local/bin/opencode", "$HOME/.npm-global/bin/opencode", "opencode"],
-    "linux":   ["$HOME/.npm-global/bin/opencode", "opencode"]
+    "macos": ["/usr/local/bin/opencode", "$HOME/.npm-global/bin/opencode", "opencode"],
+    "linux": ["$HOME/.npm-global/bin/opencode", "opencode"]
   },
   "isolation": {
-    "strategy": "env",
+    "strategy": "accountOverlay",
+    "mode": "foreground",
     "env": {
-      "OPENCODE_CONFIG_DIR": "{profileDir}",
-      "OPENCODE_CONFIG":     "{profileDir}/opencode.json"
-    }
+      "OPENCODE_CONFIG_DIR": "{runtimeRoot}",
+      "OPENCODE_CONFIG": "{runtimeRoot}/opencode.json"
+    },
+    "clearEnv": []
   },
-  "share": {
-    "systemHome":  "$HOME/.config/opencode",
-    "linkable":    ["agents", "commands", "modes", "plugins"],
-    "neverLink":   ["auth.json"]
+  "account": {
+    "mechanism": "inseparable",
+    "credentialFiles": [],
+    "credentialPrecedence": [],
+    "logoutScope": "user",
+    "reason": "Stored provider authentication and runtime data do not have a proven disjoint profile boundary."
   },
-  "session": {
-    "portable": false,
-    "reason":   "Sessions and credentials share one sqlite database (opencode.db) and cannot be separated safely."
+  "normalState": {
+    "root": {
+      "windows": "%USERPROFILE%\\.config\\opencode",
+      "macos": "$HOME/.config/opencode",
+      "linux": "$HOME/.config/opencode"
+    },
+    "sharedPaths": ["opencode.json", "tui.json", "agents", "commands", "modes", "plugins", "skills", "tools", "themes"],
+    "sessionPaths": [],
+    "filePaths": ["opencode.json", "tui.json"],
+    "unsafePaths": []
+  },
+  "concurrency": { "level": "unsupported", "singletonScope": "unknown" },
+  "support": {
+    "windows": { "level": "unsupported", "reason": "Stored-login authentication and sessions cannot yet be split truthfully." },
+    "macos": { "level": "unsupported", "reason": "Stored-login authentication and sessions cannot yet be split truthfully." },
+    "linux": { "level": "unsupported", "reason": "Stored-login authentication and sessions cannot yet be split truthfully." }
   },
   "install": "npm i -g opencode-ai",
-  "versionCommand": ["--version"],
-  "status": "stable"
+  "versionCommand": ["--version"]
 }

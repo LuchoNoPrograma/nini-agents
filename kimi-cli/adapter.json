@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 2,
+  "id": "kimi-cli",
+  "displayName": "Kimi Code CLI",
+  "kind": "cli",
+  "binary": {
+    "windows": [
+      "kimi"
+    ],
+    "macos": [
+      "kimi"
+    ],
+    "linux": [
+      "kimi"
+    ]
+  },
+  "isolation": {
+    "strategy": "accountOverlay",
+    "mode": "foreground",
+    "env": {
+      "KIMI_CODE_HOME": "{sharedStateRoot}"
+    },
+    "clearEnv": []
+  },
+  "account": {
+    "mechanism": "processSecret",
+    "credentialFiles": [],
+    "credentialPrecedence": [
+      "KIMI_MODEL_API_KEY with explicit model/provider selection"
+    ],
+    "logoutScope": "process",
+    "secret": {
+      "environmentVariable": "KIMI_MODEL_API_KEY"
+    }
+  },
+  "normalState": {
+    "root": {
+      "windows": "%USERPROFILE%\\.kimi-code",
+      "macos": "$HOME/.kimi-code",
+      "linux": "$HOME/.kimi-code"
+    },
+    "sharedPaths": [
+      "config.toml",
+      "tui.toml",
+      "mcp.json"
+    ],
+    "sessionPaths": [],
+    "filePaths": [
+      "config.toml",
+      "tui.toml",
+      "mcp.json"
+    ],
+    "unsafePaths": []
+  },
+  "concurrency": {
+    "level": "multiWriter",
+    "singletonScope": "backgroundService"
+  },
+  "support": {
+    "windows": {
+      "level": "experimental",
+      "reason": "Direct-provider mode validated mechanically; OAuth login stores credentials/kimi-code.json outside the process boundary, and ~/.agents skills leak from the real home; authenticated concurrency E2E pending."
+    },
+    "macos": {
+      "level": "experimental",
+      "reason": "Direct-provider mode only; OAuth credential file boundary and native concurrency E2E pending."
+    },
+    "linux": {
+      "level": "experimental",
+      "reason": "Direct-provider mode only; OAuth credential file boundary and native concurrency E2E pending."
+    }
+  },
+  "install": "https://www.kimi.com/code/docs/en/kimi-code-cli/",
+  "versionCommand": [
+    "--version"
+  ]
+}

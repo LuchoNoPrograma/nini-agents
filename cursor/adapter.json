@@ -1,6 +1,7 @@
 {
+  "schemaVersion": 2,
   "id": "cursor",
-  "displayName": "Cursor",
+  "displayName": "Cursor Desktop",
   "kind": "hybrid",
   "binary": {
     "windows": [
@@ -13,30 +14,39 @@
       "$HOME/Applications/Cursor.app/Contents/MacOS/Cursor",
       "cursor"
     ],
-    "linux": [
-      "/usr/bin/cursor",
-      "/opt/Cursor/cursor",
-      "$HOME/.local/bin/cursor",
-      "cursor"
-    ]
+    "linux": ["/usr/bin/cursor", "/opt/Cursor/cursor", "$HOME/.local/bin/cursor", "cursor"]
   },
   "isolation": {
-    "strategy": "userDataDir",
-    "args": [
-      "--user-data-dir", "{profileDir}",
-      "--extensions-dir", "{profileDir}/extensions"
-    ]
+    "strategy": "accountOverlay",
+    "mode": "detached",
+    "args": [],
+    "env": {},
+    "clearEnv": []
   },
-  "share": {
-    "systemHome":  "$HOME/.cursor",
-    "linkable":    ["sandbox.json", "cli-config.json"],
-    "neverLink":   []
+  "account": {
+    "mechanism": "inseparable",
+    "credentialFiles": [],
+    "credentialPrecedence": [],
+    "logoutScope": "user",
+    "reason": "Desktop credentials, chat state, SQLite global storage, and singleton behavior do not have a proven narrow split."
   },
-  "session": {
-    "portable": false,
-    "reason":   "Chats live in sqlite state databases keyed to the workspace path and cannot be safely merged."
+  "normalState": {
+    "root": {
+      "windows": "%USERPROFILE%\\.cursor",
+      "macos": "$HOME/.cursor",
+      "linux": "$HOME/.cursor"
+    },
+    "sharedPaths": [],
+    "sessionPaths": [],
+    "filePaths": [],
+    "unsafePaths": []
+  },
+  "concurrency": { "level": "unsupported", "singletonScope": "user" },
+  "support": {
+    "windows": { "level": "unsupported", "reason": "User-data flags do not prove separate desktop auth with shared conversations." },
+    "macos": { "level": "unsupported", "reason": "User-data flags do not prove separate desktop auth with shared conversations." },
+    "linux": { "level": "unsupported", "reason": "User-data flags do not prove separate desktop auth with shared conversations." }
   },
   "install": "https://cursor.com/download",
-  "versionCommand": ["--version"],
-  "status": "stable"
+  "versionCommand": ["--version"]
 }

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "id": "agy-cli",
+  "displayName": "Antigravity CLI (agy)",
+  "kind": "cli",
+  "binary": {
+    "windows": ["%LOCALAPPDATA%\\agy\\bin\\agy.exe", "agy"],
+    "macos": ["$HOME/.local/bin/agy", "agy"],
+    "linux": ["$HOME/.local/bin/agy", "agy"]
+  },
+  "isolation": { "strategy": "accountOverlay", "mode": "foreground", "env": {}, "clearEnv": [] },
+  "account": {
+    "mechanism": "osUserCredentialStore",
+    "credentialFiles": [],
+    "credentialPrecedence": ["Fixed gemini/antigravity OS credential"],
+    "logoutScope": "osUser"
+  },
+  "normalState": {
+    "root": {
+      "windows": "%USERPROFILE%\\.gemini\\antigravity-cli",
+      "macos": "$HOME/.gemini/antigravity-cli",
+      "linux": "$HOME/.gemini/antigravity-cli"
+    },
+    "sharedPaths": ["settings.json", "plugins", "skills"],
+    "sessionPaths": [],
+    "filePaths": ["settings.json"],
+    "unsafePaths": []
+  },
+  "concurrency": { "level": "multiWriter", "singletonScope": "osUser" },
+  "support": {
+    "windows": { "level": "experimental", "reason": "Fixed keychain identity requires owned OS-user isolation and authenticated agy concurrency E2E." },
+    "macos": { "level": "unsupported", "reason": "Fixed Keychain identity requires OS-user isolation not yet implemented." },
+    "linux": { "level": "unsupported", "reason": "Fixed Secret Service identity requires OS-user isolation not yet implemented." }
+  },
+  "install": "https://antigravity.google/docs/cli/install",
+  "versionCommand": ["--version"]
+}

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 2,
+  "id": "codex-gui",
+  "displayName": "Codex Windows App",
+  "kind": "ide",
+  "binary": { "windows": ["codex-app-unverified"], "macos": ["codex-app-unverified"], "linux": ["codex-app-unverified"] },
+  "isolation": { "strategy": "accountOverlay", "mode": "detached", "env": {}, "clearEnv": [] },
+  "account": {
+    "mechanism": "inseparable",
+    "credentialFiles": [],
+    "credentialPrecedence": [],
+    "logoutScope": "application",
+    "reason": "The desktop executable, CODEX_HOME behavior, package state, keychain, and singleton boundary are unverified."
+  },
+  "normalState": {
+    "root": { "windows": "%USERPROFILE%\\.codex", "macos": "$HOME/.codex", "linux": "$HOME/.codex" },
+    "sharedPaths": [],
+    "sessionPaths": [],
+    "filePaths": [],
+    "unsafePaths": []
+  },
+  "concurrency": { "level": "unsupported", "singletonScope": "application" },
+  "support": {
+    "windows": { "level": "unsupported", "reason": "Launch remains disabled until the real Store executable and dual-account GUI behavior are proven." },
+    "macos": { "level": "unsupported", "reason": "No verified Codex GUI account-overlay implementation." },
+    "linux": { "level": "unsupported", "reason": "No supported native Codex GUI surface." }
+  },
+  "install": "https://developers.openai.com/codex/windows/windows-app",
+  "versionCommand": ["--version"]
+}

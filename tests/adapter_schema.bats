@@ -1,0 +1,196 @@
+#!/usr/bin/env bats
+
+load helpers/common
+
+setup() {
+  setup_scratch
+  TOOLS_ROOT="$MULTICLI_SCRATCH/schema-tools"
+  mkdir -p "$TOOLS_ROOT"
+  VALIDATOR="$MULTICLI_REPO_ROOT/scripts/validate-adapters.sh"
+}
+
+teardown() {
+  teardown_scratch
+}
+
+write_adapter() {
+  local dir_name="$1" json="$2"
+  mkdir -p "$TOOLS_ROOT/$dir_name"
+  printf '%s\n' "$json" > "$TOOLS_ROOT/$dir_name/adapter.json"
+}
+
+valid_v2_adapter() {
+  cat <<'JSON'
+{
+  "schemaVersion": 2,
+  "id": "test-cli",
+  "displayName": "Test CLI",
+  "kind": "cli",
+  "binary": {
+    "windows": ["test-cli.exe"],
+    "macos": ["test-cli"],
+    "linux": ["test-cli"]
+  },
+  "isolation": {
+    "strategy": "accountOverlay",
+    "mode": "foreground",
+    "env": { "TEST_HOME": "{runtimeRoot}" },
+    "clearEnv": ["GLOBAL_TEST_TOKEN"]
+  },
+  "account": {
+    "mechanism": "fileOverlay",
+    "credentialFiles": ["auth.json"],
+    "credentialPrecedence": ["auth.json"],
+    "logoutScope": "profile"
+  },
+  "normalState": {
+    "root": {
+      "windows": "%USERPROFILE%\\.test-cli",
+      "macos": "$HOME/.test-cli",
+      "linux": "$HOME/.test-cli"
+    },
+    "sharedPaths": ["config.toml", "agents", "skills"],
+    "sessionPaths": ["sessions", "history.jsonl"],
+    "unsafePaths": ["cache/account.sqlite"]
+  },
+  "concurrency": {
+    "level": "multiWriter",
+    "singletonScope": "none"
+  },
+  "support": {
+    "windows": { "level": "experimental", "reason": "Awaiting dual-account E2E." },
+    "macos": { "level": "experimental", "reason": "Awaiting native E2E." },
+    "linux": { "level": "experimental", "reason": "Awaiting native E2E." }
+  },
+  "install": "https://example.test/install",
+  "versionCommand": ["--version"]
+}
+JSON
+}
+
+@test "validator accepts existing schema-v1 adapters for legacy compatibility" {
+  write_adapter legacy '{"id":"legacy","displayName":"Legacy","kind":"cli","binary":{"windows":["legacy.exe"],"macos":["legacy"],"linux":["legacy"]},"isolation":{"strategy":"env","env":{"LEGACY_HOME":"{profileDir}"}},"share":{"systemHome":"$HOME/.legacy","linkable":["config"],"neverLink":["auth.json"]},"session":{"portable":true,"paths":["sessions"],"credentials":["auth.json"]},"status":"stable"}'
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Validated 1 adapter(s)"* ]]
+}
+
+@test "validator accepts a complete schema-v2 account overlay" {
+  write_adapter test-cli "$(valid_v2_adapter)"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Validated 1 adapter(s)"* ]]
+}
+
+@test "validator rejects malformed JSON with the adapter path" {
+  write_adapter broken '{"id":"broken"'
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"broken/adapter.json: invalid JSON"* ]]
+}
+
+@test "validator rejects a directory and adapter id mismatch" {
+  write_adapter wrong-dir "$(valid_v2_adapter)"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"directory 'wrong-dir' does not match id 'test-cli'"* ]]
+}
+
+@test "validator rejects unsafe adapter ids" {
+  write_adapter 'bad id' '{"schemaVersion":2,"id":"bad id","displayName":"Bad","kind":"cli","binary":{"windows":["bad"],"macos":["bad"],"linux":["bad"]},"isolation":{"strategy":"accountOverlay","mode":"foreground"},"account":{"mechanism":"inseparable","reason":"combined state"},"normalState":{"root":{"windows":"x","macos":"x","linux":"x"},"sharedPaths":[],"sessionPaths":[],"unsafePaths":[]},"concurrency":{"level":"unsupported","singletonScope":"user"},"support":{"windows":{"level":"unsupported","reason":"combined state"},"macos":{"level":"unsupported","reason":"combined state"},"linux":{"level":"unsupported","reason":"combined state"}}}'
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"id must match"* ]]
+}
+
+@test "validator rejects schema-v2 darwin binary keys" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq 'del(.binary.macos) | .binary.darwin=["test-cli"]')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"binary uses unsupported platform key 'darwin'; use 'macos'"* ]]
+}
+
+@test "validator rejects credential paths overlapping normal state" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.account.credentialFiles=["sessions/auth.json"] | .normalState.sessionPaths=["sessions"]')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"credential path 'sessions/auth.json' overlaps session path 'sessions'"* ]]
+}
+
+@test "validator rejects parent traversal in declared state paths" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.normalState.sharedPaths=["../outside"]')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"shared path '../outside' must be a safe relative path"* ]]
+}
+
+@test "validator rejects unknown placeholders" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.isolation.env.TEST_HOME="{mysteryRoot}"')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unknown placeholder '{mysteryRoot}'"* ]]
+}
+
+@test "validator requires reasons for non-verified support" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq 'del(.support.windows.reason)')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"support.windows.reason is required for level 'experimental'"* ]]
+}
+
+@test "validator requires evidence for verified support" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.support.windows={"level":"verified"}')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"support.windows.evidenceId is required for verified support"* ]]
+}
+
+@test "validator rejects v1 linkable and neverLink overlap" {
+  write_adapter legacy '{"id":"legacy","displayName":"Legacy","kind":"cli","binary":{"windows":["legacy"],"macos":["legacy"],"linux":["legacy"]},"isolation":{"strategy":"env","env":{"HOME":"{profileDir}"}},"share":{"systemHome":"$HOME/.legacy","linkable":["auth.json"],"neverLink":["auth.json"]},"status":"stable"}'
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"share.linkable path 'auth.json' overlaps share.neverLink path 'auth.json'"* ]]
+}
+
+@test "macOS platform normalization matches schema binary keys" {
+  run bash -c "set -- help; source '$MULTICLI_BIN' >/dev/null 2>&1; MULTICLI_PLATFORM=darwin platform"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "macos" ]
+}

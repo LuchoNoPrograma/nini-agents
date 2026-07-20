@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 2,
+  "id": "copilot-vscode",
+  "displayName": "GitHub Copilot in VS Code",
+  "kind": "ide",
+  "binary": { "windows": ["code.cmd", "code"], "macos": ["code"], "linux": ["code"] },
+  "isolation": { "strategy": "accountOverlay", "mode": "detached", "env": {}, "clearEnv": [] },
+  "account": {
+    "mechanism": "osUserCredentialStore",
+    "credentialFiles": [],
+    "credentialPrecedence": ["VS Code GitHub authentication and Copilot extension credential store"],
+    "logoutScope": "osUser"
+  },
+  "normalState": {
+    "root": { "windows": "%APPDATA%\\Code", "macos": "$HOME/Library/Application Support/Code", "linux": "$HOME/.config/Code" },
+    "sharedPaths": [],
+    "sessionPaths": [],
+    "filePaths": [],
+    "unsafePaths": ["User/globalStorage", "User/workspaceStorage"]
+  },
+  "concurrency": { "level": "singleWriter", "singletonScope": "hostProfile" },
+  "support": {
+    "windows": { "level": "experimental", "reason": "Two VS Code hosts must prove distinct Copilot identity/quota and logout isolation under owned OS users." },
+    "macos": { "level": "unsupported", "reason": "No proven per-host Copilot credential namespace." },
+    "linux": { "level": "unsupported", "reason": "No proven per-host Copilot credential namespace." }
+  },
+  "install": "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-extension",
+  "versionCommand": ["--version"]
+}

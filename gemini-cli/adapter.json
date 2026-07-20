@@ -1,28 +1,48 @@
 {
+  "schemaVersion": 2,
   "id": "gemini-cli",
   "displayName": "Gemini CLI",
   "kind": "cli",
   "binary": {
     "windows": ["%APPDATA%\\npm\\gemini.cmd", "%APPDATA%\\npm\\gemini", "gemini"],
-    "macos":   ["/usr/local/bin/gemini", "$HOME/.npm-global/bin/gemini", "gemini"],
-    "linux":   ["$HOME/.npm-global/bin/gemini", "gemini"]
+    "macos": ["/usr/local/bin/gemini", "$HOME/.npm-global/bin/gemini", "gemini"],
+    "linux": ["$HOME/.npm-global/bin/gemini", "gemini"]
   },
   "isolation": {
-    "strategy": "env",
-    "env": { "GEMINI_CLI_HOME": "{profileDir}" }
+    "strategy": "accountOverlay",
+    "mode": "foreground",
+    "env": { "GEMINI_CLI_HOME": "{runtimeRoot}" },
+    "clearEnv": []
   },
-  "share": {
-    "systemHome":  "$HOME/.gemini",
-    "linkable":    ["settings.json", "skills", "GEMINI.md"],
-    "neverLink":   ["oauth_creds.json", "google_accounts.json", "history"]
+  "account": {
+    "mechanism": "fileOverlay",
+    "credentialFiles": ["oauth_creds.json", "google_accounts.json", "mcp-oauth-tokens.json", "a2a-oauth-tokens.json"],
+    "credentialPrecedence": ["oauth_creds.json", "google_accounts.json"],
+    "logoutScope": "profile"
   },
-  "session": {
-    "portable":    true,
-    "paths":       ["tmp"],
-    "credentials": ["oauth_creds.json", "google_accounts.json"],
-    "resumeHint":  "Resume a copied conversation with `gemini --resume` or `/chat resume` inside the session."
+  "normalState": {
+    "root": {
+      "windows": "%USERPROFILE%\\.gemini",
+      "macos": "$HOME/.gemini",
+      "linux": "$HOME/.gemini"
+    },
+    "sharedPaths": [
+      "settings.json", "trustedFolders.json", "installation_id", "commands", "skills", "policies",
+      "keybindings.json", "agents", "acknowledgments", "policy_integrity.json", "projects.json"
+    ],
+    "sessionPaths": ["tmp", "history"],
+    "filePaths": [
+      "settings.json", "trustedFolders.json", "installation_id", "keybindings.json",
+      "policy_integrity.json", "projects.json"
+    ],
+    "unsafePaths": []
+  },
+  "concurrency": { "level": "multiWriter", "singletonScope": "none" },
+  "support": {
+    "windows": { "level": "experimental", "reason": "GEMINI_CLI_HOME nesting and OAuth overlay require real authenticated concurrency verification." },
+    "macos": { "level": "experimental", "reason": "Requires native authenticated concurrency verification." },
+    "linux": { "level": "experimental", "reason": "Requires native authenticated concurrency verification." }
   },
   "install": "npm i -g @google/gemini-cli",
-  "versionCommand": ["--version"],
-  "status": "stable"
+  "versionCommand": ["--version"]
 }

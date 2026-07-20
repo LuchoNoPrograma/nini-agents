@@ -90,11 +90,19 @@ setup_scratch() {
   MULTICLI_SCRATCH="$(mktemp -d "${BATS_TMPDIR:-/tmp}/multicli.XXXXXX")"
   export HOME="$MULTICLI_SCRATCH/home"
   export MULTICLI_HOME="$MULTICLI_SCRATCH/profiles"
-  mkdir -p "$HOME" "$MULTICLI_HOME"
+  export MULTICLI_TOOLS_DIR="$MULTICLI_SCRATCH/tools"
+  mkdir -p "$HOME" "$MULTICLI_HOME" "$MULTICLI_TOOLS_DIR/codex" "$MULTICLI_TOOLS_DIR/cursor"
+  cat > "$MULTICLI_TOOLS_DIR/codex/adapter.json" <<'JSON'
+{"id":"codex","displayName":"OpenAI Codex CLI","kind":"cli","binary":{"windows":["codex"],"macos":["codex"],"linux":["codex"]},"isolation":{"strategy":"env","env":{"CODEX_HOME":"{profileDir}"}},"share":{"systemHome":"$HOME/.codex","linkable":["config.toml","skills","agents","prompts","mcp-configs","plugins"],"neverLink":["auth.json","sessions","history.jsonl"]},"session":{"portable":true,"paths":["sessions","history.jsonl","archived_sessions","session_index.jsonl"],"credentials":["auth.json"],"resumeHint":"Resume a copied conversation with `codex resume <session-id>`."},"install":"npm i -g @openai/codex","versionCommand":["--version"],"status":"legacy-test"}
+JSON
+  cat > "$MULTICLI_TOOLS_DIR/cursor/adapter.json" <<'JSON'
+{"id":"cursor","displayName":"Cursor","kind":"hybrid","binary":{"windows":["cursor"],"macos":["cursor"],"linux":["cursor"]},"isolation":{"strategy":"userDataDir","args":["--user-data-dir","{profileDir}"]},"share":{"systemHome":"$HOME/.cursor","linkable":[],"neverLink":[]},"session":{"portable":false,"reason":"Chats live in sqlite state databases keyed to the workspace path and cannot be safely merged."},"status":"legacy-test"}
+JSON
   CODEX_BASE="$HOME/.codex"
 }
 
 teardown_scratch() {
+  unset MULTICLI_TOOLS_DIR
   [ -n "${MULTICLI_SCRATCH:-}" ] && rm -rf "$MULTICLI_SCRATCH"
 }
 

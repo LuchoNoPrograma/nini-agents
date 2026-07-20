@@ -9,9 +9,15 @@ PROFILE_DIR="${MULTICLI_HOME:-$HOME/MultiCliProfiles}"
 echo "multi-cli uninstaller"
 echo ""
 
+# install.sh writes a regular launcher file (not a symlink) at BIN_LINK;
+# older installs used a symlink. Remove either, but only when the file is
+# recognizably ours -- never delete a foreign file that shares the path.
 if [ -L "$BIN_LINK" ]; then
   rm -f "$BIN_LINK"
   echo "Removed symlink: $BIN_LINK"
+elif [ -f "$BIN_LINK" ] && grep -q 'multi-cli' "$BIN_LINK" 2>/dev/null; then
+  rm -f "$BIN_LINK"
+  echo "Removed launcher: $BIN_LINK"
 fi
 
 if [ -d "$INSTALL_DIR" ] && [ "$INSTALL_DIR" != "$(pwd)" ]; then

@@ -1,8 +1,8 @@
 # gemini-cli — Gemini CLI
 
-**Strategy:** `env` — sets `GEMINI_CLI_HOME={profileDir}` before launch.
+**Account boundary:** `fileOverlay` — OAuth and account files are profile-local; settings, skills, and history are shared normal state.
 
-The official Gemini CLI honors `GEMINI_CLI_HOME` to relocate its `.gemini/` config tree (settings, OAuth credentials, history, skills).
+Gemini CLI honors `GEMINI_CLI_HOME` to relocate its `.gemini/` tree. The adapter points it at a per-profile runtime view where only the declared credential files belong to the profile.
 
 ## Install
 
@@ -10,32 +10,41 @@ The official Gemini CLI honors `GEMINI_CLI_HOME` to relocate its `.gemini/` conf
 npm i -g @google/gemini-cli
 ```
 
+Binary discovery: `%APPDATA%\npm\gemini.cmd` (Windows), `/usr/local/bin/gemini` (macOS), `$HOME/.npm-global/bin/gemini` (Linux), then `gemini` on PATH.
+
 ## Quickstart
 
 ```bash
 multi-cli new gemini-cli/work
+multi-cli launch gemini-cli/work      # sign in on first run; OAuth files stay profile-local
 multi-cli new gemini-cli/personal
-gemini-cli-work
-gemini-cli-personal
+multi-cli launch gemini-cli/personal
 ```
 
-## Profile types
+Conversations are shared normal state, so `multi-cli continue` is not needed between schema-v2 profiles (it remains available for legacy profiles).
 
-- **full** *(default)* — separate `oauth_creds.json`, `google_accounts.json`, `settings.json`, `history/`, `skills/`.
-- **shared** — symlinks `settings.json`, `skills/`, `GEMINI.md` from `~/.gemini/`. Only OAuth state stays isolated.
+## Account boundary
 
-## Continue a chat across accounts
+- Profile-local credentials: `oauth_creds.json`, `google_accounts.json`, `mcp-oauth-tokens.json`, `a2a-oauth-tokens.json`.
+- Credential precedence: `oauth_creds.json`, then `google_accounts.json`.
+- Launch env: `GEMINI_CLI_HOME={runtimeRoot}`.
+- Logout scope: profile.
 
-Rate-limited on one account? Copy the conversation state to a profile logged into another, then resume the same chat.
+## Shared normal state
 
-```bash
-multi-cli continue gemini-cli work personal   # copy sessions/history (never OAuth)
-gemini-cli-personal
-gemini --resume                                # or /chat resume inside the session
-```
+Shared root: `%USERPROFILE%\.gemini` (Windows), `~/.gemini` (macOS/Linux).
 
-`base` works as either profile name and means `~/.gemini`. Default merge keeps newer destination files; `--no-merge` overwrites, `--dry-run` previews.
+- Config: `settings.json`, `trustedFolders.json`, `installation_id`, `keybindings.json`, `policy_integrity.json`, `projects.json`, `commands/`, `skills/`, `policies/`, `agents/`, `acknowledgments/`.
+- Sessions: `history/`, `tmp/`.
 
-## Verified
+## Known limitations
 
-Smoke-tested live on Windows after `npm i -g @google/gemini-cli`. Specific binary version recorded in `tests/results.md` after the test run.
+- `GEMINI_CLI_HOME` nesting and the OAuth overlay still require real authenticated concurrency verification per `adapter.json`; treat the boundary as a candidate until that gate passes.
+
+## Support
+
+| Windows | macOS | Linux |
+|---|---|---|
+| experimental | experimental | experimental |
+
+`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.

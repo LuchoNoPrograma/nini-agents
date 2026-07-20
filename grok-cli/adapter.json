@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "id": "grok-cli",
+  "displayName": "Grok Build CLI",
+  "kind": "cli",
+  "binary": { "windows": ["grok"], "macos": ["grok"], "linux": ["grok"] },
+  "isolation": {
+    "strategy": "accountOverlay",
+    "mode": "foreground",
+    "env": { "GROK_HOME": "{sharedStateRoot}" },
+    "clearEnv": []
+  },
+  "account": {
+    "mechanism": "processSecret",
+    "credentialFiles": [],
+    "credentialPrecedence": ["model.api_key", "model.env_key", "active session", "XAI_API_KEY"],
+    "logoutScope": "process",
+    "secret": { "environmentVariable": "XAI_API_KEY" }
+  },
+  "normalState": {
+    "root": { "windows": "%USERPROFILE%\\.grok", "macos": "$HOME/.grok", "linux": "$HOME/.grok" },
+    "sharedPaths": ["config.toml", "sandbox.toml", "crash"],
+    "sessionPaths": [],
+    "filePaths": ["config.toml", "sandbox.toml"],
+    "unsafePaths": []
+  },
+  "concurrency": { "level": "multiWriter", "singletonScope": "none" },
+  "support": {
+    "windows": { "level": "experimental", "reason": "Direct-key mode must prove no higher-precedence shared credential and pass headless, ACP, TUI, and dual-account E2E." },
+    "macos": { "level": "experimental", "reason": "Native direct-key concurrency E2E remains pending." },
+    "linux": { "level": "experimental", "reason": "Native direct-key concurrency E2E remains pending." }
+  },
+  "install": "https://docs.x.ai/build/overview",
+  "versionCommand": ["version"]
+}

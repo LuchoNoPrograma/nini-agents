@@ -1,45 +1,44 @@
 # commandcode — Command Code
 
-**Strategy:** `redirectHome` — launches with `HOME` / `USERPROFILE` redirected to a per-profile fake home, then symlinks shared dotfiles back from the real home.
+**Account boundary:** `inseparable` — the current product exposes only a whole-home boundary; exact disjoint auth and session paths require live verification.
 
-Command Code resolves its config dir from `os.homedir()` with no override env var. Redirecting the home directory is the only way to fully isolate `~/.commandcode/`. Shared dotfiles like `~/.gitconfig`, `~/.ssh/`, and `~/.npmrc` are symlinked back into the fake home so child processes (git, ssh, npm) keep working.
+Command Code resolves its home from `os.homedir()` with no override variable. The adapter declares a redirected `HOME`/`USERPROFILE`, but narrow auth-only isolation is not proven, so the account-overlay contract is not claimed.
 
 ## Install
 
 ```bash
-npm i -g commandcode
+npm i -g command-code
 ```
+
+Provides the `cmd` binary (`%APPDATA%\npm\cmd.cmd` on Windows, `$HOME/.npm-global/bin/cmd` or `/usr/local/bin/cmd` elsewhere).
 
 ## Quickstart
 
-```bash
-multi-cli new commandcode/work
-multi-cli new commandcode/personal
-commandcode-work
-commandcode-personal
-```
-
-## Profile types
-
-- **full** *(default)* — separate `auth.json`, `history.jsonl`, `projects/`, `file-history/`, `skills/`, `taste/`, `plans/`.
-- **shared** — symlinks `skills/`, `taste/`, `plans/` from `~/.commandcode/`. Auth and history stay isolated.
-
-## Continue a chat across accounts
-
-Rate-limited on one account? Copy the conversation state to a profile logged into another, then resume the same chat.
+Account-overlay profiles are unsupported on all platforms. Legacy whole-home profiles remain available:
 
 ```bash
-multi-cli continue commandcode work personal   # copy history/projects (never auth)
-commandcode-personal                            # resume from the same working directory
+multi-cli launch commandcode/<legacy-profile>
+multi-cli doctor                        # shows the exact unsupported reason
 ```
 
-`base` works as either profile name and means `~/.commandcode`. Default merge keeps newer destination files; `--no-merge` overwrites, `--dry-run` previews.
+## Account boundary
 
-## Caveats
+- Mechanism: `inseparable` — auth and sessions inside `~/.commandcode` have no proven split.
+- Declared launch env: `HOME={runtimeRoot}/_home`, `USERPROFILE={runtimeRoot}/_home`.
+- Logout scope: profile.
 
-- Tools that read `~/.gitconfig`, `~/.ssh/`, etc. will work — they're symlinked through.
-- Tools that read other dotfiles you forgot to whitelist will see an empty home. Add their dotfile names to `shareFromRealHome` in `tools/commandcode/adapter.json` if needed.
+## Shared normal state
 
-## Verified
+None classified. `adapter.json` declares no shared, session, or file paths under the native root (`%USERPROFILE%\.commandcode` on Windows, `~/.commandcode` on macOS/Linux).
 
-Smoke-tested live against `Command Code 0.26.8` on Windows.
+## Known limitations
+
+- Only whole-home isolation exists today; per-account credentials with shared normal state are not possible until the vendor's auth and session layout is verified as separable.
+
+## Support
+
+| Windows | macOS | Linux |
+|---|---|---|
+| unsupported | unsupported | unsupported |
+
+`unsupported` means multi-cli refuses to claim the account-overlay contract. Legacy whole-home profiles remain available per `adapter.json`.

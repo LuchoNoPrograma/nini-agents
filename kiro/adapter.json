@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 2,
+  "id": "kiro",
+  "displayName": "Kiro IDE",
+  "kind": "ide",
+  "binary": { "windows": ["kiro"], "macos": ["kiro"], "linux": ["kiro"] },
+  "isolation": { "strategy": "accountOverlay", "mode": "detached", "env": {}, "clearEnv": [] },
+  "account": {
+    "mechanism": "osUserCredentialStore",
+    "credentialFiles": [],
+    "credentialPrecedence": ["IDE browser/IAM sign-in"],
+    "logoutScope": "osUser"
+  },
+  "normalState": {
+    "root": { "windows": "%USERPROFILE%\\.kiro", "macos": "$HOME/.kiro", "linux": "$HOME/.kiro" },
+    "sharedPaths": [],
+    "sessionPaths": [],
+    "filePaths": [],
+    "unsafePaths": []
+  },
+  "concurrency": { "level": "singleWriter", "singletonScope": "osUser" },
+  "support": {
+    "windows": { "level": "experimental", "reason": "Credential path, IDE singleton, and safe shared-state paths require live OS-user E2E." },
+    "macos": { "level": "unsupported", "reason": "No proven per-account credential namespace or concurrent IDE process boundary." },
+    "linux": { "level": "unsupported", "reason": "No proven per-account credential namespace or concurrent IDE process boundary." }
+  },
+  "install": "https://kiro.dev/docs/getting-started/installation/",
+  "versionCommand": ["--version"]
+}

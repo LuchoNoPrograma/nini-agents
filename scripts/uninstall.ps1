@@ -24,6 +24,15 @@ if ($userPath -like "*$BinDir*") {
     Write-Host "Removed $BinDir from user PATH"
 }
 
+# install.ps1 also registers the profile alias dir on the user PATH.
+$profilesBinDir = Join-Path $ProfileDir 'bin'
+$userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+if ($userPath -like "*$profilesBinDir*") {
+    $newPath = ($userPath -split ';' | Where-Object { $_ -ne $profilesBinDir }) -join ';'
+    [Environment]::SetEnvironmentVariable('PATH', $newPath, 'User')
+    Write-Host "Removed $profilesBinDir from user PATH"
+}
+
 if ((Test-Path $InstallDir) -and ($InstallDir -ne (Split-Path -Parent $MyInvocation.MyCommand.Definition))) {
     $confirm = Read-Host "Remove install directory $InstallDir? [y/N]"
     if ($confirm -match '^[Yy]$') {

@@ -141,6 +141,9 @@ jobs:
           bats --version
           jq --version
 
+      - name: Validate adapter contracts
+        run: bash scripts/validate-adapters.sh
+
       - name: Run the bats suite
         run: bash tests/run-bats.sh
 
@@ -160,6 +163,24 @@ jobs:
           Install-PackageProvider -Name NuGet -Force -Scope CurrentUser
           Install-Module -Name Pester -RequiredVersion 3.4.0 -Force -SkipPublisherCheck -Scope CurrentUser
 
+      - name: Validate adapter contracts
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Validate-Adapters.ps1
+
       - name: Run the Pester suite
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-pester.ps1
+
+  windows-install-smoke:
+    name: install + run (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install from working tree
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Local
+      - name: Validate installed launcher
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File multi-cli.ps1 doctor
+          powershell -NoProfile -ExecutionPolicy Bypass -File multi-cli.ps1 tools

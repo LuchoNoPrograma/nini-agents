@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "id": "cursor-cli",
+  "displayName": "Cursor CLI",
+  "kind": "cli",
+  "binary": { "windows": ["agent", "%LOCALAPPDATA%\\cursor-agent\\agent.cmd"], "macos": ["agent"], "linux": ["agent"] },
+  "isolation": {
+    "strategy": "accountOverlay",
+    "mode": "foreground",
+    "env": { "CURSOR_CONFIG_DIR": "{sharedStateRoot}" },
+    "clearEnv": []
+  },
+  "account": {
+    "mechanism": "processSecret",
+    "credentialFiles": [],
+    "credentialPrecedence": ["CURSOR_API_KEY"],
+    "logoutScope": "process",
+    "secret": { "environmentVariable": "CURSOR_API_KEY" }
+  },
+  "normalState": {
+    "root": { "windows": "%USERPROFILE%\\.cursor", "macos": "$HOME/.cursor", "linux": "$HOME/.cursor" },
+    "sharedPaths": ["cli-config.json"],
+    "sessionPaths": [],
+    "filePaths": ["cli-config.json"],
+    "unsafePaths": []
+  },
+  "concurrency": { "level": "multiWriter", "singletonScope": "none" },
+  "support": {
+    "windows": { "level": "experimental", "reason": "Direct-key precedence and authenticated concurrency E2E are pending." },
+    "macos": { "level": "experimental", "reason": "Direct-key precedence and authenticated concurrency E2E are pending." },
+    "linux": { "level": "experimental", "reason": "Direct-key precedence and authenticated concurrency E2E are pending." }
+  },
+  "install": "https://cursor.com/docs/cli",
+  "versionCommand": ["--version"]
+}

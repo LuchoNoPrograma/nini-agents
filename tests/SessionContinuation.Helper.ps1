@@ -26,10 +26,31 @@ function New-Scratch {
     $mcHome = Join-Path $root 'profiles'
     New-Item -ItemType Directory -Force -Path $userHome | Out-Null
     New-Item -ItemType Directory -Force -Path $mcHome   | Out-Null
+    $tools = Join-Path $root 'tools'
+    New-Item -ItemType Directory -Force -Path (Join-Path $tools 'codex'), (Join-Path $tools 'cursor') | Out-Null
+    $codexAdapter = @{
+        id = 'codex'; displayName = 'OpenAI Codex CLI'; kind = 'cli'
+        binary = @{ windows = @('codex'); macos = @('codex'); linux = @('codex') }
+        isolation = @{ strategy = 'env'; env = @{ CODEX_HOME = '{profileDir}' } }
+        share = @{ systemHome = '$HOME/.codex'; linkable = @('config.toml', 'skills', 'agents'); neverLink = @('auth.json', 'sessions', 'history.jsonl') }
+        session = @{ portable = $true; paths = @('sessions', 'history.jsonl', 'archived_sessions', 'session_index.jsonl'); credentials = @('auth.json'); resumeHint = 'Resume with codex resume.' }
+        status = 'legacy-test'
+    }
+    $cursorAdapter = @{
+        id = 'cursor'; displayName = 'Cursor'; kind = 'hybrid'
+        binary = @{ windows = @('cursor'); macos = @('cursor'); linux = @('cursor') }
+        isolation = @{ strategy = 'userDataDir'; args = @('--user-data-dir', '{profileDir}') }
+        share = @{ systemHome = '$HOME/.cursor'; linkable = @(); neverLink = @() }
+        session = @{ portable = $false; reason = 'Chats live in sqlite state databases keyed to the workspace path.' }
+        status = 'legacy-test'
+    }
+    $codexAdapter | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $tools 'codex\adapter.json') -Encoding UTF8
+    $cursorAdapter | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $tools 'cursor\adapter.json') -Encoding UTF8
     return [pscustomobject]@{
         Root         = $root
         Home         = $userHome
         MultiCliHome = $mcHome
+        Tools        = $tools
     }
 }
 
@@ -149,6 +170,11 @@ function Invoke-Launcher {
     $psi.EnvironmentVariables['HOMEDRIVE'] = $Scratch.Home.Substring(0, 2)
     $psi.EnvironmentVariables['HOMEPATH'] = $Scratch.Home.Substring(2)
     $psi.EnvironmentVariables['MULTICLI_HOME'] = $Scratch.MultiCliHome
+    if (-not $LauncherOverride) {
+        $psi.EnvironmentVariables['MULTICLI_TOOLS_DIR'] = $Scratch.Tools
+    } else {
+        [void]$psi.EnvironmentVariables.Remove('MULTICLI_TOOLS_DIR')
+    }
     # Park APPDATA in the sandbox so Start Menu shortcut writes never touch the real profile.
     $appdata = Join-Path $Scratch.Home 'AppData\Roaming'
     New-Item -ItemType Directory -Force -Path (Join-Path $appdata 'Microsoft\Windows\Start Menu\Programs') | Out-Null
@@ -242,9 +268,11 @@ function New-BrokenAdapterToolsDir {
     }
     Set-Content -Path (Join-Path $codexDir 'adapter.json') -Value ($adapter | ConvertTo-Json -Depth 6) -Encoding UTF8
 
-    # Copy launcher into the broken tools dir so its $ToolsDir = $ScriptDir picks up the broken adapter.
+    # Copy the launcher and runtime modules so its $ToolsDir = $ScriptDir picks up the broken adapter.
     $launcherCopy = Join-Path $toolsDir 'multi-cli.ps1'
     Copy-Item -Path $script:LauncherPath -Destination $launcherCopy -Force
+    $sourceLib = Join-Path (Split-Path -Parent $script:LauncherPath) 'lib'
+    Copy-Item -Path $sourceLib -Destination (Join-Path $toolsDir 'lib') -Recurse -Force
     return $launcherCopy
 }
 

@@ -112,14 +112,6 @@ $scriptPath  = Join-Path $InstallDir 'multi-cli.ps1'
 powershell.exe -ExecutionPolicy Bypass -File "$scriptPath" %*
 "@ | Set-Content -Path $wrapperPath -Encoding ASCII
 
-$shim = Join-Path $BinDir 'multi-cli.cmd'
-if (Test-Path (Join-Path $InstallDir 'multi-cli.ps1')) {
-@"
-@echo off
-powershell.exe -ExecutionPolicy Bypass -File "$(Join-Path $InstallDir 'multi-cli.ps1')" %*
-"@ | Set-Content -Path $shim -Encoding ASCII
-}
-
 Write-Host ""
 Write-Host "Installed multi-cli to $InstallDir"
 Write-Host "Command wrapper at $wrapperPath"

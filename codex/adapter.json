@@ -1,28 +1,44 @@
 {
+  "schemaVersion": 2,
   "id": "codex",
   "displayName": "OpenAI Codex CLI",
   "kind": "cli",
   "binary": {
     "windows": ["%APPDATA%\\npm\\codex.cmd", "%APPDATA%\\npm\\codex", "codex"],
-    "macos":   ["/usr/local/bin/codex", "$HOME/.npm-global/bin/codex", "codex"],
-    "linux":   ["$HOME/.npm-global/bin/codex", "/usr/local/bin/codex", "codex"]
+    "macos": ["/usr/local/bin/codex", "$HOME/.npm-global/bin/codex", "codex"],
+    "linux": ["$HOME/.npm-global/bin/codex", "/usr/local/bin/codex", "codex"]
   },
   "isolation": {
-    "strategy": "env",
-    "env": { "CODEX_HOME": "{profileDir}" }
+    "strategy": "accountOverlay",
+    "mode": "foreground",
+    "env": { "CODEX_HOME": "{runtimeRoot}" },
+    "clearEnv": []
   },
-  "share": {
-    "systemHome":  "$HOME/.codex",
-    "linkable":    ["config.toml", "skills", "agents", "prompts", "mcp-configs", "plugins"],
-    "neverLink":   ["auth.json", "sessions", "history.jsonl"]
+  "account": {
+    "mechanism": "fileOverlay",
+    "credentialFiles": ["auth.json"],
+    "credentialPrecedence": ["auth.json"],
+    "logoutScope": "profile"
   },
-  "session": {
-    "portable":    true,
-    "paths":       ["sessions", "history.jsonl", "archived_sessions", "session_index.jsonl"],
-    "credentials": ["auth.json"],
-    "resumeHint":  "Resume a copied conversation with `codex resume <session-id>`."
+  "normalState": {
+    "root": {
+      "windows": "%USERPROFILE%\\.codex",
+      "macos": "$HOME/.codex",
+      "linux": "$HOME/.codex"
+    },
+    "sharedPaths": [
+      "config.toml", "hooks.json", "skills", "agents", "prompts", "mcp-configs", "plugins"
+    ],
+    "sessionPaths": ["sessions", "history.jsonl", "archived_sessions", "session_index.jsonl"],
+    "filePaths": ["config.toml", "hooks.json", "history.jsonl", "session_index.jsonl"],
+    "unsafePaths": []
+  },
+  "concurrency": { "level": "multiWriter", "singletonScope": "none" },
+  "support": {
+    "windows": { "level": "experimental", "reason": "Requires file credential storage and authenticated dual-account concurrency E2E." },
+    "macos": { "level": "experimental", "reason": "Requires file credential storage and native authenticated concurrency E2E." },
+    "linux": { "level": "experimental", "reason": "Requires file credential storage and native authenticated concurrency E2E." }
   },
   "install": "npm i -g @openai/codex",
-  "versionCommand": ["--version"],
-  "status": "stable"
+  "versionCommand": ["--version"]
 }

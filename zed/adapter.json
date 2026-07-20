@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 2,
+  "id": "zed",
+  "displayName": "Zed",
+  "kind": "ide",
+  "binary": { "windows": ["zed.exe", "zed"], "macos": ["/usr/local/bin/zed", "zed"], "linux": ["zed", "zeditor"] },
+  "isolation": { "strategy": "accountOverlay", "mode": "detached", "env": {}, "clearEnv": [] },
+  "account": {
+    "mechanism": "osUserCredentialStore",
+    "credentialFiles": [],
+    "credentialPrecedence": ["Zed credentials_url keychain namespace"],
+    "logoutScope": "credentialNamespace"
+  },
+  "normalState": {
+    "root": {
+      "windows": "%LOCALAPPDATA%\\Zed",
+      "macos": "$HOME/Library/Application Support/Zed",
+      "linux": "$HOME/.local/share/zed"
+    },
+    "sharedPaths": [],
+    "sessionPaths": [],
+    "filePaths": [],
+    "unsafePaths": ["db"]
+  },
+  "concurrency": { "level": "singleWriter", "singletonScope": "releaseChannelAndOsUser" },
+  "support": {
+    "windows": { "level": "unsupported", "reason": "Same-channel singleton/IPC and shared database prevent truthful same-user concurrent account support." },
+    "macos": { "level": "unsupported", "reason": "Same-channel singleton/IPC prevents truthful same-user concurrent account support." },
+    "linux": { "level": "experimental", "reason": "Custom data roots and credential namespaces require live dual-process/database E2E." }
+  },
+  "install": "https://zed.dev/docs/installation",
+  "versionCommand": ["--version"]
+}

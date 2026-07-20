@@ -1,8 +1,8 @@
 # claude-cli — Claude Code
 
-**Strategy:** `env` — sets `CLAUDE_CONFIG_DIR={profileDir}` before launch.
+**Account boundary:** `fileOverlay` — the subscription credential `.credentials.json` is profile-local; everything else declared in `adapter.json` is shared normal state.
 
-Claude Code reads its entire config tree (settings, credentials, history, MCP state, plugins) from `CLAUDE_CONFIG_DIR`, defaulting to `~/.claude/`. Per-profile dirs give clean account isolation.
+Claude Code reads its config tree from `CLAUDE_CONFIG_DIR`. The adapter points it at a per-profile runtime view where only the credential file belongs to the profile and every declared ordinary path links back to the native shared root.
 
 ## Install
 
@@ -10,32 +10,42 @@ Claude Code reads its entire config tree (settings, credentials, history, MCP st
 npm i -g @anthropic-ai/claude-code
 ```
 
+Binary discovery: `%APPDATA%\npm\claude.cmd` (Windows), `/usr/local/bin/claude` (macOS), `$HOME/.npm-global/bin/claude` (Linux), then `claude` on PATH.
+
 ## Quickstart
 
 ```bash
 multi-cli new claude-cli/work
+multi-cli launch claude-cli/work       # /login on first run; credentials stay profile-local
 multi-cli new claude-cli/personal
-claude-cli-work       # /login on first run
-claude-cli-personal   # different account; runs concurrently
+multi-cli launch claude-cli/personal
 ```
 
-## Profile types
+Conversations are shared normal state, so `multi-cli continue` is not needed between schema-v2 profiles (it remains available for legacy profiles).
 
-- **full** *(default)* — separate `settings.json`, `.credentials.json`, `skills/`, `agents/`, `plugins/`, `commands/`, `todos/`, `projects/`, `history.jsonl`.
-- **shared** — symlinks `settings.json`, `skills/`, `agents/`, `plugins/`, `commands/` from `~/.claude/`. Only credentials and history stay isolated.
+## Account boundary
 
-## Continue a chat across accounts
+- Profile-local credentials: `.credentials.json` (the sole entry in the declared precedence chain).
+- Launch env: `CLAUDE_CONFIG_DIR={runtimeRoot}`.
+- Logout scope: profile.
 
-Rate-limited on one account? Copy the conversation state to a profile logged into another, then resume the same chat.
+## Shared normal state
 
-```bash
-multi-cli continue claude-cli work personal   # copy sessions/history (never credentials)
-claude-cli-personal
-claude --resume <session-id>                   # run from the same project directory
-```
+Shared root: `%USERPROFILE%\.claude` (Windows), `~/.claude` (macOS/Linux).
 
-`base` works as either profile name and means `~/.claude`. Default merge keeps newer destination files; `--no-merge` overwrites, `--dry-run` previews.
+- Config: `CLAUDE.md`, `settings.json`, `keybindings.json`, `remote-settings.json`, `stats-cache.json`, `themes/`, `rules/`, `skills/`, `commands/`, `output-styles/`, `agents/`, `workflows/`, `agent-memory/`, `plugins/`.
+- Sessions: `projects/`, `history.jsonl`.
+- Ordinary state: `file-history/`, `plans/`, `debug/`, `paste-cache/`, `image-cache/`, `session-env/`, `tasks/`, `shell-snapshots/`, `backups/`, `feedback-bundles/`.
 
-## Verified
+## Known limitations
 
-Smoke-tested live against `Claude Code 2.1.143` on Windows.
+- Do not put `ANTHROPIC_API_KEY` or other auth environment into the shared `settings.json` — it would apply to every profile at once.
+- macOS is unsupported for stored OAuth: Claude Code uses a fixed Keychain context, so two same-user profiles would overwrite each other. Use an explicit process token until a keychain namespace is proven.
+
+## Support
+
+| Windows | macOS | Linux |
+|---|---|---|
+| experimental | unsupported (stored OAuth) | experimental |
+
+`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.

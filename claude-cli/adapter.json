@@ -1,28 +1,51 @@
 {
+  "schemaVersion": 2,
   "id": "claude-cli",
   "displayName": "Claude Code",
   "kind": "cli",
   "binary": {
     "windows": ["%APPDATA%\\npm\\claude.cmd", "%APPDATA%\\npm\\claude", "claude"],
-    "macos":   ["/usr/local/bin/claude", "$HOME/.npm-global/bin/claude", "claude"],
-    "linux":   ["$HOME/.npm-global/bin/claude", "claude"]
+    "macos": ["/usr/local/bin/claude", "$HOME/.npm-global/bin/claude", "claude"],
+    "linux": ["$HOME/.npm-global/bin/claude", "claude"]
   },
   "isolation": {
-    "strategy": "env",
-    "env": { "CLAUDE_CONFIG_DIR": "{profileDir}" }
+    "strategy": "accountOverlay",
+    "mode": "foreground",
+    "env": { "CLAUDE_CONFIG_DIR": "{runtimeRoot}" },
+    "clearEnv": []
   },
-  "share": {
-    "systemHome":  "$HOME/.claude",
-    "linkable":    ["settings.json", "skills", "agents", "plugins", "commands"],
-    "neverLink":   [".credentials.json", "todos", "projects", "history.jsonl"]
+  "account": {
+    "mechanism": "fileOverlay",
+    "credentialFiles": [".credentials.json"],
+    "credentialPrecedence": [".credentials.json"],
+    "logoutScope": "profile"
   },
-  "session": {
-    "portable":    true,
-    "paths":       ["projects", "history.jsonl", "todos"],
-    "credentials": [".credentials.json"],
-    "resumeHint":  "Resume a copied conversation with `claude --resume <session-id>`, run from the same project directory."
+  "normalState": {
+    "root": {
+      "windows": "%USERPROFILE%\\.claude",
+      "macos": "$HOME/.claude",
+      "linux": "$HOME/.claude"
+    },
+    "sharedPaths": [
+      "CLAUDE.md", "settings.json", "keybindings.json", "themes", "rules", "skills",
+      "commands", "output-styles", "agents", "workflows", "agent-memory", "plugins",
+      "file-history", "plans", "debug", "paste-cache", "image-cache", "session-env",
+      "tasks", "shell-snapshots", "backups", "feedback-bundles", "stats-cache.json",
+      "remote-settings.json"
+    ],
+    "sessionPaths": ["projects", "history.jsonl"],
+    "filePaths": [
+      "CLAUDE.md", "settings.json", "keybindings.json", "history.jsonl", "stats-cache.json",
+      "remote-settings.json"
+    ],
+    "unsafePaths": []
+  },
+  "concurrency": { "level": "multiWriter", "singletonScope": "none" },
+  "support": {
+    "windows": { "level": "experimental", "reason": "Awaiting authenticated dual-account concurrency E2E." },
+    "macos": { "level": "unsupported", "reason": "Stored OAuth uses a fixed Keychain context; use an explicit process token until a keychain namespace is proven." },
+    "linux": { "level": "experimental", "reason": "Awaiting native authenticated dual-account concurrency E2E." }
   },
   "install": "npm i -g @anthropic-ai/claude-code",
-  "versionCommand": ["--version"],
-  "status": "stable"
+  "versionCommand": ["--version"]
 }

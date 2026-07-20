@@ -27,6 +27,7 @@ EOF
 
 JQ_VERSION="${MULTICLI_JQ_VERSION:-1.7.1}"
 
+# Canonical OS name for asset selection: macos, linux, windows, or unknown.
 os_kind() {
   case "$(uname -s)" in
     Darwin)               printf 'macos\n' ;;
@@ -36,6 +37,7 @@ os_kind() {
   esac
 }
 
+# jq release asset name for this OS/arch; returns 1 for unsupported combos.
 jq_asset_name() {
   local os="$1" arch
   arch="$(uname -m)"
@@ -82,6 +84,7 @@ install_jq_from_release() {
   command -v jq >/dev/null 2>&1
 }
 
+# Per-platform manual jq install hints, printed when automatic install fails.
 jq_manual_instructions() {
   echo "  macOS:        brew install jq" >&2
   echo "  Debian/Ubuntu: sudo apt-get install -y jq" >&2

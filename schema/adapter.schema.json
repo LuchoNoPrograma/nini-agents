@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://multi-cli.local/schema/adapter.schema.json",
+  "title": "multi-cli adapter",
+  "type": "object",
+  "required": ["id", "displayName", "kind", "binary", "isolation"],
+  "properties": {
+    "schemaVersion": {
+      "enum": [1, 2],
+      "default": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "enum": ["cli", "ide", "hybrid"]
+    },
+    "binary": {
+      "type": "object",
+      "propertyNames": {
+        "enum": ["windows", "macos", "linux"]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 }
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "required": ["strategy"],
+      "properties": {
+        "strategy": {
+          "enum": ["env", "userDataDir", "redirectHome", "appdata", "sandboxUser", "accountOverlay"]
+        },
+        "mode": {
+          "enum": ["foreground", "detached"]
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "clearEnv": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" }
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "account": {
+      "type": "object",
+      "required": ["mechanism"],
+      "properties": {
+        "mechanism": {
+          "enum": ["processSecret", "fileOverlay", "osUserCredentialStore", "inseparable"]
+        },
+        "credentialFiles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relativePath" }
+        },
+        "credentialPrecedence": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "logoutScope": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "secret": {
+          "type": "object",
+          "required": ["environmentVariable"],
+          "properties": {
+            "environmentVariable": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            }
+          }
+        }
+      }
+    },
+    "normalState": {
+      "type": "object",
+      "required": ["root", "sharedPaths", "sessionPaths", "unsafePaths"],
+      "properties": {
+        "root": {
+          "type": "object",
+          "required": ["windows", "macos", "linux"],
+          "properties": {
+            "windows": { "type": "string", "minLength": 1 },
+            "macos": { "type": "string", "minLength": 1 },
+            "linux": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false
+        },
+        "sharedPaths": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relativePath" }
+        },
+        "sessionPaths": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relativePath" }
+        },
+        "filePaths": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relativePath" }
+        },
+        "unsafePaths": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relativePath" }
+        }
+      }
+    },
+    "concurrency": {
+      "type": "object",
+      "required": ["level", "singletonScope"],
+      "properties": {
+        "level": { "enum": ["multiWriter", "singleWriter", "unsupported"] },
+        "singletonScope": { "type": "string", "minLength": 1 }
+      }
+    },
+    "support": {
+      "type": "object",
+      "required": ["windows", "macos", "linux"],
+      "properties": {
+        "windows": { "$ref": "#/$defs/support" },
+        "macos": { "$ref": "#/$defs/support" },
+        "linux": { "$ref": "#/$defs/support" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "not": {
+        "anyOf": [
+          { "pattern": "^[/\\\\]" },
+          { "pattern": "^[A-Za-z]:" },
+          { "pattern": "(^|[/\\\\])\\.\\.([/\\\\]|$)" }
+        ]
+      }
+    },
+    "support": {
+      "type": "object",
+      "required": ["level"],
+      "properties": {
+        "level": { "enum": ["verified", "experimental", "unsupported"] },
+        "reason": { "type": "string", "minLength": 1 },
+        "evidenceId": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "schemaVersion": { "const": 2 } },
+        "required": ["schemaVersion"]
+      },
+      "then": {
+        "required": ["account", "normalState", "concurrency", "support"],
+        "properties": {
+          "isolation": {
+            "required": ["strategy", "mode"],
+            "properties": {
+              "strategy": { "const": "accountOverlay" }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
