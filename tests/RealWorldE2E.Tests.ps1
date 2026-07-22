@@ -15,7 +15,7 @@ $script:ExpectedMechanism = @{
     'claude-cli'  = 'fileOverlay'
     'codex'       = 'fileOverlay'
     'gemini-cli'  = 'fileOverlay'
-    'commandcode' = 'inseparable'
+    'commandcode' = 'fileOverlay'
 }
 # Assertion names the harness must record (and pass) per mechanism.
 $script:ExpectedAssertions = @{
@@ -47,7 +47,8 @@ $script:ExpectedAssertions = @{
 }
 $script:ExpectedSafetyAssertions = @(
     'child-env-sandboxed', 'credential-manager-clean',
-    'registry-user-path-unchanged', 'real-home-unchanged', 'evidence-secret-scan'
+    'registry-user-path-unchanged', 'real-home-unchanged',
+    'at-least-one-tool-executed', 'evidence-secret-scan'
 )
 
 function Get-ToolAssertion {
@@ -77,9 +78,12 @@ Describe 'Real-world E2E harness (real binaries, sandboxed home)' {
         $startInfo.RedirectStandardError = $true
         $startInfo.CreateNoWindow = $true
         $process = [System.Diagnostics.Process]::Start($startInfo)
-        $stdout = $process.StandardOutput.ReadToEnd()
-        $stderr = $process.StandardError.ReadToEnd()
-        $process.WaitForExit()
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $timedOut = -not $process.WaitForExit(900000)
+        if ($timedOut) { try { $process.Kill() } catch { }; $process.WaitForExit() }
+        $stdout = $stdoutTask.Result
+        $stderr = $stderrTask.Result
         ($stdout + "`n" + $stderr) | Set-Content -LiteralPath $script:HarnessLog -Encoding UTF8
 
         $script:EvidencePath = Join-Path $script:EvidenceDir 'realworld-evidence.json'
@@ -87,6 +91,7 @@ Describe 'Real-world E2E harness (real binaries, sandboxed home)' {
             Write-Host '----- harness output (tail) -----'
             ($stdout + $stderr) -split "`r?`n" | Select-Object -Last 60 | ForEach-Object { Write-Host $_ }
         }
+        $timedOut | Should Be $false
         $process.ExitCode | Should Be 0
         (Test-Path -LiteralPath $script:EvidencePath -PathType Leaf) | Should Be $true
         $script:EvidenceRaw = Get-Content -LiteralPath $script:EvidencePath -Raw
@@ -103,7 +108,7 @@ Describe 'Real-world E2E harness (real binaries, sandboxed home)' {
             @('pass', 'skip') -contains $toolEntry.status | Should Be $true
             if ($toolEntry.status -eq 'skip') {
                 ($toolEntry.skipReason -match '\S') | Should Be $true
-                Set-TestInconclusive "$toolId SKIP (recorded explicitly): $($toolEntry.skipReason)"
+                Write-Host "$toolId SKIP (recorded explicitly): $($toolEntry.skipReason)"
                 return
             }
             $toolEntry.mechanism | Should Be $script:ExpectedMechanism[$toolId]

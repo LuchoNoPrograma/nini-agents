@@ -25,6 +25,8 @@ source "$SCRIPT_DIR/lib/credential-store.sh"
 source "$SCRIPT_DIR/lib/transfer.sh"
 # shellcheck source=lib/migration.sh
 source "$SCRIPT_DIR/lib/migration.sh"
+# shellcheck source=lib/multicli-osuser.sh
+source "$SCRIPT_DIR/lib/multicli-osuser.sh"
 
 # Skip automatic session seeding when the base state exceeds this size.
 SEED_MAX_BYTES=$((500 * 1024 * 1024))
@@ -351,6 +353,48 @@ copy_session_paths() {
   done < <(json_arr '.session.paths' "$apath")
 }
 
+# Abort if any schema-v2 session path is unsafe or overlaps a declared
+# credential -- the same invariant assert_session_paths_safe enforces for
+# schema-v1 adapters, read from the v2 field names.
+assert_isolated_session_paths_safe() {
+  local tool="$1" apath p c
+  apath="$(adapter_path "$tool")"
+  while IFS= read -r c; do
+    [ -z "$c" ] && continue
+    assert_relpath_safe "$c" "credential" "$tool"
+  done < <(json_arr '.account.credentialFiles' "$apath")
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+    assert_relpath_safe "$p" "session path" "$tool"
+    while IFS= read -r c; do
+      [ -z "$c" ] && continue
+      if [ "$p" = "$c" ] || [[ "$p" == "$c"/* ]] || [[ "$c" == "$p"/* ]]; then
+        abort "adapter bug: session path '$p' overlaps credential '$c' in $tool"
+      fi
+    done < <(json_arr '.account.credentialFiles' "$apath")
+  done < <(json_arr '.normalState.sessionPaths' "$apath")
+}
+
+# Copy the schema-v2 session paths between two endpoints with the declared
+# credential files as the blocklist (isolated profiles share nothing, so
+# continuation is a real copy, exactly like legacy endpoints).
+copy_isolated_session_paths() {
+  local tool="$1" src_dir="$2" dst_dir="$3" no_merge="$4" dry_run="$5"
+  local apath entry state_subdir src_state dst_state creds=()
+  apath="$(adapter_path "$tool")"
+  state_subdir="$(json_str '.normalState.runtimeSubdir' "$apath")"
+  src_state="$src_dir"; dst_state="$dst_dir"
+  [ -n "$state_subdir" ] && src_state="$src_dir/$state_subdir" && dst_state="$dst_dir/$state_subdir"
+  while IFS= read -r entry; do
+    [ -n "$entry" ] && creds+=("$entry")
+  done < <(json_arr '.account.credentialFiles' "$apath")
+  while IFS= read -r entry; do
+    [ -z "$entry" ] && continue
+    copy_session_entry "$src_state/$entry" "$dst_state/$entry" \
+      "$no_merge" "$dry_run" "$entry" "${creds[@]+"${creds[@]}"}"
+  done < <(json_arr '.normalState.sessionPaths' "$apath")
+}
+
 # multi-cli continue <tool> <src> <dest>: copy adapter-declared session state
 # between endpoints ('base' = the tool's real home). Merge policy keeps the
 # newer file; credential paths never travel. Schema-v2 tools already share
@@ -377,7 +421,31 @@ cmd_continue() {
   apath="$(adapter_path "$tool")"
   assert_adapter_valid "$tool"
   if [ "$(json_str '.schemaVersion' "$apath")" = 2 ]; then
-    echo "$(json_str '.displayName' "$apath") profiles already share conversations through the shared normal state; nothing to continue."
+    # Isolated profiles share nothing, so continuation is a real copy between
+    # them (and 'base'), exactly like legacy endpoints. Shared schema-v2
+    # profiles keep the no-op.
+    local src_dir dst_dir
+    src_dir="$(resolve_session_endpoint "$tool" "$src")" || abort "Cannot resolve source '$src'"
+    dst_dir="$(resolve_session_endpoint "$tool" "$dst")" || abort "Cannot resolve destination '$dst'"
+    [ -d "$src_dir" ] || abort "Source endpoint '$src' not found at $src_dir"
+    [ -d "$dst_dir" ] || abort "Destination endpoint '$dst' not found. Create with: multi-cli new $tool/$dst"
+    if [ ! -f "$src_dir/.isolated" ] && [ ! -f "$dst_dir/.isolated" ]; then
+      echo "$(json_str '.displayName' "$apath") profiles already share conversations through the shared normal state; nothing to continue."
+      return 0
+    fi
+    json_arr '.normalState.sessionPaths' "$apath" | grep -q . || \
+      abort "$(json_str '.displayName' "$apath") declares no session paths; nothing to continue."
+    assert_isolated_session_paths_safe "$tool"
+
+    COPIED=0; SKIPPED=0
+    copy_isolated_session_paths "$tool" "$src_dir" "$dst_dir" "$no_merge" "$dry_run"
+
+    if [ "$COPIED" -eq 0 ] && [ "$SKIPPED" -eq 0 ]; then
+      echo "No session state found for $tool/$src -- nothing to continue."
+      return 0
+    fi
+    local verb="Copied"; [ "$dry_run" = true ] && verb="Would copy"
+    echo "$verb $COPIED file(s), skipped $SKIPPED (same-or-newer)."
     return 0
   fi
   if [ "$(json_str '.session.portable' "$apath")" != true ]; then
@@ -471,16 +539,30 @@ seed_profile_from_base() {
 # Profile CRUD
 # =============================================================================
 
+# Write .profile.json for any isolated schema-v2 profile atomically. The
+# unique profileId keeps lifecycle and optional OS-store credentials distinct.
+write_isolated_profile_metadata() {
+  local manifest="$1" pdir="$2" tmp
+  tmp="$pdir/.profile.json.tmp"
+  jq -n \
+    --arg adapter_id "$(runtime_json_str '.id' "$manifest")" \
+    --arg profile_id "$(runtime_new_profile_id)" \
+    '{schemaVersion:2,adapterId:$adapter_id,profileId:$profile_id,mode:"isolated"}' > "$tmp"
+  mv -f "$tmp" "$pdir/.profile.json"
+}
+
 cmd_new() {
   local spec="$1"; shift
-  local shared=false cli=false from_template="" seed=true
+  local shared=false cli=false from_template="" seed=true isolated=false
 
   while [ $# -gt 0 ]; do
     case "$1" in
       --shared)  shared=true ;;
+      --isolated|--isolate|-i) isolated=true ;;
       --cli)     cli=true ;;
       --no-seed) seed=false ;;
       --from)    shift; from_template="${1:-}"; [ -z "$from_template" ] && abort "Usage: --from <template>" ;;
+      *)         abort "Unknown option for new: '$1'. Run: multi-cli help" ;;
     esac
     shift
   done
@@ -493,25 +575,42 @@ cmd_new() {
   pdir="$(profile_dir "$TOOL" "$NAME")"
   strategy="$(json_str '.isolation.strategy' "$apath")"
 
+  [ "$shared" = true ] && [ "$isolated" = true ] && \
+    abort "--shared and --isolated are mutually exclusive: choose one profile mode."
+  if [ "$isolated" = true ] && [ "$strategy" != "accountOverlay" ]; then
+    abort "--isolated applies to schema-v2 (accountOverlay) adapters; '$TOOL' uses '$strategy', which already isolates the whole root per profile."
+  fi
+
   [ -d "$pdir" ] && abort "Profile '$spec' already exists"
   mkdir -p "$(tool_profiles_dir "$TOOL")"
 
   if [ -n "$from_template" ]; then
     local tdir="$(templates_dir)/$from_template"
     [ -d "$tdir" ] || abort "Template '$from_template' not found"
-    # Compatibility must be proven before anything is copied; an incompatible
-    # template must not leave a half-created profile behind.
     if [ "$strategy" = "accountOverlay" ]; then
+      # Validate before creating the profile, then place payload files where
+      # the selected mode actually launches them.
       transfer_assert_template_compatible "$tdir" "$apath"
+      mkdir -p "$pdir"
+      transfer_apply_template "$tdir" "$apath" "$pdir" "$isolated"
+    else
+      cp -R "$tdir" "$pdir"
     fi
-    cp -R "$tdir" "$pdir"
   elif [ "$shared" = true ] && [ "$strategy" != "accountOverlay" ]; then
     create_shared_profile "$TOOL" "$pdir"
   else
     mkdir -p "$pdir"
   fi
 
-  if [ "$strategy" = "accountOverlay" ]; then
+  if [ "$isolated" = true ]; then
+    touch "$pdir/.isolated"
+    # Every isolated schema-v2 profile carries a unique profileId. Lifecycle
+    # operations then stay on the allowlisted transfer path instead of the
+    # legacy whole-directory clone/export path.
+    if [ ! -f "$pdir/.profile.json" ]; then
+      write_isolated_profile_metadata "$apath" "$pdir"
+    fi
+  elif [ "$strategy" = "accountOverlay" ]; then
     runtime_initialize_profile "$apath" "$pdir"
   fi
 
@@ -532,9 +631,10 @@ cmd_new() {
     create_shortcut "$TOOL" "$NAME"
   fi
 
-  local display
+  local display mode_note=""
   display="$(json_str '.displayName' "$apath")"
-  echo "Created profile $spec ($display, strategy=$strategy)"
+  [ "$isolated" = true ] && mode_note=", isolated"
+  echo "Created profile $spec ($display, strategy=$strategy$mode_note)"
   if ! alias_dir_in_path; then
     echo ""
     echo "Tip: add $(alias_dir) to PATH to use '$TOOL-$NAME' as a command."
@@ -603,6 +703,9 @@ cmd_delete() {
         mc_cred_clear "$(mc_cred_target "$TOOL" "$profile_id" "$env_var")" 2>/dev/null || true
     fi
   fi
+  if [ -f "$pdir/.osuser.json" ]; then
+    mc_osuser_remove "$pdir" || abort "Could not clean up OS-user isolation for '$spec'; the profile was preserved. Resolve the cleanup error, then retry deletion."
+  fi
   rm -rf "$pdir"
   remove_shell_alias "$TOOL" "$NAME"
   remove_shortcut "$TOOL" "$NAME"
@@ -633,8 +736,31 @@ cmd_clone() {
   local sdir="$(profile_dir "$st" "$sn")" ddir="$(profile_dir "$dt" "$dn")"
   [ -d "$sdir" ] || abort "Source profile '$src' does not exist"
   [ -d "$ddir" ] && abort "Destination profile '$dest' already exists"
-  [ ! -f "$sdir/.profile.json" ] || abort "Cloning schema-v2 profiles requires the transfer implementation; it is not enabled yet."
-  cp -R "$sdir" "$ddir"
+  local apath="$(adapter_path "$st")"
+  if [ -f "$sdir/.profile.json" ]; then
+    local mode rel
+    mode="$(json_str '.mode' "$sdir/.profile.json")"
+    mkdir -p "$ddir"
+    if [ "$mode" = isolated ]; then
+      local state_subdir src_state dst_state
+      state_subdir="$(json_str '.normalState.runtimeSubdir' "$apath")"
+      src_state="$sdir"; dst_state="$ddir"
+      [ -n "$state_subdir" ] && src_state="$sdir/$state_subdir" && dst_state="$ddir/$state_subdir"
+      while IFS= read -r rel; do
+        [ -z "$rel" ] && continue
+        if [ -e "$src_state/$rel" ]; then
+          mkdir -p "$dst_state/$(dirname "$rel")"
+          cp -R "$src_state/$rel" "$dst_state/$rel"
+        fi
+      done < <({ runtime_json_arr '.normalState.sharedPaths' "$apath"; runtime_json_arr '.normalState.sessionPaths' "$apath"; } | sort -u)
+      : > "$ddir/.isolated"
+      write_isolated_profile_metadata "$apath" "$ddir"
+    else
+      runtime_initialize_profile "$apath" "$ddir"
+    fi
+  else
+    cp -R "$sdir" "$ddir"
+  fi
   create_shell_alias "$dt" "$dn"; create_shortcut "$dt" "$dn"
   echo "Cloned '$src' to '$dest'"
 }
@@ -842,6 +968,9 @@ cmd_launch() {
 
   local pdir="$(profile_dir "$TOOL" "$NAME")"
   [ -d "$pdir" ] || abort "Profile '$spec' does not exist. Create with: multi-cli new $spec"
+  if [ "$(json_str ".support.$(platform).level" "$apath")" = unsupported ]; then
+    abort "$(json_str '.displayName' "$apath") is unsupported on $(platform): $(json_str ".support.$(platform).reason" "$apath")"
+  fi
 
   local binary
   binary="$(find_adapter_binary "$TOOL")" || {
@@ -854,6 +983,15 @@ cmd_launch() {
   local strategy display
   strategy="$(json_str '.isolation.strategy' "$apath")"
   display="$(json_str '.displayName' "$apath")"
+
+  # Isolated profiles share nothing: the profile dir is the tool's whole root,
+  # so the account-overlay runtime (shared links, overlay) is bypassed.
+  if [ "$strategy" = "accountOverlay" ] && [ -f "$pdir/.isolated" ]; then
+    echo "Launching $display profile '$spec' [$strategy, isolated]"
+    launch_isolated "$TOOL" "$pdir" "$binary" "${binary_args[@]+"${binary_args[@]}"}"
+    return
+  fi
+
   echo "Launching $display profile '$spec' [$strategy]"
 
   case "$strategy" in
@@ -871,6 +1009,86 @@ cmd_launch() {
 expand_placeholder() {
   local val="$1" pdir="$2"
   printf '%s\n' "${val//\{profileDir\}/$pdir}"
+}
+
+# Isolated launch for schema-v2 profiles created with --isolated: the profile
+# dir is the tool's whole root. No runtime overlay, no shared links, nothing
+# read from or written to the native shared root. fileOverlay and
+# processSecret point the adapter's home env at the profile dir itself;
+# processSecret additionally injects the per-profile credential (fail-closed
+# until `multi-cli auth set`). osUserCredentialStore and inseparable get a
+# whole-home redirect into <profile>/_home -- no OS user, no shared state.
+launch_isolated() {
+  local tool="$1" pdir="$2" binary="$3"; shift 3
+  local apath mechanism profile_id=""
+  apath="$(adapter_path "$tool")"
+  mechanism="$(json_str '.account.mechanism' "$apath")"
+  [ -f "$pdir/.profile.json" ] && profile_id="$(runtime_profile_id "$pdir")"
+
+  local secret_env_var="" process_secret=""
+  if [ "$mechanism" = processSecret ]; then
+    secret_env_var="$(json_str '.account.secret.environmentVariable' "$apath")"
+    [ -n "$secret_env_var" ] || abort "Adapter '$tool' is missing account.secret.environmentVariable."
+    [ -n "$profile_id" ] || abort "Profile '$tool/$(basename "$pdir")' is missing schema-v2 metadata."
+    process_secret="$(mc_cred_get "$(mc_cred_target "$tool" "$profile_id" "$secret_env_var")")" || \
+      abort "Profile '$tool/$(basename "$pdir")' has no stored credential. Run: multi-cli auth set $tool/$(basename "$pdir")"
+  fi
+
+  # Both {runtimeRoot} and {sharedStateRoot} resolve to the profile dir: in
+  # isolated mode the profile is the root, so no placeholder can leak a path
+  # into the native shared root.
+  local env_args=() unset_args=() key value
+  while IFS= read -r key; do
+    [ -z "$key" ] && continue
+    value="$(json_obj_val '.isolation.env' "$key" "$apath")"
+    value="$(runtime_expand_value "$value" "$pdir" "$profile_id" "$pdir/auth" "$pdir" "$pdir")"
+    env_args+=("$key=$value")
+  done < <(json_obj_keys '.isolation.env' "$apath")
+  while IFS= read -r key; do
+    [ -z "$key" ] && continue
+    unset_args+=("-u" "$key")
+  done < <(runtime_json_arr '.isolation.clearEnv' "$apath")
+  [ -n "$profile_id" ] && env_args+=("MULTICLI_PROFILE_ID=$profile_id")
+  [ -n "$secret_env_var" ] && env_args+=("$secret_env_var=$process_secret")
+
+  local mode
+  mode="$(json_str '.isolation.mode' "$apath")"
+  local launch_env=()
+  case "$mechanism" in
+    fileOverlay|processSecret)
+      launch_env=("${env_args[@]+"${env_args[@]}"}")
+      ;;
+    *)
+      local hdir="$pdir/_home" tmpdir="$pdir/_home/.tmp"
+      mkdir -p "$hdir" "$tmpdir"
+      case "$(platform)" in
+        macos)
+          launch_env=(HOME="$hdir" TMPDIR="$tmpdir"
+            XDG_CONFIG_HOME="$hdir/.config" XDG_DATA_HOME="$hdir/.local/share"
+            XDG_CACHE_HOME="$hdir/.cache" XDG_STATE_HOME="$hdir/.local/state"
+            XDG_RUNTIME_DIR="$tmpdir" "${env_args[@]+"${env_args[@]}"}")
+          ;;
+        linux)
+          launch_env=(HOME="$hdir" TMPDIR="$tmpdir" TEMP="$tmpdir" TMP="$tmpdir"
+            XDG_CONFIG_HOME="$hdir/.config" XDG_DATA_HOME="$hdir/.local/share"
+            XDG_CACHE_HOME="$hdir/.cache" XDG_STATE_HOME="$hdir/.local/state"
+            XDG_RUNTIME_DIR="$tmpdir" "${env_args[@]+"${env_args[@]}"}")
+          ;;
+        *)
+          launch_env=(HOME="$hdir" USERPROFILE="$hdir"
+            APPDATA="$hdir/AppData/Roaming" LOCALAPPDATA="$hdir/AppData/Local"
+            TEMP="$tmpdir" TMP="$tmpdir" TMPDIR="$tmpdir"
+            "${env_args[@]+"${env_args[@]}"}")
+          ;;
+      esac
+      ;;
+  esac
+  if [ "$mode" = detached ]; then
+    env "${unset_args[@]+"${unset_args[@]}"}" "${launch_env[@]+"${launch_env[@]}"}" "$binary" "$@" \
+      > "$pdir/.isolated-launch.log" 2>&1 &
+    return 0
+  fi
+  env "${unset_args[@]+"${unset_args[@]}"}" "${launch_env[@]+"${launch_env[@]}"}" "$binary" "$@"
 }
 
 # env strategy: the whole isolation is the adapter's env map, expanded and
@@ -1118,6 +1336,7 @@ cmd_list() {
       local ptype="full"
       [ -f "$pdir/.cli" ] && ptype="cli"
       [ -f "$pdir/.shared" ] && ptype="shared"
+      [ -f "$pdir/.isolated" ] && ptype="isolated"
       printf "  %-20s %-8s %s\n" "$pname" "$ptype" "$(folder_size "$pdir")"
     done
     [ "$found" = false ] && echo "  (none)"
@@ -1134,10 +1353,11 @@ cmd_tools() {
   local tid
   for tid in $(list_tool_ids | sort); do
     local apath="$(adapter_path "$tid")"
-    local kind strategy status installed color
+    local kind strategy status reason installed color
     kind="$(json_str '.kind' "$apath")"
     strategy="$(json_str '.isolation.strategy' "$apath")"
     status="$(json_str ".support.$(platform).level" "$apath")"
+    reason="$(json_str ".support.$(platform).reason" "$apath")"
     [ -z "$status" ] && status="$(json_str '.status' "$apath")"
     [ -z "$status" ] && status="?"
     if find_adapter_binary "$tid" >/dev/null 2>&1; then
@@ -1146,6 +1366,7 @@ cmd_tools() {
       installed="no"; color="\033[90m"
     fi
     printf "  ${color}%-18s %-12s %-15s %-10s %s\033[0m\n" "$tid" "$kind" "$strategy" "$status" "$installed"
+    [ -n "$reason" ] && printf '    %s\n' "$reason"
   done
 }
 
@@ -1191,8 +1412,12 @@ cmd_doctor() {
     local support_level support_reason
     support_level="$(json_str ".support.$(platform).level" "$(adapter_path "$tid")")"
     support_reason="$(json_str ".support.$(platform).reason" "$(adapter_path "$tid")")"
-    if [ -n "$support_level" ] && [ "$support_level" != verified ]; then
-      printf '         \033[33m%s: %s\033[0m\n' "$support_level" "$support_reason"
+    if [ -n "$support_reason" ]; then
+      if [ "$support_level" = unsupported ]; then
+        printf '         \033[33m%s: %s\033[0m\n' "$support_level" "$support_reason"
+      else
+        printf '         %s: %s\n' "$support_level" "$support_reason"
+      fi
     fi
   done
 
@@ -1211,6 +1436,31 @@ cmd_doctor() {
           warnings=$((warnings + 1))
           continue
         fi
+        local apath expected item target expected_target
+        apath="$(adapter_path "$(basename "$(dirname "$pdir")")")"
+        while IFS= read -r rel; do
+          [ -n "$rel" ] || continue
+          item="$runtime/$rel"
+          if [ ! -e "$item" ] && [ ! -L "$item" ]; then
+            printf '  \033[33m[WARN] missing declared runtime path %s in %s -- relaunch the profile\033[0m\n' "$rel" "$pdir"
+            warnings=$((warnings + 1))
+            continue
+          fi
+          if [ -L "$item" ]; then
+            target="$(cd "$(dirname "$item")" && cd "$(dirname "$(readlink "$item")")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$(readlink "$item")")" || true)"
+            expected_target=""
+            if runtime_json_arr '.account.credentialFiles' "$apath" | grep -qxF "$rel"; then
+              expected_target="$pdir/auth/$rel"
+            else
+              expected_target="$(runtime_platform_root "$apath")/$rel"
+            fi
+            expected_target="$(cd "$(dirname "$expected_target")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$expected_target")" || true)"
+            if [ -z "$target" ] || [ "$target" != "$expected_target" ]; then
+              printf '  \033[33m[WARN] runtime path %s in %s points to the wrong target\033[0m\n' "$rel" "$pdir"
+              warnings=$((warnings + 1))
+            fi
+          fi
+        done < "$runtime/.runtime-manifest"
         while IFS= read -r f; do
           rel="${f#"$runtime"/}"
           [ "$rel" = ".runtime-manifest" ] && continue
@@ -1226,11 +1476,15 @@ cmd_doctor() {
   echo ""
   if [ $errors -eq 0 ] && [ $warnings -eq 0 ]; then
     printf '\033[32mAll good.\033[0m\n'
+    return 0
   elif [ $errors -eq 0 ]; then
     printf '\033[33m%d warning(s).\033[0m\n' "$warnings"
+    [ "$deep" = --deep ] && return 1
+    return 0
   else
     printf '\033[31m%d error(s), %d warning(s).\033[0m\n' "$errors" "$warnings"
   fi
+  return 1
 }
 
 cmd_stats() {
@@ -1275,7 +1529,7 @@ cmd_template() {
       local dest="$tdir/$tpl_name"
       [ -d "$dest" ] && abort "Template '$tpl_name' already exists"
       cp -R "$sdir" "$dest"
-      for f in .shared .cli auth.json .credentials.json oauth_creds.json; do
+      for f in .shared .cli .isolated auth.json .credentials.json oauth_creds.json; do
         [ -e "$dest/$f" ] && rm -rf "$dest/$f"
       done
       echo "Saved template '$tpl_name' from '$spec'"
@@ -1354,7 +1608,7 @@ USAGE
   multi-cli <command> [args]
 
 COMMANDS
-  new <tool>/<name> [--shared] [--cli] [--no-seed] [--from <tpl>]   Create a profile
+  new <tool>/<name> [--shared] [--isolated] [--cli] [--no-seed] [--from <tpl>]   Create a profile
   launch <tool>/<name> [-- args...]                     Launch the profile
   list [<tool>]                                         List profiles
   status                                                Same as list
@@ -1383,7 +1637,8 @@ ENVIRONMENT
 
 EXAMPLES
   multi-cli new claude-cli/work
-  multi-cli new cursor/personal --shared
+  multi-cli new codex/acme --isolated
+  multi-cli new opencode/personal --isolated
   multi-cli launch codex/acme -- exec --search "fix the build"
   multi-cli continue codex acme backup   # resume a rate-limited chat under another profile
   claude-cli-work          # via auto-generated alias on \$PATH

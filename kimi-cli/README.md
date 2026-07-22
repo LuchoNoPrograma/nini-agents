@@ -35,12 +35,12 @@ Shared root: `%USERPROFILE%\.kimi-code` (Windows), `~/.kimi-code` (macOS/Linux).
 ## Known limitations
 
 - Foreground-only: Kimi background services use fixed names/ports (`singletonScope: backgroundService`), so two profiles must not run background services at once. multi-cli launches profiles as foreground processes only.
-- Direct-provider mode requires explicit provider/model selection; authenticated concurrency E2E is pending.
+- Direct-provider mode requires explicit provider/model selection. This adapter does not provide isolated Kimi OAuth profiles; every launch requires a stored `KIMI_MODEL_API_KEY`.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| experimental | experimental | experimental |
+| supported (process token via `multi-cli auth set`) | supported | supported |
 
-`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.
+`supported` means multi-cli provides account isolation on that OS (mode requirements noted); `unsupported` means no isolation mode works there.

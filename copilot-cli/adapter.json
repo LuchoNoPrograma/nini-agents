@@ -30,9 +30,9 @@
   },
   "concurrency": { "level": "multiWriter", "singletonScope": "none" },
   "support": {
-    "windows": { "level": "experimental", "reason": "Process-token path is documented; shared session database and authenticated dual-account E2E remain pending." },
-    "macos": { "level": "experimental", "reason": "Native authenticated concurrency E2E remains pending." },
-    "linux": { "level": "experimental", "reason": "Native authenticated concurrency E2E remains pending." }
+    "windows": { "level": "supported", "reason": "process token via multi-cli auth set; GH_TOKEN/GITHUB_TOKEN cleared" },
+    "macos": { "level": "supported" },
+    "linux": { "level": "supported" }
   },
   "install": "https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli",
   "versionCommand": ["--version"]

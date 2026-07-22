@@ -5,8 +5,8 @@
 .DESCRIPTION
   Delegates to Invoke-ModuleCoverage.ps1, which runs the Pester 3.x suite
   in-process against lib/*.psm1, applies the documented-exception list, writes
-  tests/coverage/out/powershell-coverage.json, and exits nonzero on any test
-  failure or total coverage below -MinimumPercent.
+  JSON and Cobertura reports, and exits nonzero on test, module, or changed-line
+  coverage failures.
 
   USAGE
     powershell -NoProfile -ExecutionPolicy Bypass -File tests/coverage/Run-PowerShellCoverage.ps1 [-MinimumPercent 95]

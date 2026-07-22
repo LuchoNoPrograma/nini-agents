@@ -6,13 +6,13 @@
 
 **הפעלת מספר פרופילי חשבון של כלי תכנות מבוססי AI בו-זמנית.**
 
-פרופיל schema-v2 מבודד את אישורי החשבון ואת זהות המכסה, תוך שיתוף המצב הרגיל של הכלי — שיחות, תצורה, סוכנים, מיומנויות ותוספים — במקומות שבהם הספק חושף גבול בטוח. מוצרים שמשלבים אימות עם סשנים או עם מצב קבוע של צרור המפתחות מסומנים כניסיוניים או כלא נתמכים, במקום לקבל טענת בידוד שגויה. אף מתאם עדיין לא עבר את שער האימות של שני חשבונות בו-זמנית; ראו [מטריצת התמיכה](docs/support-matrix.md) לסטטוס המדויק לפי מוצר, פלטפורמה ומצב אימות.
+פרופיל schema-v2 מבודד את אישורי החשבון והמכסה, ומשתף שיחות, הגדרות והרחבות כאשר הגבול בטוח. כאשר הספק משלב אימות עם סשנים, multi-cli משתמש במשתמש מערכת הפעלה נפרד או בפרופיל שורש מלא באמצעות `--isolated`. [מטריצת התמיכה](docs/support-matrix.md) מפרטת את המצב והדרישות המדויקים לכל פלטפורמה.
 
 פרופילי schema-v1 קיימים נשארים פרופילים מדור קודם בעלי שורש מלא עד שיועברו — ראו [פרופילים מדור קודם](#legacy-profiles).
 
-[![GitHub repository](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Spielewoy/multi-codex)
+[![GitHub repository](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Spielewoy/multi-cli)
 [![GitHub profile](https://img.shields.io/badge/GitHub-Spielewoy-lightgrey?logo=github)](https://github.com/Spielewoy)
-[![GitHub stars](https://img.shields.io/github/stars/Spielewoy/multi-codex?style=social)](https://github.com/Spielewoy/multi-codex/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/Spielewoy/multi-cli?style=social)](https://github.com/Spielewoy/multi-cli/stargazers)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#install)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
 
@@ -20,27 +20,27 @@
 
 ## כלים נתמכים
 
-המאגר כולל 17 מתאמים. הסטטוס נקבע לכל מערכת הפעלה בנפרד: `experimental` פירושו שקיים גבול מועמד מתועד אך אימות מלא של שני חשבונות עדיין לא עבר, ו-`unsupported` פירושו ש-multi-cli מסרב לטעון לבידוד חשבונות. דבר עדיין לא אומת. המקור הסמכותי הוא [docs/support-matrix.md](docs/support-matrix.md).
+המאגר כולל 17 מתאמים. `supported` פירושו ש-multi-cli מספק לפחות מצב בידוד עובד אחד במערכת זו; `unsupported` פירושו שהמוצר או מצב הבידוד אינם זמינים בה. המקור הסמכותי הוא [docs/support-matrix.md](docs/support-matrix.md).
 
 | כלי | סוג | Windows | macOS | Linux |
 |------|------|---------|-------|-------|
-| [Claude Code](claude-cli/) | CLI | ניסיוני | לא נתמך (OAuth מאוחסן) | ניסיוני |
-| [OpenAI Codex CLI](codex/) | CLI | ניסיוני | ניסיוני | ניסיוני |
-| [Gemini CLI](gemini-cli/) | CLI | ניסיוני | ניסיוני | ניסיוני |
-| [OpenCode](opencode/) | CLI | לא נתמך | לא נתמך | לא נתמך |
-| [Command Code](commandcode/) | CLI | לא נתמך | לא נתמך | לא נתמך |
-| [Cursor Desktop](cursor/) | IDE | לא נתמך | לא נתמך | לא נתמך |
-| [Cursor CLI](cursor-cli/) | CLI | ניסיוני | ניסיוני | ניסיוני |
-| [Antigravity](antigravity/) | IDE | ניסיוני | לא נתמך | לא נתמך |
-| [AGY CLI](agy-cli/) | CLI | ניסיוני | לא נתמך | לא נתמך |
-| [Kiro](kiro/) | IDE | ניסיוני | לא נתמך | לא נתמך |
-| [Zed](zed/) | IDE | לא נתמך | לא נתמך | ניסיוני |
-| [Devin Desktop / Windsurf](windsurf/) | IDE | ניסיוני | לא נתמך | לא נתמך |
-| [GitHub Copilot CLI](copilot-cli/) | CLI | ניסיוני | ניסיוני | ניסיוני |
-| [Copilot ב-VS Code](copilot-vscode/) | IDE | ניסיוני | לא נתמך | לא נתמך |
-| [Kimi Code CLI](kimi-cli/) | CLI | ניסיוני | ניסיוני | ניסיוני |
-| [Codex Windows App](codex-gui/) | IDE | לא נתמך | לא נתמך | לא נתמך |
-| [Grok Build CLI](grok-cli/) | CLI/TUI | ניסיוני | ניסיוני | ניסיוני |
+| [Claude Code](claude-cli/) | CLI | supported (file overlay) | supported for API-key profiles only; subscription OAuth is unsupported | supported (file overlay) |
+| [OpenAI Codex CLI](codex/) | CLI | supported (file overlay; file credential store mode) | supported | supported |
+| [Gemini CLI](gemini-cli/) | CLI | supported (file overlay) | supported | supported |
+| [OpenCode](opencode/) | CLI | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Command Code](commandcode/) | CLI | supported (file overlay; use `commandcode`, bare `cmd` collides with cmd.exe) | supported | supported |
+| [Cursor Desktop](cursor/) | IDE | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Cursor CLI](cursor-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Antigravity](antigravity/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [AGY CLI](agy-cli/) | CLI | supported (OS-user isolation; elevated terminal) | unsupported (owned-user Keychain isolation not proven) | unsupported (owned-user Secret Service session not implemented) |
+| [Kiro](kiro/) | IDE | supported (OS-user isolation) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Zed](zed/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [Devin Desktop / Windsurf](windsurf/) | IDE | supported (OS-user isolation; elevated terminal) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [GitHub Copilot CLI](copilot-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Copilot in VS Code](copilot-vscode/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [Kimi Code CLI](kimi-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Codex Desktop App](codex-gui/) | IDE | supported (OS-user isolation when the Store app is installed) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (no desktop app) |
+| [Grok Build CLI](grok-cli/) | CLI/TUI | supported (process token via `multi-cli auth set`) | supported | supported |
 
 לכל כלי תיקייה משלו בשורש המאגר עם קובץ `adapter.json` שמתאר את גבול החשבון, את המצב הרגיל המשותף ואת הראיות הנדרשות לקידום לסטטוס מאומת.
 
@@ -53,13 +53,13 @@
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/install.sh | bash
 ```
 
 **Windows** — פתחו PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/install.ps1 | iex
 ```
 
 > לאחר ההתקנה, **הפעילו מחדש את הטרמינל** כדי ששינויי ה-PATH ייכנסו לתוקף.
@@ -67,8 +67,8 @@ irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install
 ### מקוד המקור
 
 ```bash
-git clone https://github.com/Spielewoy/multi-codex.git
-cd multi-codex
+git clone https://github.com/Spielewoy/multi-cli.git
+cd multi-cli
 ./scripts/install.sh --local        # macOS/Linux
 .\scripts\install.ps1 -Local        # Windows
 ```
@@ -107,13 +107,14 @@ multi-cli claude-cli/work
 
 | פקודה | תיאור |
 |---------|-------------|
-| `multi-cli new <tool>/<name>` | יצירת פרופיל מבודד חדש |
-| `multi-cli new <tool>/<name> --shared` | פרופיל קל (הגדרות משותפות, אימות מבודד) |
+| `multi-cli new <tool>/<name>` | יצירת פרופיל חשבון (אישורים נפרדים ומצב רגיל משותף) |
+| `multi-cli new <tool>/<name> --isolated` | יצירת פרופיל שורש מלא ללא מצב משותף |
+| `multi-cli new <tool>/<name> --shared` | פרופיל משותף ישן של schema-v1; פרופילי schema-v2 כבר משתפים את המצב הרגיל המוצהר כברירת מחדל |
 | `multi-cli new <tool>/<name> --from <tpl>` | יצירה מתבנית שמורה |
 | `multi-cli <tool>/<name>` | הפעלת פרופיל (קיצור) |
 | `multi-cli launch <tool>/<name>` | הפעלת פרופיל |
 | `multi-cli list [<tool>]` | הצגת כל הפרופילים |
-| `multi-cli status` | הצגת מצב ריצה, סוג, שימוש אחרון וגודל |
+| `multi-cli status` | List profiles with their type and disk size |
 | `multi-cli clone <tool>/<src> <tool>/<dest>` | העתקת פרופיל קיים |
 | `multi-cli rename <tool>/<old> <tool>/<new>` | שינוי שם של פרופיל |
 | `multi-cli delete <tool>/<name>` | מחיקת פרופיל וכל הנתונים שלו |
@@ -215,7 +216,7 @@ codex resume <session-id>                        # resume the same chat (codex �
 
 **לא נתמך:** `opencode` (סשנים ואישורים חיים במסד נתונים SQLite משותף אחד) ו-`cursor` (שיחות מאוחסנות ב-SQLite עם מפתח לפי נתיב סביבת העבודה).
 
-> פרופילים חדשים נזרעים מ-`base` כברירת מחדל — מצב השיחה, ובנוסף נכסי מיומנויות/תצורה עבור פרופילים מלאים. העבירו `--no-seed` ל-`multi-cli new` כדי להתחיל ריק.
+> פרופילי schema-v1 ישנים מאותחלים מ-`base` כברירת מחדל. פרופילי חשבון schema-v2 כבר קוראים שיחות ותצורה מוצהרות מהשורש המקומי המשותף, ופרופילים מבודדים מתחילים ריקים. השתמשו ב-`multi-cli continue` כדי להעתיק שיחות נתמכות אל פרופיל מבודד או ממנו.
 
 ---
 
@@ -223,9 +224,10 @@ codex resume <session-id>                        # resume the same chat (codex �
 
 | דגל | משמעות |
 |------|---------|
-| *(ללא)* | **מלא** — מבודד לחלוטין. אימות חדש, תצורה חדשה. |
-| `--shared` | **משותף** — קישורים סימבוליים להגדרות/תוספים מההתקנה הראשית. האימות נשאר מבודד. |
-| `--cli` | **CLI** — מסמן את הפרופיל להפעלה מטרמינל בלבד (מדלג על זיהוי GUI). |
+| *(ללא)* | **משותף כברירת מחדל** — אישורים נפרדים; שיחות והגדרות משותפות כאשר המתאם מאפשר זאת. |
+| `-i`, `--isolate`, `--isolated` | **מבודד** — כל שורש הכלי נמצא בפרופיל; דבר אינו משותף. |
+| `--shared` | כינוי ישן למצב המשותף, כאשר המתאם תומך בו. |
+| `--cli` | **CLI** — הפעלה מהטרמינל בלבד. |
 | `--from <tpl>` | שיבוט מתבנית שמורה. |
 
 ---
@@ -276,13 +278,13 @@ multi-cli completion bash   # or zsh, powershell
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/uninstall.sh | bash
 ```
 
 **Windows**
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/uninstall.ps1 | iex
 ```
 
 תישאלו אם להסיר את נתוני הפרופילים — דבר לא נמחק ללא אישור.
@@ -294,7 +296,7 @@ irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/uninsta
 - [מטריצת תמיכה](docs/support-matrix.md) — סטטוס בידוד לפי מוצר ומערכת הפעלה, ושער האימות
 - [מדיניות אבטחה](SECURITY.md)
 - [רישיון](LICENSE)
-- [מאגר GitHub](https://github.com/Spielewoy/multi-codex)
+- [מאגר GitHub](https://github.com/Spielewoy/multi-cli)
 
 ---
 

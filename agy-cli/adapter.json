@@ -4,15 +4,31 @@
   "displayName": "Antigravity CLI (agy)",
   "kind": "cli",
   "binary": {
-    "windows": ["%LOCALAPPDATA%\\agy\\bin\\agy.exe", "agy"],
-    "macos": ["$HOME/.local/bin/agy", "agy"],
-    "linux": ["$HOME/.local/bin/agy", "agy"]
+    "windows": [
+      "%LOCALAPPDATA%\\agy\\bin\\agy.exe",
+      "agy"
+    ],
+    "macos": [
+      "$HOME/.local/bin/agy",
+      "agy"
+    ],
+    "linux": [
+      "$HOME/.local/bin/agy",
+      "agy"
+    ]
   },
-  "isolation": { "strategy": "accountOverlay", "mode": "foreground", "env": {}, "clearEnv": [] },
+  "isolation": {
+    "strategy": "accountOverlay",
+    "mode": "foreground",
+    "env": {},
+    "clearEnv": []
+  },
   "account": {
     "mechanism": "osUserCredentialStore",
     "credentialFiles": [],
-    "credentialPrecedence": ["Fixed gemini/antigravity OS credential"],
+    "credentialPrecedence": [
+      "Fixed gemini/antigravity OS credential"
+    ],
     "logoutScope": "osUser"
   },
   "normalState": {
@@ -21,17 +37,37 @@
       "macos": "$HOME/.gemini/antigravity-cli",
       "linux": "$HOME/.gemini/antigravity-cli"
     },
-    "sharedPaths": ["settings.json", "plugins", "skills"],
+    "sharedPaths": [
+      "settings.json",
+      "plugins",
+      "skills"
+    ],
     "sessionPaths": [],
-    "filePaths": ["settings.json"],
+    "filePaths": [
+      "settings.json"
+    ],
     "unsafePaths": []
   },
-  "concurrency": { "level": "multiWriter", "singletonScope": "osUser" },
+  "concurrency": {
+    "level": "multiWriter",
+    "singletonScope": "osUser"
+  },
   "support": {
-    "windows": { "level": "experimental", "reason": "Fixed keychain identity requires owned OS-user isolation and authenticated agy concurrency E2E." },
-    "macos": { "level": "unsupported", "reason": "Fixed Keychain identity requires OS-user isolation not yet implemented." },
-    "linux": { "level": "unsupported", "reason": "Fixed Secret Service identity requires OS-user isolation not yet implemented." }
+    "windows": {
+      "level": "supported",
+      "reason": "OS-user isolation; elevated terminal required"
+    },
+    "macos": {
+      "level": "unsupported",
+      "reason": "Owned-user macOS login Keychain isolation is not yet proven by an authenticated run."
+    },
+    "linux": {
+      "level": "unsupported",
+      "reason": "Owned-user Linux Secret Service session isolation is not yet implemented and verified."
+    }
   },
   "install": "https://antigravity.google/docs/cli/install",
-  "versionCommand": ["--version"]
+  "versionCommand": [
+    "--version"
+  ]
 }

@@ -1,8 +1,8 @@
 # commandcode — Command Code
 
-**Account boundary:** `inseparable` — the current product exposes only a whole-home boundary; exact disjoint auth and session paths require live verification.
+**Account boundary:** `fileOverlay` — `.commandcode/auth.json` is profile-local; declared configuration and session paths are shared normal state.
 
-Command Code resolves its home from `os.homedir()` with no override variable. The adapter declares a redirected `HOME`/`USERPROFILE`, but narrow auth-only isolation is not proven, so the account-overlay contract is not claimed.
+Command Code resolves its home from `os.homedir()` with no override variable. The adapter redirects `HOME`/`USERPROFILE` at a per-profile runtime view where only `.commandcode/auth.json` belongs to the profile.
 
 ## Install
 
@@ -14,31 +14,34 @@ Provides the `cmd` binary (`%APPDATA%\npm\cmd.cmd` on Windows, `$HOME/.npm-globa
 
 ## Quickstart
 
-Account-overlay profiles are unsupported on all platforms. Legacy whole-home profiles remain available:
+Account-overlay profiles are supported on all platforms:
 
 ```bash
-multi-cli launch commandcode/<legacy-profile>
-multi-cli doctor                        # shows the exact unsupported reason
+multi-cli new commandcode/work
+multi-cli launch commandcode/work       # sign in on first run; auth.json stays profile-local
 ```
 
 ## Account boundary
 
-- Mechanism: `inseparable` — auth and sessions inside `~/.commandcode` have no proven split.
-- Declared launch env: `HOME={runtimeRoot}/_home`, `USERPROFILE={runtimeRoot}/_home`.
+- Mechanism: `fileOverlay` — `.commandcode/auth.json` is profile-local; `COMMAND_CODE_API_KEY` takes precedence when set.
+- Declared launch env: `HOME={runtimeRoot}`, `USERPROFILE={runtimeRoot}`.
 - Logout scope: profile.
 
 ## Shared normal state
 
-None classified. `adapter.json` declares no shared, session, or file paths under the native root (`%USERPROFILE%\.commandcode` on Windows, `~/.commandcode` on macOS/Linux).
+Shared root: the user home (`%USERPROFILE%` on Windows, `$HOME` on macOS/Linux).
+
+- Config: `.commandcode/config.json`, `.commandcode/settings.json`, `.commandcode/skills/`, `.commandcode/plans/`, `.commandcode/taste/`.
+- Sessions: `.commandcode/projects/`, `.commandcode/history.jsonl`, `.commandcode/file-history/`.
 
 ## Known limitations
 
-- Only whole-home isolation exists today; per-account credentials with shared normal state are not possible until the vendor's auth and session layout is verified as separable.
+- Use the `commandcode` binary name; bare `cmd` collides with Windows cmd.exe.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| unsupported | unsupported | unsupported |
+| supported (file overlay; use `commandcode`, bare `cmd` collides with cmd.exe) | supported | supported |
 
-`unsupported` means multi-cli refuses to claim the account-overlay contract. Legacy whole-home profiles remain available per `adapter.json`.
+`supported` means multi-cli provides account isolation on that OS (mode requirements noted); `unsupported` means no isolation mode works there.

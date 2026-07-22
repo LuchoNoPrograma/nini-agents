@@ -3,10 +3,20 @@
   "$id": "https://multi-cli.local/schema/adapter.schema.json",
   "title": "multi-cli adapter",
   "type": "object",
-  "required": ["id", "displayName", "kind", "binary", "isolation"],
+  "required": [
+    "id",
+    "displayName",
+    "kind",
+    "binary",
+    "isolation"
+  ],
+  "additionalProperties": false,
   "properties": {
     "schemaVersion": {
-      "enum": [1, 2],
+      "enum": [
+        1,
+        2
+      ],
       "default": 1
     },
     "id": {
@@ -18,56 +28,105 @@
       "minLength": 1
     },
     "kind": {
-      "enum": ["cli", "ide", "hybrid"]
+      "enum": [
+        "cli",
+        "ide",
+        "hybrid"
+      ]
     },
     "binary": {
       "type": "object",
       "propertyNames": {
-        "enum": ["windows", "macos", "linux"]
+        "enum": [
+          "windows",
+          "macos",
+          "linux"
+        ]
       },
       "additionalProperties": {
         "type": "array",
-        "items": { "type": "string", "minLength": 1 }
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "isolation": {
       "type": "object",
-      "required": ["strategy"],
+      "required": [
+        "strategy"
+      ],
       "properties": {
         "strategy": {
-          "enum": ["env", "userDataDir", "redirectHome", "appdata", "sandboxUser", "accountOverlay"]
+          "enum": [
+            "env",
+            "userDataDir",
+            "redirectHome",
+            "appdata",
+            "sandboxUser",
+            "accountOverlay"
+          ]
         },
         "mode": {
-          "enum": ["foreground", "detached"]
+          "enum": [
+            "foreground",
+            "detached"
+          ]
         },
         "env": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "clearEnv": {
           "type": "array",
-          "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" }
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          }
         },
         "args": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
+        },
+        "shareFromRealHome": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
         }
-      }
+      },
+      "additionalProperties": false
     },
     "account": {
       "type": "object",
-      "required": ["mechanism"],
+      "required": [
+        "mechanism"
+      ],
       "properties": {
         "mechanism": {
-          "enum": ["processSecret", "fileOverlay", "osUserCredentialStore", "inseparable"]
+          "enum": [
+            "processSecret",
+            "fileOverlay",
+            "osUserCredentialStore",
+            "inseparable"
+          ]
         },
         "credentialFiles": {
           "type": "array",
-          "items": { "$ref": "#/$defs/relativePath" }
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
         },
         "credentialPrecedence": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "logoutScope": {
           "type": "string",
@@ -79,104 +138,273 @@
         },
         "secret": {
           "type": "object",
-          "required": ["environmentVariable"],
+          "required": [
+            "environmentVariable"
+          ],
           "properties": {
             "environmentVariable": {
               "type": "string",
               "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
             }
-          }
+          },
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
     },
     "normalState": {
       "type": "object",
-      "required": ["root", "sharedPaths", "sessionPaths", "unsafePaths"],
+      "required": [
+        "root",
+        "sharedPaths",
+        "sessionPaths",
+        "unsafePaths"
+      ],
       "properties": {
         "root": {
           "type": "object",
-          "required": ["windows", "macos", "linux"],
+          "required": [
+            "windows",
+            "macos",
+            "linux"
+          ],
           "properties": {
-            "windows": { "type": "string", "minLength": 1 },
-            "macos": { "type": "string", "minLength": 1 },
-            "linux": { "type": "string", "minLength": 1 }
+            "windows": {
+              "type": "string",
+              "minLength": 1
+            },
+            "macos": {
+              "type": "string",
+              "minLength": 1
+            },
+            "linux": {
+              "type": "string",
+              "minLength": 1
+            }
           },
           "additionalProperties": false
         },
         "sharedPaths": {
           "type": "array",
-          "items": { "$ref": "#/$defs/relativePath" }
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
         },
         "sessionPaths": {
           "type": "array",
-          "items": { "$ref": "#/$defs/relativePath" }
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
         },
         "filePaths": {
           "type": "array",
-          "items": { "$ref": "#/$defs/relativePath" }
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
         },
         "unsafePaths": {
           "type": "array",
-          "items": { "$ref": "#/$defs/relativePath" }
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
         }
-      }
+      },
+      "additionalProperties": false
     },
     "concurrency": {
       "type": "object",
-      "required": ["level", "singletonScope"],
+      "required": [
+        "level",
+        "singletonScope"
+      ],
       "properties": {
-        "level": { "enum": ["multiWriter", "singleWriter", "unsupported"] },
-        "singletonScope": { "type": "string", "minLength": 1 }
-      }
+        "level": {
+          "enum": [
+            "multiWriter",
+            "singleWriter",
+            "unsupported"
+          ]
+        },
+        "singletonScope": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
     },
     "support": {
       "type": "object",
-      "required": ["windows", "macos", "linux"],
+      "required": [
+        "windows",
+        "macos",
+        "linux"
+      ],
       "properties": {
-        "windows": { "$ref": "#/$defs/support" },
-        "macos": { "$ref": "#/$defs/support" },
-        "linux": { "$ref": "#/$defs/support" }
+        "windows": {
+          "$ref": "#/$defs/support"
+        },
+        "macos": {
+          "$ref": "#/$defs/support"
+        },
+        "linux": {
+          "$ref": "#/$defs/support"
+        }
       },
       "additionalProperties": false
+    },
+    "install": {
+      "type": "string",
+      "minLength": 1
+    },
+    "versionCommand": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "share": {
+      "$ref": "#/$defs/legacyShare"
+    },
+    "session": {
+      "$ref": "#/$defs/legacySession"
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1
     }
   },
   "$defs": {
+    "legacyShare": {
+      "type": "object",
+      "properties": {
+        "systemHome": {
+          "type": "string",
+          "minLength": 1
+        },
+        "linkable": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        },
+        "neverLink": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "legacySession": {
+      "type": "object",
+      "properties": {
+        "portable": {
+          "type": "boolean"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        },
+        "credentials": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resumeHint": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
     "relativePath": {
       "type": "string",
       "minLength": 1,
       "not": {
         "anyOf": [
-          { "pattern": "^[/\\\\]" },
-          { "pattern": "^[A-Za-z]:" },
-          { "pattern": "(^|[/\\\\])\\.\\.([/\\\\]|$)" }
+          {
+            "pattern": "^[/\\\\]"
+          },
+          {
+            "pattern": "^[A-Za-z]:"
+          },
+          {
+            "pattern": "(^|[/\\\\])\\.\\.([/\\\\]|$)"
+          }
         ]
       }
     },
     "support": {
       "type": "object",
-      "required": ["level"],
+      "required": [
+        "level"
+      ],
       "properties": {
-        "level": { "enum": ["verified", "experimental", "unsupported"] },
-        "reason": { "type": "string", "minLength": 1 },
-        "evidenceId": { "type": "string", "minLength": 1 }
-      }
+        "level": {
+          "enum": [
+            "supported",
+            "unsupported"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
     }
   },
   "allOf": [
     {
       "if": {
-        "properties": { "schemaVersion": { "const": 2 } },
-        "required": ["schemaVersion"]
+        "properties": {
+          "schemaVersion": {
+            "const": 2
+          }
+        },
+        "required": [
+          "schemaVersion"
+        ]
       },
       "then": {
-        "required": ["account", "normalState", "concurrency", "support"],
+        "required": [
+          "account",
+          "normalState",
+          "concurrency",
+          "support"
+        ],
         "properties": {
           "isolation": {
-            "required": ["strategy", "mode"],
+            "required": [
+              "strategy",
+              "mode"
+            ],
             "properties": {
-              "strategy": { "const": "accountOverlay" }
+              "strategy": {
+                "const": "accountOverlay"
+              },
+              "shareFromRealHome": false
             }
-          }
+          },
+          "share": false,
+          "session": false,
+          "status": false
+        }
+      },
+      "else": {
+        "properties": {
+          "account": false,
+          "normalState": false,
+          "concurrency": false,
+          "support": false
         }
       }
     }

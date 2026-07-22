@@ -1,18 +1,24 @@
-# Normalize all text files to LF in the repo, auto-detect text vs binary.
+# Normalize line endings by file type.
 * text=auto
 
-# Shell scripts must be LF so the shebang and shellcheck work on Linux/macOS CI.
+# POSIX entrypoints and test sources.
 *.sh text eol=lf
-
-# The extensionless launcher is a bash script -- force LF.
+*.bash text eol=lf
+*.bats text eol=lf
 multi-cli text eol=lf
 
-# PowerShell stays CRLF (Windows-native).
+# Windows-native scripts and modules.
 *.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.psd1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
 
-# Sensible text defaults.
-*.json text
-*.md   text
+# Portable text formats.
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
 
-# Binary assets -- never touch line endings.
+# Binary assets.
 *.icns binary

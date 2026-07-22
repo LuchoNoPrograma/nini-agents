@@ -4,15 +4,34 @@
   "displayName": "Google Antigravity IDE",
   "kind": "ide",
   "binary": {
-    "windows": ["%LOCALAPPDATA%\\Programs\\Antigravity\\Antigravity.exe", "antigravity"],
-    "macos": ["/Applications/Antigravity.app/Contents/MacOS/Antigravity", "$HOME/Applications/Antigravity.app/Contents/MacOS/Antigravity"],
-    "linux": ["/usr/bin/antigravity", "/opt/Antigravity/antigravity", "$HOME/.local/bin/antigravity"]
+    "windows": [
+      "%LOCALAPPDATA%\\Programs\\Antigravity\\Antigravity.exe",
+      "antigravity"
+    ],
+    "macos": [
+      "/Applications/Antigravity.app/Contents/MacOS/Antigravity",
+      "$HOME/Applications/Antigravity.app/Contents/MacOS/Antigravity"
+    ],
+    "linux": [
+      "/usr/bin/antigravity",
+      "/opt/Antigravity/antigravity",
+      "$HOME/.local/bin/antigravity"
+    ]
   },
-  "isolation": { "strategy": "accountOverlay", "mode": "detached", "env": {}, "clearEnv": [] },
+  "isolation": {
+    "strategy": "accountOverlay",
+    "mode": "detached",
+    "env": {},
+    "clearEnv": []
+  },
   "account": {
     "mechanism": "osUserCredentialStore",
     "credentialFiles": [],
-    "credentialPrecedence": ["Windows gemini:antigravity", "macOS gemini/antigravity", "Linux service=gemini username=antigravity"],
+    "credentialPrecedence": [
+      "Windows gemini:antigravity",
+      "macOS gemini/antigravity",
+      "Linux service=gemini username=antigravity"
+    ],
     "logoutScope": "osUser"
   },
   "normalState": {
@@ -24,14 +43,31 @@
     "sharedPaths": [],
     "sessionPaths": [],
     "filePaths": [],
-    "unsafePaths": ["User/globalStorage/storage.json", "User/globalStorage/state.vscdb"]
+    "unsafePaths": [
+      "User/globalStorage/storage.json",
+      "User/globalStorage/state.vscdb"
+    ]
   },
-  "concurrency": { "level": "singleWriter", "singletonScope": "osUser" },
+  "concurrency": {
+    "level": "singleWriter",
+    "singletonScope": "osUser"
+  },
   "support": {
-    "windows": { "level": "experimental", "reason": "Fixed keychain identity requires owned OS-user isolation; current Antigravity 2.0 GUI E2E is pending." },
-    "macos": { "level": "unsupported", "reason": "Fixed Keychain identity and GUI process isolation are not implemented." },
-    "linux": { "level": "unsupported", "reason": "Fixed Secret Service identity and GUI process isolation are not implemented." }
+    "windows": {
+      "level": "supported",
+      "reason": "OS-user isolation; elevated terminal required (fixed gemini/antigravity keychain)"
+    },
+    "macos": {
+      "level": "unsupported",
+      "reason": "Owned-user macOS GUI login and Keychain isolation are not yet proven by a real logged-in desktop session."
+    },
+    "linux": {
+      "level": "unsupported",
+      "reason": "Owned-user Linux GUI and Secret Service sessions are not yet implemented and verified."
+    }
   },
   "install": "https://antigravity.google.com/",
-  "versionCommand": ["--version"]
+  "versionCommand": [
+    "--version"
+  ]
 }

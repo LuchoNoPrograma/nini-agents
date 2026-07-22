@@ -82,7 +82,7 @@ migration_match_declared() {
 migration_is_meta_entry() {
   local rel="$1"
   case "$rel" in
-    .shared|.cli|.profile.json|.runtime|auth) return 0 ;;
+    .shared|.cli|.profile.json|.runtime|.isolated|auth) return 0 ;;
     "$MIGRATION_JOURNAL_NAME"*) return 0 ;;
   esac
   return 1

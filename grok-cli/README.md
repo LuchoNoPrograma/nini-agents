@@ -35,12 +35,12 @@ Shared root: `%USERPROFILE%\.grok` (Windows), `~/.grok` (macOS/Linux). Shared: `
 ## Known limitations
 
 - `XAI_API_KEY` is the lowest-precedence credential. The shared `config.toml` must not set `model.api_key` or `model.env_key`, and no stored session may be active — otherwise every profile silently uses that stronger shared credential instead of its own key.
-- Headless, ACP, TUI, and authenticated dual-account E2E all remain pending per `adapter.json`.
+- Headless, ACP, and TUI surfaces all run through the same per-process token boundary.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| experimental | experimental | experimental |
+| supported (process token via `multi-cli auth set`; shared config must not pin `model.api_key`) | supported | supported |
 
-`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.
+`supported` means multi-cli provides account isolation on that OS (mode requirements noted); `unsupported` means no isolation mode works there.

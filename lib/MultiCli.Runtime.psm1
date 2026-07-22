@@ -129,58 +129,95 @@ function Remove-RuntimeOverlay {
     Remove-Item -LiteralPath $RuntimeRoot -Recurse -Force
 }
 
-# Build the overlay in a PID-unique staging dir (sweeping stale stagings from
-# crashed runs) and swap it into place. Returns the runtime root. Throws on a
-# hostile staging reparse point instead of removing it.
+function Get-RuntimeManifestLines {
+    param($Adapter)
+    $normalState = Get-RuntimeProperty -Object $Adapter -Name 'normalState'
+    $account = Get-RuntimeProperty -Object $Adapter -Name 'account'
+    $stateSubdir = Get-RuntimeProperty -Object $normalState -Name 'runtimeSubdir'
+    return @($normalState.sharedPaths) + @($normalState.sessionPaths) + @($account.credentialFiles) |
+        Where-Object { $_ } | ForEach-Object { if ($stateSubdir) { "$stateSubdir/$_" } else { $_ } }
+}
+
+function Test-RuntimeOverlayCurrent {
+    param($Adapter, [string]$RuntimeRoot)
+    $manifestPath = Join-Path $RuntimeRoot '.runtime-manifest'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return $false }
+    $expected = @(Get-RuntimeManifestLines -Adapter $Adapter)
+    $actual = @(Get-Content -LiteralPath $manifestPath)
+    if (($expected -join "`n") -ne ($actual -join "`n")) { return $false }
+    foreach ($relativePath in $expected) {
+        if (-not (Test-Path -LiteralPath (Join-Path $RuntimeRoot ($relativePath -replace '/', '\')))) { return $false }
+    }
+    return $true
+}
+
+function Get-RuntimeMutexName {
+    param([string]$ProfileDir)
+    $bytes = [Text.Encoding]::UTF8.GetBytes([System.IO.Path]::GetFullPath($ProfileDir).ToLowerInvariant())
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $hash = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '') } finally { $sha.Dispose() }
+    return "Local\MultiCliRuntime_$hash"
+}
+
+# Serialize builds across processes. A current overlay is reused so launching a
+# second process never removes the runtime tree from beneath the first.
 function New-RuntimeOverlay {
+    param($Adapter, [string]$ProfileDir)
+    $mutex = New-Object Threading.Mutex($false, (Get-RuntimeMutexName -ProfileDir $ProfileDir))
+    $hasLock = $false
+    try {
+        try { $hasLock = $mutex.WaitOne([TimeSpan]::FromSeconds(30)) }
+        catch [Threading.AbandonedMutexException] { $hasLock = $true }
+        if (-not $hasLock) { throw "Timed out waiting for the profile runtime lock. Close a stuck multi-cli launch and retry." }
+        return New-RuntimeOverlayLocked -Adapter $Adapter -ProfileDir $ProfileDir
+    } finally {
+        if ($hasLock) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+
+function New-RuntimeOverlayLocked {
     param($Adapter, [string]$ProfileDir)
     $sharedRoot = Get-RuntimePlatformRoot -Adapter $Adapter
     New-Item -ItemType Directory -Force -Path $sharedRoot | Out-Null
     $runtimeRoot = Join-Path $ProfileDir '.runtime'
+    if (Test-RuntimeOverlayCurrent -Adapter $Adapter -RuntimeRoot $runtimeRoot) { return $runtimeRoot }
     $stagingRoot = "$runtimeRoot.staging.$PID"
     $normalState = Get-RuntimeProperty -Object $Adapter -Name 'normalState'
-    $linkRoot = $stagingRoot
     $stateSubdir = Get-RuntimeProperty -Object $normalState -Name 'runtimeSubdir'
-    if ($stateSubdir) { $linkRoot = Join-Path $stagingRoot ($stateSubdir -replace '/', '\') }
-    # Sweep staging leftovers from other processes only; this process's own
-    # staging root is inspected below so a hostile reparse point is refused
-    # instead of silently removed.
+    $linkRoot = if ($stateSubdir) { Join-Path $stagingRoot ($stateSubdir -replace '/', '\') } else { $stagingRoot }
     foreach ($stale in Get-ChildItem -LiteralPath $ProfileDir -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '.runtime.staging.*' -and $_.FullName -ne $stagingRoot }) {
         Remove-RuntimeOverlay -Adapter $Adapter -RuntimeRoot $stale.FullName
     }
     if (Test-Path -LiteralPath $stagingRoot) {
         $stagingItem = Get-Item -LiteralPath $stagingRoot -Force
-        if ($stagingItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
-            throw "Refusing to build overlay: '$stagingRoot' is a reparse point."
-        }
+        if ($stagingItem.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Refusing to build overlay: '$stagingRoot' is a reparse point." }
         Remove-RuntimeOverlay -Adapter $Adapter -RuntimeRoot $stagingRoot
     }
     New-Item -ItemType Directory -Force -Path $linkRoot | Out-Null
+    Add-RuntimeStateLinks -Adapter $Adapter -ProfileDir $ProfileDir -SharedRoot $sharedRoot -LinkRoot $linkRoot
+    Set-Content -LiteralPath (Join-Path $stagingRoot '.runtime-manifest') -Value @(Get-RuntimeManifestLines -Adapter $Adapter) -Encoding ASCII
+    Remove-RuntimeOverlay -Adapter $Adapter -RuntimeRoot $runtimeRoot
+    Move-Item -LiteralPath $stagingRoot -Destination $runtimeRoot
+    return $runtimeRoot
+}
 
+function Add-RuntimeStateLinks {
+    param($Adapter, [string]$ProfileDir, [string]$SharedRoot, [string]$LinkRoot)
+    $normalState = Get-RuntimeProperty -Object $Adapter -Name 'normalState'
     foreach ($relativePath in @($normalState.sharedPaths) + @($normalState.sessionPaths)) {
         if (-not $relativePath) { continue }
-        $source = New-RuntimeStateSource -Adapter $Adapter -SharedRoot $sharedRoot -RelativePath $relativePath
-        $destination = Join-Path $linkRoot ($relativePath -replace '/', '\')
-        New-RuntimeLink -Source $source -Destination $destination -Label 'shared state'
+        $source = New-RuntimeStateSource -Adapter $Adapter -SharedRoot $SharedRoot -RelativePath $relativePath
+        New-RuntimeLink -Source $source -Destination (Join-Path $LinkRoot ($relativePath -replace '/', '\')) -Label 'shared state'
     }
-
     $account = Get-RuntimeProperty -Object $Adapter -Name 'account'
     foreach ($relativePath in @($account.credentialFiles)) {
         if (-not $relativePath) { continue }
         $source = Join-Path (Join-Path $ProfileDir 'auth') ($relativePath -replace '/', '\')
-        $sourceParent = Split-Path -Parent $source
-        New-Item -ItemType Directory -Force -Path $sourceParent | Out-Null
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $source) | Out-Null
         if (-not (Test-Path -LiteralPath $source)) { New-Item -ItemType File -Force -Path $source | Out-Null }
-        $destination = Join-Path $linkRoot ($relativePath -replace '/', '\')
-        New-RuntimeLink -Source $source -Destination $destination -Label 'profile credential'
+        New-RuntimeLink -Source $source -Destination (Join-Path $LinkRoot ($relativePath -replace '/', '\')) -Label 'profile credential'
     }
-
-    $manifestLines = @($normalState.sharedPaths) + @($normalState.sessionPaths) + @($account.credentialFiles) | Where-Object { $_ } | ForEach-Object { if ($stateSubdir) { "$stateSubdir/$_" } else { $_ } }
-    Set-Content -LiteralPath (Join-Path $stagingRoot '.runtime-manifest') -Value $manifestLines -Encoding ASCII
-
-    Remove-RuntimeOverlay -Adapter $Adapter -RuntimeRoot $runtimeRoot
-    Move-Item -LiteralPath $stagingRoot -Destination $runtimeRoot
-    return $runtimeRoot
 }
 
 # Expand the six adapter placeholders against the concrete launch-time paths.
@@ -212,14 +249,15 @@ function Get-ProfileCredentialTarget {
 # Plan one accountOverlay launch. fileOverlay builds the per-profile runtime
 # view; processSecret reads the profile's secret from Credential Manager and
 # injects it into the child environment only (fail-closed until auth set);
-# osUserCredentialStore and inseparable refuse by design.
+# osUserCredentialStore launches through the OS-user module (MultiCli.OsUser);
+# inseparable refuses by design.
 function Get-AccountOverlayLaunchPlan {
     param($Adapter, [string]$ProfileDir, [string]$Binary, [string[]]$BinaryArgs)
     switch ($Adapter.account.mechanism) {
         'fileOverlay' { }
         'processSecret' { }
-        'osUserCredentialStore' { throw "Profile '$($Adapter.id)/$(Split-Path $ProfileDir -Leaf)' requires an owned OS-user credential context; this platform implementation is not enabled yet." }
-        'inseparable' { throw "$($Adapter.account.reason) Use a legacy-isolated profile until the vendor exposes a safe account boundary." }
+        'osUserCredentialStore' { throw "Profile '$($Adapter.id)/$(Split-Path $ProfileDir -Leaf)' uses the OS-user runtime; it must launch through Invoke-OsUserLaunch, not a process launch plan." }
+        'inseparable' { throw "$($Adapter.account.reason) Create this profile with --isolated to use a separate whole-root profile." }
         default { throw "Unsupported schema-v2 account mechanism '$($Adapter.account.mechanism)'." }
     }
     $metadata = Get-Content -LiteralPath (Join-Path $ProfileDir '.profile.json') -Raw | ConvertFrom-Json

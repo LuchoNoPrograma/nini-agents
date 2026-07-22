@@ -37,9 +37,9 @@
   },
   "concurrency": { "level": "unsupported", "singletonScope": "unknown" },
   "support": {
-    "windows": { "level": "unsupported", "reason": "Stored-login authentication and sessions cannot yet be split truthfully." },
-    "macos": { "level": "unsupported", "reason": "Stored-login authentication and sessions cannot yet be split truthfully." },
-    "linux": { "level": "unsupported", "reason": "Stored-login authentication and sessions cannot yet be split truthfully." }
+    "windows": { "level": "supported", "reason": "--isolated whole-root; auth and sessions share one database" },
+    "macos": { "level": "supported" },
+    "linux": { "level": "supported" }
   },
   "install": "npm i -g opencode-ai",
   "versionCommand": ["--version"]

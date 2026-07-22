@@ -77,9 +77,9 @@ function New-TransferAdapter {
         }
         concurrency = [ordered]@{ level = 'multiWriter'; singletonScope = 'none' }
         support = [ordered]@{
-            windows = [ordered]@{ level = 'experimental'; reason = 'Fixture only.' }
-            macos = [ordered]@{ level = 'experimental'; reason = 'Fixture only.' }
-            linux = [ordered]@{ level = 'experimental'; reason = 'Fixture only.' }
+            windows = [ordered]@{ level = 'supported'; reason = 'Fixture only.' }
+            macos = [ordered]@{ level = 'supported'; reason = 'Fixture only.' }
+            linux = [ordered]@{ level = 'supported'; reason = 'Fixture only.' }
         }
     }
     return ($adapter | ConvertTo-Json -Depth 12 | ConvertFrom-Json)
@@ -264,7 +264,7 @@ Describe 'schema-v2 transfer safety' {
         } finally { Remove-TransferScratch $scratch }
     }
 
-    It 'template from another adapter is refused at apply time' {
+    It 'template validation refuses foreign adapters and tampered payload paths' {
         $scratch = New-TransferScratch
         try {
             $adapter = New-TransferAdapter
@@ -273,12 +273,22 @@ Describe 'schema-v2 transfer safety' {
             $profile = Initialize-TransferProfile -Scratch $scratch -Adapter $adapter -Name 'account-a' -SharedRoot $shared
             $templates = Join-Path $scratch.Profiles '.templates'
             Save-MultiCliTemplate -Adapter $adapter -ProfileDir $profile -TemplatesRoot $templates -Name 'mytpl'
+            $template = Join-Path $templates 'mytpl'
 
-            $message = Get-ThrownMessage { Assert-TransferTemplateCompatible -TemplateDir (Join-Path $templates 'mytpl') -Adapter $other }
-
+            $message = Get-ThrownMessage { Assert-TransferTemplateCompatible -TemplateDir $template -Adapter $other }
             $message | Should Not BeNullOrEmpty
             ($message.Contains("cannot be applied to 'fixture2'")) | Should Be $true
-            { Assert-TransferTemplateCompatible -TemplateDir (Join-Path $templates 'mytpl') -Adapter $adapter } | Should Not Throw
+            { Assert-TransferTemplateCompatible -TemplateDir $template -Adapter $adapter } | Should Not Throw
+
+            New-Item -ItemType Directory -Force -Path (Join-Path $template 'auth') | Out-Null
+            Set-Content -LiteralPath (Join-Path $template 'auth\auth.json') -Value '{"token":"sk-injected"}' -Encoding ASCII
+            $message = Get-ThrownMessage { Assert-TransferTemplateCompatible -TemplateDir $template -Adapter $adapter }
+            ($message.Contains("forbidden path 'auth'")) | Should Be $true
+            Remove-Item -LiteralPath (Join-Path $template 'auth') -Recurse -Force
+
+            Set-Content -LiteralPath (Join-Path $template 'random.txt') -Value 'undeclared' -Encoding ASCII
+            $message = Get-ThrownMessage { Assert-TransferTemplateCompatible -TemplateDir $template -Adapter $adapter }
+            ($message.Contains("undeclared path 'random.txt'")) | Should Be $true
         } finally { Remove-TransferScratch $scratch }
     }
 
@@ -309,14 +319,13 @@ Describe 'schema-v2 transfer safety' {
             $destination = Join-Path $scratch.Profiles 'fixture\account-b'
             Import-MultiCliProfile -Adapter $adapter -ArchivePath $archive -DestinationDir $destination
 
-            ((Get-Content -LiteralPath (Join-Path $destination 'config.toml') -Raw).Trim()) | Should Be 'model = "gpt-5"'
-            (Test-Path -LiteralPath (Join-Path $destination 'agents\reviewer.md')) | Should Be $true
+            ((Get-Content -LiteralPath (Join-Path $shared 'config.toml') -Raw).Trim()) | Should Be 'model = "gpt-5"'
+            (Test-Path -LiteralPath (Join-Path $shared 'agents\reviewer.md')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $destination 'config.toml')) | Should Be $false
             (Test-Path -LiteralPath (Join-Path $destination 'sessions')) | Should Be $false
             (Test-Path -LiteralPath (Join-Path $destination 'history.jsonl')) | Should Be $false
             (Test-Path -LiteralPath (Join-Path $destination '.runtime')) | Should Be $false
             (Test-Path -LiteralPath (Join-Path $destination '.multicli-manifest.json')) | Should Be $false
-            $links = @(Get-ChildItem -LiteralPath $destination -Recurse -Force | Where-Object { $_.Attributes -band [System.IO.FileAttributes]::ReparsePoint })
-            $links.Count | Should Be 0
             # a fresh stable identity is generated; the exported one is never reused
             $metadata = Get-Content -LiteralPath (Join-Path $destination '.profile.json') -Raw | ConvertFrom-Json
             $metadata.schemaVersion | Should Be 2
@@ -327,6 +336,35 @@ Describe 'schema-v2 transfer safety' {
             # credential placeholders are recreated empty; exported secrets never cross
             $placeholder = Get-Item -LiteralPath (Join-Path $destination 'auth\auth.json')
             $placeholder.Length | Should Be 0
+        } finally { Remove-TransferScratch $scratch }
+    }
+
+    It 'isolated export and import preserve profile-local state and isolation mode' {
+        $scratch = New-TransferScratch
+        try {
+            $adapter = New-TransferAdapter
+            $profile = Join-Path $scratch.Profiles 'fixture\iso-a'
+            New-Item -ItemType Directory -Force -Path (Join-Path $profile 'agents') | Out-Null
+            Set-Content -LiteralPath (Join-Path $profile 'config.toml') -Value 'isolated-config' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $profile 'agents\reviewer.md') -Value 'isolated-agent' -Encoding ASCII
+            [ordered]@{ schemaVersion = 2; adapterId = 'fixture'; profileId = [guid]::NewGuid().ToString(); mode = 'isolated' } |
+                ConvertTo-Json | Set-Content -LiteralPath (Join-Path $profile '.profile.json') -Encoding UTF8
+            New-Item -ItemType File -Path (Join-Path $profile '.isolated') | Out-Null
+            $shared = Join-Path $scratch.UserHome '.fixture'
+            New-Item -ItemType Directory -Force -Path $shared | Out-Null
+            Set-Content -LiteralPath (Join-Path $shared 'config.toml') -Value 'native-must-not-travel' -Encoding ASCII
+            $archive = Join-Path $scratch.Root 'isolated.zip'
+
+            Export-MultiCliProfile -Adapter $adapter -ProfileDir $profile -OutPath $archive -ProfileName 'iso-a'
+            $destination = Join-Path $scratch.Profiles 'fixture\iso-b'
+            Import-MultiCliProfile -Adapter $adapter -ArchivePath $archive -DestinationDir $destination
+
+            ((Get-Content -LiteralPath (Join-Path $destination 'config.toml') -Raw).Trim()) | Should Be 'isolated-config'
+            ((Get-Content -LiteralPath (Join-Path $shared 'config.toml') -Raw).Trim()) | Should Be 'native-must-not-travel'
+            (Test-Path -LiteralPath (Join-Path $destination '.isolated')) | Should Be $true
+            $metadata = Get-Content -LiteralPath (Join-Path $destination '.profile.json') -Raw | ConvertFrom-Json
+            $metadata.mode | Should Be 'isolated'
+            $metadata.adapterId | Should Be 'fixture'
         } finally { Remove-TransferScratch $scratch }
     }
 
@@ -363,7 +401,7 @@ Describe 'schema-v2 transfer safety' {
             $symlinkMode = [int](2717847552L - 4294967296L)
             $archive = Join-Path $scratch.Root 'hostile-symlink.zip'
             New-HostileZip -Path $archive -Entries @(
-                @{ Name = 'sneaky-link.txt'; Content = ''; ExternalAttributes = $symlinkMode },
+                @{ Name = 'agents/sneaky-link.txt'; Content = ''; ExternalAttributes = $symlinkMode },
                 (Get-StagedManifestEntry -AdapterId 'fixture')
             )
             $destination = Join-Path $scratch.Profiles 'fixture\evil-symlink'
@@ -447,7 +485,7 @@ Describe 'schema-v2 transfer safety' {
             $archive = Join-Path $scratch.Root 'secret.zip'
             New-HostileZip -Path $archive -Entries @(
                 @{ Name = 'config.toml'; Content = 'model = "gpt-5"' },
-                @{ Name = 'notes.md'; Content = 'Authorization: Bearer abc123' },
+                @{ Name = 'agents/notes.md'; Content = 'Authorization: Bearer abc123' },
                 (Get-StagedManifestEntry -AdapterId 'fixture')
             )
             $destination = Join-Path $scratch.Profiles 'fixture\secret'

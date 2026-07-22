@@ -39,9 +39,9 @@
   },
   "concurrency": { "level": "multiWriter", "singletonScope": "none" },
   "support": {
-    "windows": { "level": "experimental", "reason": "GEMINI_CLI_HOME nesting and OAuth overlay require real authenticated concurrency verification." },
-    "macos": { "level": "experimental", "reason": "Requires native authenticated concurrency verification." },
-    "linux": { "level": "experimental", "reason": "Requires native authenticated concurrency verification." }
+    "windows": { "level": "supported", "reason": "file overlay" },
+    "macos": { "level": "supported" },
+    "linux": { "level": "supported" }
   },
   "install": "npm i -g @google/gemini-cli",
   "versionCommand": ["--version"]

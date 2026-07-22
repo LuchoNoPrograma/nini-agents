@@ -6,13 +6,17 @@
   One documented command:
       powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-pester.ps1
 
-  Discovers the Pester *.Tests.ps1 files in this directory and runs them. Exits
-  non-zero only if a test FAILS (Inconclusive/Skipped/Pending do not fail the
-  build), so it doubles as a CI gate. Requires Pester 3.x (>=3.4, <4); the suite
-  uses Pester 3.x assertion syntax that Pester 5 does not support.
+  Discovers the hermetic Pester *.Tests.ps1 files in this directory and runs
+  them. The opt-in RealWorldE2E suite is excluded because missing vendor
+  binaries must not count as a passing CI gate. -CI additionally fails when
+  any test is skipped, pending, or inconclusive. Requires Pester 3.x (>=3.4,
+  <4).
 #>
 
-param([switch]$CI)
+param(
+    [switch]$CI,
+    [string[]]$Path
+)
 
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Definition
@@ -30,14 +34,21 @@ if (-not $pesterVersion -or $pesterVersion.Major -ne 3) {
 }
 Write-Host "Using Pester $pesterVersion"
 
-$testFiles = Get-ChildItem -Path $here -Filter '*.Tests.ps1' | ForEach-Object { $_.FullName }
+if ($Path) {
+    $testFiles = @($Path | ForEach-Object {
+        if ([System.IO.Path]::IsPathRooted($_)) { $_ } else { Join-Path $here $_ }
+    })
+} else {
+    $testFiles = Get-ChildItem -Path $here -Filter '*.Tests.ps1' |
+        Where-Object { $_.Name -ne 'RealWorldE2E.Tests.ps1' } |
+        ForEach-Object { $_.FullName }
+}
 
-# Fail the build ONLY on real failures. Inconclusive/Skipped/Pending (the
-# symlink tests on hosts without symlink privilege) must not fail CI.
 $result = Invoke-Pester -Path $testFiles -PassThru
 $failed = $result.FailedCount
+$unexecuted = $result.SkippedCount + $result.PendingCount + $result.InconclusiveCount
 
-if ($failed -gt 0) { exit 1 }
+if ($failed -gt 0 -or ($CI -and $unexecuted -gt 0)) { exit 1 }
 
 # Sweep temp def files this run dot-sourced (one per child PowerShell that imported
 # the launcher). Best-effort; never fail the run on cleanup.

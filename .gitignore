@@ -19,7 +19,7 @@ tests/coverage/out/
 
 # Local test output and evidence (never commit profiles, logs, or artifacts)
 vendor-evidence/
-tests/e2e/evidence/
+tests/e2e/evidence*/
 coverage-out*.txt
 *-fail*.json
 pester-*-result.json
@@ -31,3 +31,11 @@ pending/
 
 # PowerShell parser cache written when modules are analyzed in the repo root
 ModuleAnalysisCache
+
+# Local work log and orchestration state — never commit
+track.md
+.claude/
+GATELOG.md
+PENDING-WORK.md
+PROMPTS.txt
+ROADMAP.md

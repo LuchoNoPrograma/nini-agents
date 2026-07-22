@@ -111,11 +111,32 @@ function Get-TransferLinkTarget {
     return Get-TransferCanonical -Path @(Get-TransferProperty -Object $item -Name 'Target')[0]
 }
 
-# Where the profile resolves a declared shared path to: the overlay view when
-# it exists, otherwise the native shared root; $null when neither exists.
+# Read the profile mode from schema-v2 metadata. Missing or malformed metadata
+# is treated as the ordinary account-overlay mode for backward compatibility.
+function Get-TransferProfileMode {
+    param([string]$ProfileDir)
+    $metadataPath = Join-Path $ProfileDir '.profile.json'
+    if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) { return 'accountOverlay' }
+    try {
+        $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+        if ($metadata.mode -eq 'isolated') { return 'isolated' }
+    } catch { }
+    return 'accountOverlay'
+}
+
+# Where the profile resolves a declared shared path to. Isolated profiles read
+# their own root; ordinary profiles read the runtime view or native shared root.
 function Get-TransferProfileSource {
-    param([string]$ProfileDir, [string]$RelativePath, [string]$SharedRoot)
+    param($Adapter, [string]$ProfileDir, [string]$RelativePath, [string]$SharedRoot)
     $windowsRelative = $RelativePath -replace '/', '\'
+    if ((Get-TransferProfileMode -ProfileDir $ProfileDir) -eq 'isolated') {
+        $normalState = Get-TransferProperty -Object $Adapter -Name 'normalState'
+        $runtimeSubdir = Get-TransferProperty -Object $normalState -Name 'runtimeSubdir'
+        $stateRoot = if ($runtimeSubdir) { Join-Path $ProfileDir ($runtimeSubdir -replace '/', '\') } else { $ProfileDir }
+        $candidate = Join-Path $stateRoot $windowsRelative
+        if (Test-Path -LiteralPath $candidate) { return $candidate }
+        return $null
+    }
     $candidate = Join-Path (Join-Path $ProfileDir '.runtime') $windowsRelative
     if (Test-Path -LiteralPath $candidate) { return $candidate }
     $candidate = Join-Path $SharedRoot $windowsRelative
@@ -139,21 +160,29 @@ function Resolve-TransferTopPath {
     return $target
 }
 
-# True when a text file below the scan cap matches a secret-shaped pattern;
-# oversized and binary files are never scanned (and never match).
-function Test-TransferFileSecret {
+# Return why a file cannot cross the transfer boundary, or $null when its full
+# text content is small enough to scan and contains no secret-shaped pattern.
+function Get-TransferFileRefusal {
     param([string]$Path)
     $info = Get-Item -LiteralPath $Path -Force
-    if ($info.Length -gt $script:TransferSecretScanMaxBytes) { return $false }
-    $stream = [System.IO.File]::OpenRead($Path)
+    if ($info.Length -gt $script:TransferSecretScanMaxBytes) {
+        return "is larger than the $($script:TransferSecretScanMaxBytes)-byte secret-scan limit"
+    }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes -contains 0) { return 'is binary and cannot be secret-scanned safely' }
     try {
-        $buffer = New-Object byte[] 8192
-        $read = $stream.Read($buffer, 0, $buffer.Length)
-        for ($i = 0; $i -lt $read; $i++) {
-            if ($buffer[$i] -eq 0) { return $false }
-        }
-    } finally { $stream.Dispose() }
-    return $script:TransferSecretPattern.IsMatch([System.IO.File]::ReadAllText($Path))
+        $utf8 = New-Object System.Text.UTF8Encoding($false, $true)
+        $text = $utf8.GetString($bytes)
+    } catch [System.Text.DecoderFallbackException] {
+        return 'is binary and cannot be secret-scanned safely'
+    }
+    if ($script:TransferSecretPattern.IsMatch($text)) { return 'looks like it contains a secret (credential pattern match)' }
+    return $null
+}
+
+function Test-TransferFileSecret {
+    param([string]$Path)
+    return $null -ne (Get-TransferFileRefusal -Path $Path)
 }
 
 # Append every regular file under a resolved declared path to the plan. Links
@@ -186,8 +215,9 @@ function Add-TransferPlanEntry {
     # overlay mechanism itself and are copied as content.
     $linkType = Get-TransferProperty -Object $item -Name 'LinkType'
     if (-not $IsTop -and $linkType -eq 'HardLink') { return }
-    if (Test-TransferFileSecret -Path $Source) {
-        throw "Cannot ${Action}: '$relative' looks like it contains a secret (credential pattern match). Remove the secret from shared state and retry."
+    $refusal = Get-TransferFileRefusal -Path $Source
+    if ($refusal) {
+        throw "Cannot ${Action}: '$relative' $refusal. Remove it from shared state or replace it with inspectable non-secret text, then retry."
     }
     $Plan.Add([pscustomobject]@{ Relative = $relative; Source = $Source })
 }
@@ -204,7 +234,7 @@ function Get-TransferPlan {
         if (-not $relativePath) { continue }
         if (Test-TransferSessionPath -Adapter $Adapter -RelativePath $relativePath) { continue }
         if (Test-TransferCredentialPath -Adapter $Adapter -RelativePath $relativePath) { continue }
-        $source = Get-TransferProfileSource -ProfileDir $ProfileDir -RelativePath $relativePath -SharedRoot $SharedRoot
+        $source = Get-TransferProfileSource -Adapter $Adapter -ProfileDir $ProfileDir -RelativePath $relativePath -SharedRoot $SharedRoot
         if (-not $source) { continue }
         $resolved = Resolve-TransferTopPath -Path $source -RelativePath $relativePath -SharedRoot $SharedRoot -ProfileDir $ProfileDir -Action $Action
         Add-TransferPlanEntry -Source $resolved -RelativePath $relativePath -Adapter $Adapter -Action $Action -IsTop $true -AllowedShared $allowedShared -AllowedProfile $allowedProfile -Plan $plan
@@ -222,6 +252,14 @@ function Write-TransferPlan {
         if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
         Copy-Item -LiteralPath $entry.Source -Destination $target -Force
     }
+}
+
+function Get-TransferIsolatedStateRoot {
+    param($Adapter, [string]$ProfileDir)
+    $normalState = Get-TransferProperty -Object $Adapter -Name 'normalState'
+    $runtimeSubdir = Get-TransferProperty -Object $normalState -Name 'runtimeSubdir'
+    if ($runtimeSubdir) { return Join-Path $ProfileDir ($runtimeSubdir -replace '/', '\') }
+    return $ProfileDir
 }
 
 # Write the transport manifest (adapter id, name, kind) that import and
@@ -281,7 +319,40 @@ function Save-MultiCliTemplate {
     Move-Item -LiteralPath $staging -Destination $destination
 }
 
-# Throw unless the template was saved from the same adapter it is applied to.
+# Return every regular template file except its transport manifest, refusing
+# links, credential/session/runtime paths, undeclared top-level paths, and any
+# content that cannot pass the secret scanner.
+function Get-TransferTemplatePlan {
+    param([string]$TemplateDir, $Adapter)
+    $plan = New-Object System.Collections.Generic.List[object]
+    $stack = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
+    $stack.Push((Get-Item -LiteralPath $TemplateDir -Force))
+    while ($stack.Count -gt 0) {
+        foreach ($item in (Get-ChildItem -LiteralPath $stack.Pop().FullName -Force)) {
+            $relative = $item.FullName.Substring($TemplateDir.Length).TrimStart('\', '/').Replace('\', '/')
+            if ($relative -eq $script:TransferManifestName) { continue }
+            if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                throw "Template '$(Split-Path -Leaf $TemplateDir)' contains link '$relative'; templates may contain only regular files and directories."
+            }
+            if ((Test-TransferCredentialPath -Adapter $Adapter -RelativePath $relative) -or
+                (Test-TransferSessionPath -Adapter $Adapter -RelativePath $relative) -or
+                $relative -eq '.runtime' -or $relative.StartsWith('.runtime/')) {
+                throw "Template '$(Split-Path -Leaf $TemplateDir)' contains forbidden path '$relative'."
+            }
+            if (-not (Test-TransferPayloadPath -Adapter $Adapter -RelativePath $relative)) {
+                throw "Template '$(Split-Path -Leaf $TemplateDir)' contains undeclared path '$relative'."
+            }
+            if ($item.PSIsContainer) { $stack.Push($item); continue }
+            $refusal = Get-TransferFileRefusal -Path $item.FullName
+            if ($refusal) { throw "Template '$(Split-Path -Leaf $TemplateDir)' file '$relative' $refusal." }
+            $plan.Add([pscustomobject]@{ Relative = $relative; Source = $item.FullName })
+        }
+    }
+    Write-Output -NoEnumerate $plan
+}
+
+# Throw unless a template belongs to this adapter and every payload entry is
+# safe. Returns the validated copy plan so callers never recurse blindly.
 function Assert-TransferTemplateCompatible {
     param([string]$TemplateDir, $Adapter)
     $templateName = Split-Path -Leaf $TemplateDir
@@ -292,6 +363,49 @@ function Assert-TransferTemplateCompatible {
     if ($manifest.adapterId -ne $Adapter.id) {
         throw "Template '$templateName' was saved from adapter '$($manifest.adapterId)' and cannot be applied to '$($Adapter.id)'. Save a new template from a '$($Adapter.id)' profile."
     }
+    return Get-TransferTemplatePlan -TemplateDir $TemplateDir -Adapter $Adapter
+}
+
+# Apply an already validated template to the actual state location used by the
+# selected mode: profile root for isolated, native shared root otherwise.
+function Apply-MultiCliTemplate {
+    param([string]$TemplateDir, $Adapter, [string]$ProfileDir, [switch]$Isolated)
+    $plan = Assert-TransferTemplateCompatible -TemplateDir $TemplateDir -Adapter $Adapter
+    $destination = if ($Isolated) { Get-TransferIsolatedStateRoot -Adapter $Adapter -ProfileDir $ProfileDir } else { Get-TransferSharedRoot -Adapter $Adapter }
+    New-Item -ItemType Directory -Force -Path $destination | Out-Null
+    Write-TransferPlan -Plan $plan -DestinationRoot $destination
+}
+
+# Replace only adapter-declared shared payload in the native shared root. The
+# staged import stays intact until all replacements succeed.
+function Install-TransferSharedState {
+    param($Adapter, [string]$Staging)
+    $sharedRoot = Get-TransferSharedRoot -Adapter $Adapter
+    New-Item -ItemType Directory -Force -Path $sharedRoot | Out-Null
+    $normalState = Get-TransferProperty -Object $Adapter -Name 'normalState'
+    foreach ($relativePath in @(Get-TransferProperty -Object $normalState -Name 'sharedPaths')) {
+        if (-not $relativePath) { continue }
+        $source = Join-Path $Staging ($relativePath -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $source)) { continue }
+        $destination = Join-Path $sharedRoot ($relativePath -replace '/', '\')
+        if (Test-Path -LiteralPath $destination) { Remove-Item -LiteralPath $destination -Recurse -Force }
+        $parent = Split-Path -Parent $destination
+        if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+        Move-Item -LiteralPath $source -Destination $destination
+    }
+}
+
+# Write fresh metadata without creating account-overlay credential placeholders.
+function Write-ImportedIsolatedMetadata {
+    param($Adapter, [string]$DestinationDir)
+    $metadata = [ordered]@{
+        schemaVersion = 2
+        adapterId = $Adapter.id
+        profileId = [guid]::NewGuid().ToString()
+        mode = 'isolated'
+    }
+    $metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $DestinationDir '.profile.json') -Encoding UTF8
+    New-Item -ItemType File -Force -Path (Join-Path $DestinationDir '.isolated') | Out-Null
 }
 
 # Write a .zip of the profile's shareable state plus transport metadata.
@@ -333,9 +447,22 @@ function ConvertTo-TransferEntryName {
     return $normalized.TrimEnd('/')
 }
 
-# Reject one archive entry name that is absolute, drive-qualified, carries an
-# alternate data stream, escapes via '..', is a credential, or is runtime
-# state. Empty/root entries are allowed.
+# True when an archive/template payload path is declared shared state, a child
+# of declared state, or a parent directory needed to contain a declared path.
+function Test-TransferPayloadPath {
+    param($Adapter, [string]$RelativePath)
+    $normalState = Get-TransferProperty -Object $Adapter -Name 'normalState'
+    foreach ($declared in @(Get-TransferProperty -Object $normalState -Name 'sharedPaths')) {
+        if (-not $declared) { continue }
+        if ($RelativePath -eq $declared -or $RelativePath.StartsWith("$declared/") -or $declared.StartsWith("$RelativePath/")) {
+            return $true
+        }
+    }
+    return $false
+}
+
+# Reject one archive entry name that is unsafe or outside the adapter-declared
+# shared-state allowlist. Empty/root and transport metadata entries are allowed.
 function Assert-TransferEntrySafe {
     param([string]$Name, $Adapter)
     if (-not $Name -or $Name -eq '.') { return }
@@ -356,6 +483,10 @@ function Assert-TransferEntrySafe {
     }
     if ($Name -eq '.runtime' -or $Name.StartsWith('.runtime/')) {
         throw "Refusing to import: archive entry '$Name' is disposable runtime state."
+    }
+    if ($Name -eq $script:TransferManifestName -or $Name -eq '.profile.json') { return }
+    if (-not (Test-TransferPayloadPath -Adapter $Adapter -RelativePath $Name)) {
+        throw "Refusing to import: archive entry '$Name' is not adapter-declared shared state."
     }
 }
 
@@ -449,22 +580,35 @@ function Import-MultiCliProfile {
         }
         foreach ($file in (Get-ChildItem -LiteralPath $staging -Recurse -Force -File)) {
             $relative = ($file.FullName.Substring($staging.Length).TrimStart('\') -replace '\\', '/')
-            if (Test-TransferFileSecret -Path $file.FullName) {
-                throw "Refusing to import: '$relative' looks like it contains a secret (credential pattern match)."
-            }
+            $refusal = Get-TransferFileRefusal -Path $file.FullName
+            if ($refusal) { throw "Refusing to import: '$relative' $refusal." }
         }
-        # The manifest is transport metadata, not profile content.
+        $archivedMode = 'accountOverlay'
+        $archivedMetadata = Join-Path $staging '.profile.json'
+        if (Test-Path -LiteralPath $archivedMetadata -PathType Leaf) {
+            try {
+                $mode = (Get-Content -LiteralPath $archivedMetadata -Raw | ConvertFrom-Json).mode
+                if ($mode -eq 'isolated') { $archivedMode = 'isolated' }
+            } catch { throw 'Refusing to import: archived profile metadata is invalid.' }
+            Remove-Item -LiteralPath $archivedMetadata -Force
+        }
         Remove-Item -LiteralPath (Join-Path $staging $script:TransferManifestName) -Force
         New-Item -ItemType Directory -Force -Path $DestinationDir | Out-Null
-        foreach ($item in (Get-ChildItem -LiteralPath $staging -Force)) {
-            Move-Item -LiteralPath $item.FullName -Destination $DestinationDir
+        if ($archivedMode -eq 'isolated') {
+            foreach ($item in (Get-ChildItem -LiteralPath $staging -Force)) {
+                Move-Item -LiteralPath $item.FullName -Destination $DestinationDir
+            }
+            Write-ImportedIsolatedMetadata -Adapter $Adapter -DestinationDir $DestinationDir
+        } else {
+            Install-TransferSharedState -Adapter $Adapter -Staging $staging
+            Initialize-RuntimeProfile -Adapter $Adapter -ProfileDir $DestinationDir
         }
+    } catch {
+        Remove-Item -LiteralPath $DestinationDir -Recurse -Force -ErrorAction SilentlyContinue
+        throw
     } finally {
         Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
     }
-    # Fresh stable identity and empty credential placeholders: the imported
-    # profile must authenticate again.
-    Initialize-RuntimeProfile -Adapter $Adapter -ProfileDir $DestinationDir
 }
 
-Export-ModuleMember -Function Save-MultiCliTemplate, Export-MultiCliProfile, Import-MultiCliProfile, Assert-TransferTemplateCompatible
+Export-ModuleMember -Function Save-MultiCliTemplate, Export-MultiCliProfile, Import-MultiCliProfile, Assert-TransferTemplateCompatible, Apply-MultiCliTemplate

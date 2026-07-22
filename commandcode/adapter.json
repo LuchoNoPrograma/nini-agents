@@ -4,42 +4,42 @@
   "displayName": "Command Code",
   "kind": "cli",
   "binary": {
-    "windows": ["%APPDATA%\\npm\\cmd.cmd", "%APPDATA%\\npm\\cmd", "cmd"],
-    "macos": ["/usr/local/bin/cmd", "$HOME/.npm-global/bin/cmd", "cmd"],
-    "linux": ["$HOME/.npm-global/bin/cmd", "/usr/local/bin/cmd", "cmd"]
+    "windows": ["%APPDATA%\\npm\\commandcode.cmd", "%APPDATA%\\npm\\commandcode", "commandcode"],
+    "macos": ["/usr/local/bin/commandcode", "$HOME/.npm-global/bin/commandcode", "commandcode"],
+    "linux": ["$HOME/.npm-global/bin/commandcode", "/usr/local/bin/commandcode", "commandcode"]
   },
   "isolation": {
     "strategy": "accountOverlay",
     "mode": "foreground",
     "env": {
-      "HOME": "{runtimeRoot}/_home",
-      "USERPROFILE": "{runtimeRoot}/_home"
+      "HOME": "{runtimeRoot}",
+      "USERPROFILE": "{runtimeRoot}"
     },
-    "clearEnv": []
+    "clearEnv": ["COMMAND_CODE_API_KEY"]
   },
   "account": {
-    "mechanism": "inseparable",
-    "credentialFiles": [],
-    "credentialPrecedence": [],
-    "logoutScope": "profile",
-    "reason": "The current product exposes only a whole-home boundary; exact disjoint auth and session paths require live verification."
+    "mechanism": "fileOverlay",
+    "credentialFiles": ["auth.json"],
+    "credentialPrecedence": ["COMMAND_CODE_API_KEY", ".commandcode/auth.json"],
+    "logoutScope": "profile"
   },
   "normalState": {
     "root": {
-      "windows": "%USERPROFILE%\\.commandcode",
-      "macos": "$HOME/.commandcode",
-      "linux": "$HOME/.commandcode"
+      "windows": "%USERPROFILE%",
+      "macos": "$HOME",
+      "linux": "$HOME"
     },
-    "sharedPaths": [],
-    "sessionPaths": [],
-    "filePaths": [],
+    "runtimeSubdir": ".commandcode",
+    "sharedPaths": ["config.json", "settings.json", "skills", "plans", "taste"],
+    "sessionPaths": ["projects", "history.jsonl", "file-history"],
+    "filePaths": ["config.json", "settings.json", "history.jsonl"],
     "unsafePaths": []
   },
-  "concurrency": { "level": "unsupported", "singletonScope": "unknown" },
+  "concurrency": { "level": "multiWriter", "singletonScope": "none" },
   "support": {
-    "windows": { "level": "unsupported", "reason": "Narrow auth-only isolation is not proven; legacy whole-home profiles remain available." },
-    "macos": { "level": "unsupported", "reason": "Narrow auth-only isolation is not proven; legacy whole-home profiles remain available." },
-    "linux": { "level": "unsupported", "reason": "Narrow auth-only isolation is not proven; legacy whole-home profiles remain available." }
+    "windows": { "level": "supported", "reason": "file overlay (.commandcode/auth.json); use commandcode, bare cmd collides with cmd.exe" },
+    "macos": { "level": "supported" },
+    "linux": { "level": "supported" }
   },
   "install": "npm i -g command-code",
   "versionCommand": ["--version"]

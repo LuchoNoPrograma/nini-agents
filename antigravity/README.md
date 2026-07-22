@@ -10,7 +10,7 @@ Antigravity IDE 2.x stores its account under a fixed keychain identity (`gemini:
 
 Binary discovery: `%LOCALAPPDATA%\Programs\Antigravity\Antigravity.exe` (Windows), `/Applications/Antigravity.app` (macOS), `/usr/bin/antigravity` or `/opt/Antigravity/antigravity` (Linux).
 
-## Quickstart (Windows only)
+## Quickstart
 
 ```bash
 multi-cli new antigravity/work
@@ -19,7 +19,7 @@ multi-cli new antigravity/personal
 multi-cli launch antigravity/personal
 ```
 
-macOS and Linux launches fail closed: fixed Keychain/Secret Service isolation is not implemented there.
+The first launch requires an elevated terminal on Windows so multi-cli can provision the owned OS user. macOS and Linux remain unsupported until a real owned-user login/desktop credential session is implemented and verified.
 
 ## Account boundary
 
@@ -35,14 +35,12 @@ None claimed yet. Native roots: `%APPDATA%\Antigravity` (Windows), `~/Library/Ap
 
 ## Known limitations
 
-- The fixed keychain identity makes same-OS-user dual accounts impossible; OS-user provisioning is mandatory.
-- No shared normal state until database tracing proves which paths are credential-free.
-- Authenticated Antigravity 2.0 GUI E2E is pending.
+- The fixed keychain identity makes same-OS-user dual accounts impossible. Windows owned-user isolation is supported; macOS and Linux remain unsupported.
+- No normal state is shared until database tracing proves which paths are credential-free.
+- Authenticated GUI testing requires two test accounts; the runtime and cleanup paths are covered by platform tests.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| experimental | unsupported | unsupported |
-
-`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.
+| supported (owned OS user; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |

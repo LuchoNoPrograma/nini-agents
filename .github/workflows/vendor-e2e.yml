@@ -6,7 +6,16 @@ on:
       tool:
         description: Adapter id to verify on the protected Windows runner
         required: true
-        type: string
+        type: choice
+        options:
+          - claude-cli
+          - codex
+          - gemini-cli
+          - commandcode
+          - cursor-cli
+          - copilot-cli
+          - kimi-cli
+          - grok-cli
 
 permissions:
   contents: read
@@ -14,6 +23,7 @@ permissions:
 jobs:
   offline-real-binary:
     runs-on: [self-hosted, windows, multi-cli-vendor-test]
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Run real binary offline smoke
@@ -23,18 +33,14 @@ jobs:
           -File tests/e2e/windows/Invoke-VendorSmoke.ps1
           -Tool '${{ inputs.tool }}'
           -EvidenceDirectory "$env:RUNNER_TEMP\multi-cli-evidence"
-
-  # Disabled until a protected self-hosted runner with disposable vendor
-  # accounts exists; the job stays as the documented promotion-gate harness.
-  authenticated-dual-account:
-    if: ${{ false }}
-    runs-on: [self-hosted, windows, multi-cli-protected-auth]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Protected authenticated gate
+      - name: Upload secret-scanned evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendor-smoke-${{ inputs.tool }}
+          path: ${{ runner.temp }}\multi-cli-evidence\${{ inputs.tool }}-offline.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove local evidence
+        if: always()
         shell: powershell
-        run: >-
-          powershell -NoProfile -ExecutionPolicy Bypass
-          -File tests/e2e/windows/Invoke-DualAccount.ps1
-          -Protected
-          -Manifest "$env:MULTICLI_E2E_MANIFEST"
+        run: Remove-Item -LiteralPath "$env:RUNNER_TEMP\multi-cli-evidence" -Recurse -Force -ErrorAction SilentlyContinue

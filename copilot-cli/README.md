@@ -38,12 +38,12 @@ Shared root: `%USERPROFILE%\.copilot` (Windows), `~/.copilot` (macOS/Linux).
 ## Known limitations
 
 - `~/.copilot` is mixed: `config.json`, `mcp-oauth-config/`, and `mcp-secrets/` are declared unsafe (credential-bearing) and are never linked. Only the declared paths above are shared.
-- The shared `session-store.db` and authenticated dual-account E2E remain pending.
+- `session-store.db` is shared normal state; concurrent profiles share it.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| experimental | experimental | experimental |
+| supported (process token via `multi-cli auth set`; `GH_TOKEN`/`GITHUB_TOKEN` cleared) | supported | supported |
 
-`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.
+`supported` means multi-cli provides account isolation on that OS (mode requirements noted); `unsupported` means no isolation mode works there.

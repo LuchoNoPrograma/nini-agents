@@ -4,13 +4,13 @@
 
 **Запускайте несколько аккаунтных профилей инструментов ИИ-программирования одновременно.**
 
-Профиль schema-v2 изолирует учётные данные аккаунта и квотную идентичность, при этом разделяя обычное состояние инструмента — диалоги, конфигурацию, агентов, навыки и плагины — там, где вендор предоставляет безопасную границу. Продукты, в которых аутентификация объединена с сессиями или с фиксированным состоянием связки ключей, помечаются как экспериментальные или неподдерживаемые, вместо того чтобы получать ложное заявление об изоляции. Ни один адаптер пока не прошёл проверку одновременной работы с двумя аккаунтами; точный статус по продукту, платформе и режиму аутентификации смотрите в [матрице поддержки](docs/support-matrix.md).
+Профиль schema-v2 изолирует учётные данные и квоту аккаунта, а при безопасной границе разделяет диалоги, настройки и расширения. Если вендор объединяет аутентификацию с сессиями, multi-cli использует отдельного пользователя ОС или режим полного корня `--isolated`. [Матрица поддержки](docs/support-matrix.md) указывает точный режим и требования для каждой платформы.
 
 Существующие профили schema-v1 остаются устаревшими профилями с полным корнем до миграции — см. [Устаревшие профили](#устаревшие-профили).
 
-[![GitHub repository](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Spielewoy/multi-codex)
+[![GitHub repository](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Spielewoy/multi-cli)
 [![GitHub profile](https://img.shields.io/badge/GitHub-Spielewoy-lightgrey?logo=github)](https://github.com/Spielewoy)
-[![GitHub stars](https://img.shields.io/github/stars/Spielewoy/multi-codex?style=social)](https://github.com/Spielewoy/multi-codex/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/Spielewoy/multi-cli?style=social)](https://github.com/Spielewoy/multi-cli/stargazers)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#установка)
 [![License](https://img.shields.io/badge/license-MIT-green)](#лицензия)
 
@@ -18,27 +18,27 @@
 
 ## Поддерживаемые инструменты
 
-В репозиторий входят 17 адаптеров. Статус указан для каждой операционной системы: `experimental` означает, что задокументирована кандидатная граница, но полная проверка двух аккаунтов не пройдена, а `unsupported` означает, что multi-cli отказывается заявлять об изоляции аккаунтов. Ничто пока не верифицировано. Авторитетный источник — [docs/support-matrix.md](docs/support-matrix.md).
+В репозиторий входят 17 адаптеров. `supported` означает, что multi-cli предоставляет на этой ОС хотя бы один рабочий режим изоляции; `unsupported` означает, что продукт или режим там недоступен. Авторитетный источник — [docs/support-matrix.md](docs/support-matrix.md).
 
 | Инструмент | Тип | Windows | macOS | Linux |
 |------|------|---------|-------|-------|
-| [Claude Code](claude-cli/) | CLI | экспериментально | не поддерживается (сохранённый OAuth) | экспериментально |
-| [OpenAI Codex CLI](codex/) | CLI | экспериментально | экспериментально | экспериментально |
-| [Gemini CLI](gemini-cli/) | CLI | экспериментально | экспериментально | экспериментально |
-| [OpenCode](opencode/) | CLI | не поддерживается | не поддерживается | не поддерживается |
-| [Command Code](commandcode/) | CLI | не поддерживается | не поддерживается | не поддерживается |
-| [Cursor Desktop](cursor/) | IDE | не поддерживается | не поддерживается | не поддерживается |
-| [Cursor CLI](cursor-cli/) | CLI | экспериментально | экспериментально | экспериментально |
-| [Antigravity](antigravity/) | IDE | экспериментально | не поддерживается | не поддерживается |
-| [AGY CLI](agy-cli/) | CLI | экспериментально | не поддерживается | не поддерживается |
-| [Kiro](kiro/) | IDE | экспериментально | не поддерживается | не поддерживается |
-| [Zed](zed/) | IDE | не поддерживается | не поддерживается | экспериментально |
-| [Devin Desktop / Windsurf](windsurf/) | IDE | экспериментально | не поддерживается | не поддерживается |
-| [GitHub Copilot CLI](copilot-cli/) | CLI | экспериментально | экспериментально | экспериментально |
-| [Copilot в VS Code](copilot-vscode/) | IDE | экспериментально | не поддерживается | не поддерживается |
-| [Kimi Code CLI](kimi-cli/) | CLI | экспериментально | экспериментально | экспериментально |
-| [Codex Windows App](codex-gui/) | IDE | не поддерживается | не поддерживается | не поддерживается |
-| [Grok Build CLI](grok-cli/) | CLI/TUI | экспериментально | экспериментально | экспериментально |
+| [Claude Code](claude-cli/) | CLI | supported (file overlay) | supported for API-key profiles only; subscription OAuth is unsupported | supported (file overlay) |
+| [OpenAI Codex CLI](codex/) | CLI | supported (file overlay; file credential store mode) | supported | supported |
+| [Gemini CLI](gemini-cli/) | CLI | supported (file overlay) | supported | supported |
+| [OpenCode](opencode/) | CLI | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Command Code](commandcode/) | CLI | supported (file overlay; use `commandcode`, bare `cmd` collides with cmd.exe) | supported | supported |
+| [Cursor Desktop](cursor/) | IDE | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Cursor CLI](cursor-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Antigravity](antigravity/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [AGY CLI](agy-cli/) | CLI | supported (OS-user isolation; elevated terminal) | unsupported (owned-user Keychain isolation not proven) | unsupported (owned-user Secret Service session not implemented) |
+| [Kiro](kiro/) | IDE | supported (OS-user isolation) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Zed](zed/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [Devin Desktop / Windsurf](windsurf/) | IDE | supported (OS-user isolation; elevated terminal) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [GitHub Copilot CLI](copilot-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Copilot in VS Code](copilot-vscode/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [Kimi Code CLI](kimi-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Codex Desktop App](codex-gui/) | IDE | supported (OS-user isolation when the Store app is installed) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (no desktop app) |
+| [Grok Build CLI](grok-cli/) | CLI/TUI | supported (process token via `multi-cli auth set`) | supported | supported |
 
 У каждого инструмента есть собственная папка в корне репозитория с файлом `adapter.json`, описывающим границу аккаунта, разделяемое обычное состояние и доказательства, необходимые для повышения до статуса «верифицировано».
 
@@ -49,13 +49,13 @@
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/install.sh | bash
 ```
 
 **Windows** — откройте PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/install.ps1 | iex
 ```
 
 > После установки **перезапустите терминал**, чтобы изменения PATH вступили в силу.
@@ -63,8 +63,8 @@ irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install
 ### Из исходного кода
 
 ```bash
-git clone https://github.com/Spielewoy/multi-codex.git
-cd multi-codex
+git clone https://github.com/Spielewoy/multi-cli.git
+cd multi-cli
 ./scripts/install.sh --local        # macOS/Linux
 .\scripts\install.ps1 -Local        # Windows
 ```
@@ -103,13 +103,14 @@ multi-cli claude-cli/work
 
 | Команда | Описание |
 |---------|-------------|
-| `multi-cli new <tool>/<name>` | Создать новый изолированный профиль |
-| `multi-cli new <tool>/<name> --shared` | Лёгкий профиль (общие настройки, изолированная аутентификация) |
+| `multi-cli new <tool>/<name>` | Создать профиль аккаунта (отдельные учётные данные, общее обычное состояние) |
+| `multi-cli new <tool>/<name> --isolated` | Создать профиль полного корня без общего состояния |
+| `multi-cli new <tool>/<name> --shared` | Устаревший общий профиль schema-v1; профили schema-v2 уже используют объявленное общее состояние по умолчанию |
 | `multi-cli new <tool>/<name> --from <tpl>` | Создать из сохранённого шаблона |
 | `multi-cli <tool>/<name>` | Запустить профиль (сокращение) |
 | `multi-cli launch <tool>/<name>` | Запустить профиль |
 | `multi-cli list [<tool>]` | Показать все профили |
-| `multi-cli status` | Показать состояние запуска, тип, время последнего использования и размер |
+| `multi-cli status` | List profiles with their type and disk size |
 | `multi-cli clone <tool>/<src> <tool>/<dest>` | Скопировать существующий профиль |
 | `multi-cli rename <tool>/<old> <tool>/<new>` | Переименовать профиль |
 | `multi-cli delete <tool>/<name>` | Удалить профиль и все его данные |
@@ -171,7 +172,7 @@ multi-cli claude-cli/work
 |-----------|--------------|
 | `fileOverlay` | Учётные данные остаются внутри профиля; объявленное обычное состояние связывается с родным общим домашним каталогом инструмента. |
 | `processSecret` | Уникальные для профиля учётные данные с наивысшим приоритетом внедряются только в дочерний процесс. Запуск остаётся отключённым, пока не настроено безопасное хранилище секретов. |
-| `osUserCredentialStore` | Фиксированные идентичности связки ключей разделяются с помощью принадлежащего multi-cli пользователя ОС. Остаётся отключённым, пока не проверены владение и очистка. |
+| `osUserCredentialStore` | Uses a multi-cli-owned OS user for tools with a fixed credential identity. Windows requires elevation; macOS/Linux require `sudo`. |
 | `inseparable` | Вендор объединяет аутентификацию и обычное состояние; корректный запуск завершается отказом, а ограничение показывается пользователю. |
 
 Профили версии 1 сохраняют прежнее поведение с полным корнем (`env`, `userDataDir`, `redirectHome`, `appdata` и `sandboxUser`) для совместимости. Каждый `<id>/adapter.json` указывает возможности продукта/платформы и требования к доказательствам.
@@ -211,7 +212,7 @@ codex resume <session-id>                        # resume the same chat (codex �
 
 **Не поддерживается:** `opencode` (сессии и учётные данные находятся в одной общей базе данных SQLite) и `cursor` (чаты хранятся в SQLite с привязкой к пути рабочей области).
 
-> Новые профили по умолчанию засеваются из `base` — состояние диалога, а для полных профилей также ресурсы навыков/конфигурации. Передайте `--no-seed` команде `multi-cli new`, чтобы начать с пустого профиля.
+> Устаревшие профили schema-v1 по умолчанию заполняются из `base`. Профили аккаунтов schema-v2 уже читают объявленные диалоги и настройки из общего нативного корня, а изолированные профили начинают пустыми. Используйте `multi-cli continue`, чтобы копировать поддерживаемые диалоги в изолированный профиль или из него.
 
 ---
 
@@ -219,9 +220,10 @@ codex resume <session-id>                        # resume the same chat (codex �
 
 | Флаг | Значение |
 |------|---------|
-| *(нет)* | **Полный** — полностью изолирован. Новая аутентификация, новая конфигурация. |
-| `--shared` | **Общий** — символические ссылки на настройки/расширения из основной установки. Аутентификация остаётся изолированной. |
-| `--cli` | **CLI** — помечает профиль для запуска только в терминале (пропускает обнаружение GUI). |
+| *(нет)* | **Общий по умолчанию** — учётные данные раздельны; диалоги и настройки общие, когда адаптер это допускает. |
+| `-i`, `--isolate`, `--isolated` | **Изолированный** — весь корень инструмента находится в профиле; ничего не разделяется. |
+| `--shared` | Устаревший псевдоним общего режима, если адаптер его поддерживает. |
+| `--cli` | **CLI** — запуск только из терминала. |
 | `--from <tpl>` | Клонировать из сохранённого шаблона. |
 
 ---
@@ -270,13 +272,13 @@ multi-cli completion bash   # or zsh, powershell
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/uninstall.sh | bash
 ```
 
 **Windows**
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/uninstall.ps1 | iex
 ```
 
 Вас спросят, удалить ли данные профилей — ничто не удаляется без подтверждения.
@@ -288,7 +290,7 @@ irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/uninsta
 - [Матрица поддержки](docs/support-matrix.md) — статус изоляции по продуктам и ОС, а также критерии верификации
 - [Политика безопасности](SECURITY.md)
 - [Лицензия](LICENSE)
-- [Репозиторий на GitHub](https://github.com/Spielewoy/multi-codex)
+- [Репозиторий на GitHub](https://github.com/Spielewoy/multi-cli)
 
 ---
 

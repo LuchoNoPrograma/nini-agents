@@ -43,9 +43,9 @@ function Write-OverlayAdapter {
         }
         concurrency = [ordered]@{ level = 'multiWriter'; singletonScope = 'none' }
         support = [ordered]@{
-            windows = [ordered]@{ level = 'experimental'; reason = 'Fixture only.' }
-            macos = [ordered]@{ level = 'experimental'; reason = 'Fixture only.' }
-            linux = [ordered]@{ level = 'experimental'; reason = 'Fixture only.' }
+            windows = [ordered]@{ level = 'supported'; reason = 'Fixture only.' }
+            macos = [ordered]@{ level = 'supported'; reason = 'Fixture only.' }
+            linux = [ordered]@{ level = 'supported'; reason = 'Fixture only.' }
         }
     }
     $adapter | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $Scratch.Tools 'fixture\adapter.json') -Encoding UTF8
@@ -53,27 +53,29 @@ function Write-OverlayAdapter {
 
 function Invoke-OverlayLauncher {
     param($Scratch, [string[]]$Arguments, [string]$Probe, [string]$Capture)
-    $argumentLine = ($Arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '""') + '"' } else { $_ } }) -join ' '
-    $process = New-Object System.Diagnostics.ProcessStartInfo
-    $process.FileName = (Get-Command powershell.exe).Source
-    $process.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$script:LauncherPath`" $argumentLine"
-    $process.UseShellExecute = $false
-    $process.RedirectStandardOutput = $true
-    $process.RedirectStandardError = $true
-    $process.CreateNoWindow = $true
-    $process.EnvironmentVariables['USERPROFILE'] = $Scratch.UserHome
-    $process.EnvironmentVariables['HOME'] = $Scratch.UserHome
-    $process.EnvironmentVariables['APPDATA'] = Join-Path $Scratch.UserHome 'AppData\Roaming'
-    $process.EnvironmentVariables['LOCALAPPDATA'] = Join-Path $Scratch.UserHome 'AppData\Local'
-    $process.EnvironmentVariables['MULTICLI_HOME'] = $Scratch.Profiles
-    $process.EnvironmentVariables['MULTICLI_TOOLS_DIR'] = $Scratch.Tools
-    if ($Probe) { $process.EnvironmentVariables['MULTICLI_OVERRIDE_BINARY'] = $Probe }
-    if ($Capture) { $process.EnvironmentVariables['CAPTURE_OUTPUT'] = $Capture }
-    $child = [System.Diagnostics.Process]::Start($process)
-    $stdout = $child.StandardOutput.ReadToEnd()
-    $stderr = $child.StandardError.ReadToEnd()
-    $child.WaitForExit()
-    return [pscustomobject]@{ ExitCode = $child.ExitCode; Output = "$stdout$stderr" }
+    $environment = @{
+        USERPROFILE = $Scratch.UserHome
+        HOME = $Scratch.UserHome
+        APPDATA = (Join-Path $Scratch.UserHome 'AppData\Roaming')
+        LOCALAPPDATA = (Join-Path $Scratch.UserHome 'AppData\Local')
+        MULTICLI_HOME = $Scratch.Profiles
+        MULTICLI_TOOLS_DIR = $Scratch.Tools
+        PATH = "$($Scratch.Profiles)\bin;$env:PATH"
+    }
+    if ($Probe) { $environment['MULTICLI_OVERRIDE_BINARY'] = $Probe }
+    if ($Capture) { $environment['CAPTURE_OUTPUT'] = $Capture }
+    $original = @{}
+    foreach ($entry in $environment.GetEnumerator()) {
+        $original[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
+    }
+    try {
+        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:LauncherPath @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        foreach ($name in $original.Keys) { [Environment]::SetEnvironmentVariable($name, $original[$name], 'Process') }
+    }
+    return [pscustomobject]@{ ExitCode = $exitCode; Output = ($output | Out-String) }
 }
 
 Describe 'schema-v2 account overlay on Windows' {

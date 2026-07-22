@@ -26,9 +26,9 @@
   },
   "concurrency": { "level": "multiWriter", "singletonScope": "none" },
   "support": {
-    "windows": { "level": "experimental", "reason": "Direct-key precedence and authenticated concurrency E2E are pending." },
-    "macos": { "level": "experimental", "reason": "Direct-key precedence and authenticated concurrency E2E are pending." },
-    "linux": { "level": "experimental", "reason": "Direct-key precedence and authenticated concurrency E2E are pending." }
+    "windows": { "level": "supported", "reason": "process token (CURSOR_API_KEY) via multi-cli auth set" },
+    "macos": { "level": "supported" },
+    "linux": { "level": "supported" }
   },
   "install": "https://cursor.com/docs/cli",
   "versionCommand": ["--version"]

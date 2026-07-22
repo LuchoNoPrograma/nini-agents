@@ -3,13 +3,33 @@
   "id": "zed",
   "displayName": "Zed",
   "kind": "ide",
-  "binary": { "windows": ["zed.exe", "zed"], "macos": ["/usr/local/bin/zed", "zed"], "linux": ["zed", "zeditor"] },
-  "isolation": { "strategy": "accountOverlay", "mode": "detached", "env": {}, "clearEnv": [] },
+  "binary": {
+    "windows": [
+      "zed.exe",
+      "zed"
+    ],
+    "macos": [
+      "/usr/local/bin/zed",
+      "zed"
+    ],
+    "linux": [
+      "zed",
+      "zeditor"
+    ]
+  },
+  "isolation": {
+    "strategy": "accountOverlay",
+    "mode": "detached",
+    "env": {},
+    "clearEnv": []
+  },
   "account": {
     "mechanism": "osUserCredentialStore",
     "credentialFiles": [],
-    "credentialPrecedence": ["Zed credentials_url keychain namespace"],
-    "logoutScope": "credentialNamespace"
+    "credentialPrecedence": [
+      "Zed credential store scoped to the owned OS user"
+    ],
+    "logoutScope": "osUser"
   },
   "normalState": {
     "root": {
@@ -20,14 +40,30 @@
     "sharedPaths": [],
     "sessionPaths": [],
     "filePaths": [],
-    "unsafePaths": ["db"]
+    "unsafePaths": [
+      "db"
+    ]
   },
-  "concurrency": { "level": "singleWriter", "singletonScope": "releaseChannelAndOsUser" },
+  "concurrency": {
+    "level": "singleWriter",
+    "singletonScope": "releaseChannelAndOsUser"
+  },
   "support": {
-    "windows": { "level": "unsupported", "reason": "Same-channel singleton/IPC and shared database prevent truthful same-user concurrent account support." },
-    "macos": { "level": "unsupported", "reason": "Same-channel singleton/IPC prevents truthful same-user concurrent account support." },
-    "linux": { "level": "experimental", "reason": "Custom data roots and credential namespaces require live dual-process/database E2E." }
+    "windows": {
+      "level": "supported",
+      "reason": "OS-user isolation; elevated terminal required for concurrent same-channel windows"
+    },
+    "macos": {
+      "level": "unsupported",
+      "reason": "Owned-user macOS GUI login and Keychain isolation are not yet proven by a real logged-in desktop session."
+    },
+    "linux": {
+      "level": "unsupported",
+      "reason": "Owned-user Linux GUI and Secret Service sessions are not yet implemented and verified."
+    }
   },
   "install": "https://zed.dev/docs/installation",
-  "versionCommand": ["--version"]
+  "versionCommand": [
+    "--version"
+  ]
 }

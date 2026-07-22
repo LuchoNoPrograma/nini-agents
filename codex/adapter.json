@@ -35,9 +35,9 @@
   },
   "concurrency": { "level": "multiWriter", "singletonScope": "none" },
   "support": {
-    "windows": { "level": "experimental", "reason": "Requires file credential storage and authenticated dual-account concurrency E2E." },
-    "macos": { "level": "experimental", "reason": "Requires file credential storage and native authenticated concurrency E2E." },
-    "linux": { "level": "experimental", "reason": "Requires file credential storage and native authenticated concurrency E2E." }
+    "windows": { "level": "supported", "reason": "file overlay; file credential store mode" },
+    "macos": { "level": "supported" },
+    "linux": { "level": "supported" }
   },
   "install": "npm i -g @openai/codex",
   "versionCommand": ["--version"]

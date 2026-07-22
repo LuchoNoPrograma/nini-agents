@@ -21,7 +21,7 @@
 Set-StrictMode -Version Latest
 
 $script:MigrationJournalName = '.migration-journal.json'
-$script:MigrationMetaEntries = @('.shared', '.cli', '.profile.json', '.runtime', 'auth')
+$script:MigrationMetaEntries = @('.shared', '.cli', '.profile.json', '.runtime', '.isolated', 'auth')
 
 function Get-MigrationProperty {
     param($Object, [string]$Name)

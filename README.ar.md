@@ -6,13 +6,13 @@
 
 **شغّل عدة ملفات تعريف لحسابات أدوات البرمجة بالذكاء الاصطناعي في وقت واحد.**
 
-يعزل ملف التعريف schema-v2 بيانات اعتماد الحساب وهوية الحصة، مع مشاركة الحالة العادية للأداة — المحادثات والإعدادات والوكلاء والمهارات والإضافات — حيث يوفر المورّد حدًا آمنًا. أما المنتجات التي تدمج المصادقة مع الجلسات أو مع حالة ثابتة في سلسلة المفاتيح، فتُصنَّف تجريبية أو غير مدعومة بدلًا من إعطائها ادعاء عزل زائفًا. لم يجتز أي محوّل بوابة التحقق من الحسابين المزدوجين حتى الآن؛ راجع [مصفوفة الدعم](docs/support-matrix.md) لمعرفة الحالة الدقيقة لكل منتج ومنصة ووضع مصادقة.
+يعزل ملف schema-v2 بيانات اعتماد الحساب وحصته، ويشارك المحادثات والإعدادات والإضافات عندما يكون الحد آمنًا. إذا دمج المورّد المصادقة مع الجلسات، يستخدم multi-cli مستخدم نظام تشغيل مستقلًا أو ملف جذر كاملًا عبر `--isolated`. توضّح [مصفوفة الدعم](docs/support-matrix.md) الوضع والمتطلبات الدقيقة لكل منصة.
 
 تظل ملفات التعريف schema-v1 الحالية ملفات تعريف قديمة ذات جذر كامل حتى يتم ترحيلها — راجع [ملفات التعريف القديمة](#legacy-profiles).
 
-[![GitHub repository](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Spielewoy/multi-codex)
+[![GitHub repository](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Spielewoy/multi-cli)
 [![GitHub profile](https://img.shields.io/badge/GitHub-Spielewoy-lightgrey?logo=github)](https://github.com/Spielewoy)
-[![GitHub stars](https://img.shields.io/github/stars/Spielewoy/multi-codex?style=social)](https://github.com/Spielewoy/multi-codex/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/Spielewoy/multi-cli?style=social)](https://github.com/Spielewoy/multi-cli/stargazers)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#install)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
 
@@ -20,27 +20,27 @@
 
 ## الأدوات المدعومة
 
-يتضمن هذا المستودع 17 محوّلًا. الحالة لكل نظام تشغيل: `experimental` تعني وجود حد مرشح موثّق لكن التحقق الكامل من الحسابين المزدوجين لم ينجح بعد، و`unsupported` تعني أن multi-cli يرفض ادعاء عزل الحسابات. لا يوجد أي شيء موثَّق حتى الآن. المصدر المعتمد هو [docs/support-matrix.md](docs/support-matrix.md).
+يتضمن هذا المستودع 17 محوّلًا. تعني `supported` أن multi-cli يوفر وضع عزل عاملًا واحدًا على الأقل في ذلك النظام، وتعني `unsupported` أن المنتج أو وضع العزل غير متاح هناك. المصدر المعتمد هو [docs/support-matrix.md](docs/support-matrix.md).
 
 | الأداة | النوع | Windows | macOS | Linux |
 |------|------|---------|-------|-------|
-| [Claude Code](claude-cli/) | CLI | تجريبي | غير مدعوم (OAuth مخزَّن) | تجريبي |
-| [OpenAI Codex CLI](codex/) | CLI | تجريبي | تجريبي | تجريبي |
-| [Gemini CLI](gemini-cli/) | CLI | تجريبي | تجريبي | تجريبي |
-| [OpenCode](opencode/) | CLI | غير مدعوم | غير مدعوم | غير مدعوم |
-| [Command Code](commandcode/) | CLI | غير مدعوم | غير مدعوم | غير مدعوم |
-| [Cursor Desktop](cursor/) | IDE | غير مدعوم | غير مدعوم | غير مدعوم |
-| [Cursor CLI](cursor-cli/) | CLI | تجريبي | تجريبي | تجريبي |
-| [Antigravity](antigravity/) | IDE | تجريبي | غير مدعوم | غير مدعوم |
-| [AGY CLI](agy-cli/) | CLI | تجريبي | غير مدعوم | غير مدعوم |
-| [Kiro](kiro/) | IDE | تجريبي | غير مدعوم | غير مدعوم |
-| [Zed](zed/) | IDE | غير مدعوم | غير مدعوم | تجريبي |
-| [Devin Desktop / Windsurf](windsurf/) | IDE | تجريبي | غير مدعوم | غير مدعوم |
-| [GitHub Copilot CLI](copilot-cli/) | CLI | تجريبي | تجريبي | تجريبي |
-| [Copilot في VS Code](copilot-vscode/) | IDE | تجريبي | غير مدعوم | غير مدعوم |
-| [Kimi Code CLI](kimi-cli/) | CLI | تجريبي | تجريبي | تجريبي |
-| [Codex Windows App](codex-gui/) | IDE | غير مدعوم | غير مدعوم | غير مدعوم |
-| [Grok Build CLI](grok-cli/) | CLI/TUI | تجريبي | تجريبي | تجريبي |
+| [Claude Code](claude-cli/) | CLI | supported (file overlay) | supported for API-key profiles only; subscription OAuth is unsupported | supported (file overlay) |
+| [OpenAI Codex CLI](codex/) | CLI | supported (file overlay; file credential store mode) | supported | supported |
+| [Gemini CLI](gemini-cli/) | CLI | supported (file overlay) | supported | supported |
+| [OpenCode](opencode/) | CLI | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Command Code](commandcode/) | CLI | supported (file overlay; use `commandcode`, bare `cmd` collides with cmd.exe) | supported | supported |
+| [Cursor Desktop](cursor/) | IDE | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Cursor CLI](cursor-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Antigravity](antigravity/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [AGY CLI](agy-cli/) | CLI | supported (OS-user isolation; elevated terminal) | unsupported (owned-user Keychain isolation not proven) | unsupported (owned-user Secret Service session not implemented) |
+| [Kiro](kiro/) | IDE | supported (OS-user isolation) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Zed](zed/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [Devin Desktop / Windsurf](windsurf/) | IDE | supported (OS-user isolation; elevated terminal) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [GitHub Copilot CLI](copilot-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Copilot in VS Code](copilot-vscode/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [Kimi Code CLI](kimi-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Codex Desktop App](codex-gui/) | IDE | supported (OS-user isolation when the Store app is installed) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (no desktop app) |
+| [Grok Build CLI](grok-cli/) | CLI/TUI | supported (process token via `multi-cli auth set`) | supported | supported |
 
 لكل أداة مجلد خاص بها في جذر المستودع يحتوي على ملف `adapter.json` يصف حد الحساب والحالة العادية المشتركة والأدلة المطلوبة للترقية إلى حالة موثَّقة.
 
@@ -53,13 +53,13 @@
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/install.sh | bash
 ```
 
 **Windows** — افتح PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/install.ps1 | iex
 ```
 
 > بعد التثبيت، **أعد تشغيل الطرفية** لتسري التغييرات على PATH.
@@ -67,8 +67,8 @@ irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install
 ### من المصدر
 
 ```bash
-git clone https://github.com/Spielewoy/multi-codex.git
-cd multi-codex
+git clone https://github.com/Spielewoy/multi-cli.git
+cd multi-cli
 ./scripts/install.sh --local        # macOS/Linux
 .\scripts\install.ps1 -Local        # Windows
 ```
@@ -107,13 +107,14 @@ multi-cli claude-cli/work
 
 | الأمر | الوصف |
 |---------|-------------|
-| `multi-cli new <tool>/<name>` | إنشاء ملف تعريف معزول جديد |
-| `multi-cli new <tool>/<name> --shared` | ملف تعريف خفيف (إعدادات مشتركة، مصادقة معزولة) |
+| `multi-cli new <tool>/<name>` | إنشاء ملف تعريف حساب (بيانات اعتماد منفصلة وحالة عادية مشتركة) |
+| `multi-cli new <tool>/<name> --isolated` | إنشاء ملف جذر كامل بلا حالة مشتركة |
+| `multi-cli new <tool>/<name> --shared` | ملف مشترك قديم من schema-v1؛ تشارك ملفات schema-v2 الحالة العادية المعلنة افتراضيًا |
 | `multi-cli new <tool>/<name> --from <tpl>` | الإنشاء من قالب محفوظ |
 | `multi-cli <tool>/<name>` | تشغيل ملف تعريف (صيغة مختصرة) |
 | `multi-cli launch <tool>/<name>` | تشغيل ملف تعريف |
 | `multi-cli list [<tool>]` | عرض جميع ملفات التعريف |
-| `multi-cli status` | عرض حالة التشغيل والنوع وآخر استخدام والحجم |
+| `multi-cli status` | List profiles with their type and disk size |
 | `multi-cli clone <tool>/<src> <tool>/<dest>` | نسخ ملف تعريف موجود |
 | `multi-cli rename <tool>/<old> <tool>/<new>` | إعادة تسمية ملف تعريف |
 | `multi-cli delete <tool>/<name>` | حذف ملف تعريف وجميع بياناته |
@@ -215,7 +216,7 @@ codex resume <session-id>                        # resume the same chat (codex �
 
 **غير مدعوم:** `opencode` (الجلسات وبيانات الاعتماد في قاعدة بيانات SQLite واحدة مشتركة) و`cursor` (تُخزَّن المحادثات في SQLite مفهرسة بمسار مساحة العمل).
 
-> تُبذَر ملفات التعريف الجديدة من `base` افتراضيًا — حالة المحادثة، بالإضافة إلى أصول المهارات/الإعدادات لملفات التعريف الكاملة. مرّر `--no-seed` إلى `multi-cli new` للبدء فارغًا.
+> تُبذَر ملفات تعريف schema-v1 القديمة من `base` افتراضيًا. تقرأ ملفات تعريف حساب schema-v2 المحادثات والإعدادات المعلنة من الجذر الأصلي المشترك، بينما تبدأ الملفات المعزولة فارغة. استخدم `multi-cli continue` لنسخ المحادثات المدعومة إلى ملف معزول أو منه.
 
 ---
 
@@ -223,9 +224,10 @@ codex resume <session-id>                        # resume the same chat (codex �
 
 | العلامة | المعنى |
 |------|---------|
-| *(لا شيء)* | **كامل** — معزول تمامًا. مصادقة جديدة وإعدادات جديدة. |
-| `--shared` | **مشترك** — روابط رمزية للإعدادات/الإضافات من تثبيتك الرئيسي. تبقى المصادقة معزولة. |
-| `--cli` | **CLI** — يحدد ملف التعريف للتشغيل من الطرفية فقط (يتخطى اكتشاف واجهة GUI). |
+| *(لا شيء)* | **مشترك افتراضيًا** — بيانات الاعتماد منفصلة، وتُشارك المحادثات والإعدادات عندما يسمح المحوّل. |
+| `-i` أو `--isolate` أو `--isolated` | **معزول** — يعيش جذر الأداة كاملًا داخل ملف التعريف ولا يُشارك شيء. |
+| `--shared` | اسم قديم للوضع المشترك عندما يدعمه المحوّل. |
+| `--cli` | **CLI** — تشغيل من الطرفية فقط. |
 | `--from <tpl>` | الاستنساخ من قالب محفوظ. |
 
 ---
@@ -276,13 +278,13 @@ multi-cli completion bash   # or zsh, powershell
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/uninstall.sh | bash
 ```
 
 **Windows**
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/uninstall.ps1 | iex
 ```
 
 سُتسأل عمّا إذا كنت تريد إزالة بيانات ملفات التعريف — لا يُحذَف أي شيء دون تأكيد.
@@ -294,7 +296,7 @@ irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/uninsta
 - [مصفوفة الدعم](docs/support-matrix.md) — حالة العزل لكل منتج ونظام تشغيل وبوابة التحقق
 - [سياسة الأمان](SECURITY.md)
 - [الرخصة](LICENSE)
-- [مستودع GitHub](https://github.com/Spielewoy/multi-codex)
+- [مستودع GitHub](https://github.com/Spielewoy/multi-cli)
 
 ---
 

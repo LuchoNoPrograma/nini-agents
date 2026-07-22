@@ -3,8 +3,8 @@ Set-StrictMode -Version Latest
 # Semantic adapter.json validation for multi-cli (Windows).
 # PowerShell mirror of lib/adapter-validation.sh: declared paths are relative
 # and traversal-free, credential/shared/session/unsafe lists never overlap,
-# placeholders come from the known set, and support levels carry the evidence
-# or reason their claim requires.
+# placeholders come from the known set, and every unsupported support row
+# carries the reason why.
 #
 # Entry point: Test-AdapterManifest -ManifestPath <path> -ExpectedId <id>;
 # returns an array of validation error strings (empty = valid).
@@ -93,6 +93,48 @@ function Test-AdapterPlaceholders {
     }
 }
 
+function Test-AdapterObjectFields {
+    param(
+        [System.Collections.Generic.List[string]]$Errors,
+        $Object,
+        [string[]]$Allowed,
+        [string]$Label
+    )
+    if ($null -eq $Object) { return }
+    foreach ($property in $Object.PSObject.Properties) {
+        if ($Allowed -contains $property.Name) { continue }
+        $message = if ($Label) { "unsupported field '$Label.$($property.Name)'" } else { "unsupported top-level field '$($property.Name)'" }
+        Add-AdapterValidationError -Errors $Errors -Message $message
+    }
+}
+
+function Test-AdapterFields {
+    param([System.Collections.Generic.List[string]]$Errors, $Adapter, [int]$SchemaVersion)
+    $allowedTopLevel = @('schemaVersion', 'id', 'displayName', 'kind', 'binary', 'isolation', 'install', 'versionCommand')
+    if ($SchemaVersion -eq 1) { $allowedTopLevel += @('share', 'session', 'status') }
+    if ($SchemaVersion -eq 2) { $allowedTopLevel += @('account', 'normalState', 'concurrency', 'support') }
+    Test-AdapterObjectFields -Errors $Errors -Object $Adapter -Allowed $allowedTopLevel -Label ''
+    $isolation = Get-ObjectProperty -Object $Adapter -Name 'isolation'
+    Test-AdapterObjectFields -Errors $Errors -Object $isolation -Allowed @('strategy', 'mode', 'env', 'clearEnv', 'args', 'shareFromRealHome') -Label 'isolation'
+    if ($SchemaVersion -eq 1) {
+        Test-AdapterObjectFields -Errors $Errors -Object (Get-ObjectProperty -Object $Adapter -Name 'share') -Allowed @('systemHome', 'linkable', 'neverLink') -Label 'share'
+        Test-AdapterObjectFields -Errors $Errors -Object (Get-ObjectProperty -Object $Adapter -Name 'session') -Allowed @('portable', 'paths', 'credentials', 'reason', 'resumeHint') -Label 'session'
+        return
+    }
+    $account = Get-ObjectProperty -Object $Adapter -Name 'account'
+    Test-AdapterObjectFields -Errors $Errors -Object $account -Allowed @('mechanism', 'credentialFiles', 'credentialPrecedence', 'logoutScope', 'reason', 'secret') -Label 'account'
+    Test-AdapterObjectFields -Errors $Errors -Object (Get-ObjectProperty -Object $account -Name 'secret') -Allowed @('environmentVariable') -Label 'account.secret'
+    $normalState = Get-ObjectProperty -Object $Adapter -Name 'normalState'
+    Test-AdapterObjectFields -Errors $Errors -Object $normalState -Allowed @('root', 'runtimeSubdir', 'sharedPaths', 'sessionPaths', 'filePaths', 'unsafePaths') -Label 'normalState'
+    Test-AdapterObjectFields -Errors $Errors -Object (Get-ObjectProperty -Object $normalState -Name 'root') -Allowed @('windows', 'macos', 'linux') -Label 'normalState.root'
+    Test-AdapterObjectFields -Errors $Errors -Object (Get-ObjectProperty -Object $Adapter -Name 'concurrency') -Allowed @('level', 'singletonScope') -Label 'concurrency'
+    $support = Get-ObjectProperty -Object $Adapter -Name 'support'
+    Test-AdapterObjectFields -Errors $Errors -Object $support -Allowed @('windows', 'macos', 'linux') -Label 'support'
+    foreach ($platform in @('windows', 'macos', 'linux')) {
+        Test-AdapterObjectFields -Errors $Errors -Object (Get-ObjectProperty -Object $support -Name $platform) -Allowed @('level', 'reason') -Label "support.$platform"
+    }
+}
+
 # Platform keys must be exactly windows/macos/linux; schema-v2 additionally
 # requires at least one non-empty binary candidate per platform.
 function Test-AdapterBinary {
@@ -131,30 +173,25 @@ function Test-AdapterBinary {
     }
 }
 
-# Every platform row needs a level; 'verified' must cite evidence, the other
-# levels must cite a reason.
+# Every platform row needs a level: 'supported' (reason optional, encouraged
+# for mode requirements) or 'unsupported' (reason required). The retired
+# verified/experimental levels are rejected with an explicit message.
 function Test-AdapterSupport {
     param([System.Collections.Generic.List[string]]$Errors, $Support)
     foreach ($platform in @('windows', 'macos', 'linux')) {
         $entry = Get-ObjectProperty -Object $Support -Name $platform
         $level = Get-ObjectProperty -Object $entry -Name 'level'
         switch ($level) {
-            'verified' {
-                if (-not (Get-ObjectProperty -Object $entry -Name 'evidenceId')) {
-                    Add-AdapterValidationError -Errors $Errors -Message "support.$platform.evidenceId is required for verified support"
-                }
-            }
-            'experimental' {
-                if (-not (Get-ObjectProperty -Object $entry -Name 'reason')) {
-                    Add-AdapterValidationError -Errors $Errors -Message "support.$platform.reason is required for level 'experimental'"
-                }
-            }
+            'supported' { }
             'unsupported' {
                 if (-not (Get-ObjectProperty -Object $entry -Name 'reason')) {
                     Add-AdapterValidationError -Errors $Errors -Message "support.$platform.reason is required for level 'unsupported'"
                 }
             }
-            default { Add-AdapterValidationError -Errors $Errors -Message "support.$platform.level must be verified, experimental, or unsupported" }
+            { $_ -eq 'verified' -or $_ -eq 'experimental' } {
+                Add-AdapterValidationError -Errors $Errors -Message "support.$platform.level '$level' was retired; use 'supported' or 'unsupported'"
+            }
+            default { Add-AdapterValidationError -Errors $Errors -Message "support.$platform.level must be supported or unsupported" }
         }
     }
 }
@@ -185,8 +222,7 @@ function Test-AdapterV1 {
 
 # Schema-v2 (accountOverlay): account mechanism with its required fields,
 # concurrency declaration, per-platform state roots, and full separation
-# between credential, shared, session, and unsafe path lists. An inseparable
-# adapter may never claim verified support.
+# between credential, shared, session, and unsafe path lists.
 function Test-AdapterV2 {
     param([System.Collections.Generic.List[string]]$Errors, $Adapter)
     $isolation = Get-ObjectProperty -Object $Adapter -Name 'isolation'
@@ -248,15 +284,6 @@ function Test-AdapterV2 {
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $credentials -LeftLabel 'credential path' -RightValues $unsafePaths -RightLabel 'unsafe path'
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $sharedPaths -LeftLabel 'shared path' -RightValues $unsafePaths -RightLabel 'unsafe path'
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $sessionPaths -LeftLabel 'session path' -RightValues $unsafePaths -RightLabel 'unsafe path'
-    if ($mechanism -eq 'inseparable') {
-        $support = Get-ObjectProperty -Object $Adapter -Name 'support'
-        foreach ($platform in @('windows', 'macos', 'linux')) {
-            $entry = Get-ObjectProperty -Object $support -Name $platform
-            if ((Get-ObjectProperty -Object $entry -Name 'level') -eq 'verified') {
-                Add-AdapterValidationError -Errors $Errors -Message "support.$platform.level cannot be verified for inseparable state"
-            }
-        }
-    }
 
     $concurrency = Get-ObjectProperty -Object $Adapter -Name 'concurrency'
     if (@('multiWriter', 'singleWriter', 'unsupported') -notcontains (Get-ObjectProperty -Object $concurrency -Name 'level')) {
@@ -303,8 +330,12 @@ function Test-AdapterManifest {
     switch ([int]$schemaVersion) {
         1 { Test-AdapterV1 -Errors $errors -Adapter $adapter }
         2 { Test-AdapterV2 -Errors $errors -Adapter $adapter }
-        default { Add-AdapterValidationError -Errors $errors -Message "schemaVersion '$schemaVersion' is not supported" }
+        default {
+            Add-AdapterValidationError -Errors $errors -Message "schemaVersion '$schemaVersion' is not supported"
+            return $errors.ToArray()
+        }
     }
+    Test-AdapterFields -Errors $errors -Adapter $adapter -SchemaVersion ([int]$schemaVersion)
     Test-AdapterBinary -Errors $errors -Adapter $adapter -SchemaVersion ([int]$schemaVersion)
     Test-AdapterPlaceholders -Errors $errors -Json $json
     return $errors.ToArray()

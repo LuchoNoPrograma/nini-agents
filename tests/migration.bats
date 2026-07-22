@@ -84,9 +84,9 @@ write_fixture_adapter() {
     "singletonScope": "none"
   },
   "support": {
-    "windows": { "level": "experimental", "reason": "Fixture only." },
-    "macos": { "level": "experimental", "reason": "Fixture only." },
-    "linux": { "level": "experimental", "reason": "Fixture only." }
+    "windows": { "level": "supported", "reason": "Fixture only." },
+    "macos": { "level": "supported", "reason": "Fixture only." },
+    "linux": { "level": "supported", "reason": "Fixture only." }
   },
   "install": "https://example.test/install",
   "versionCommand": ["--version"]

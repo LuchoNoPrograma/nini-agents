@@ -4,8 +4,8 @@
 # Bash mirror of lib/MultiCli.AdapterValidation.psm1. Beyond the JSON schema,
 # these checks enforce the contracts the launchers rely on: declared paths are
 # relative and traversal-free, credential/shared/session/unsafe lists never
-# overlap, placeholders come from the known set, and support levels carry the
-# evidence or reason their claim requires.
+# overlap, placeholders come from the known set, and every unsupported support
+# row carries the reason why.
 #
 # Entry point: validate_adapter_manifest <manifest> <expected-id>. Errors
 # accumulate in ADAPTER_VALIDATION_ERRORS (reset per call); returns 0 when the
@@ -77,6 +77,47 @@ validate_adapter_placeholders() {
   done < <(jq -r '.. | strings | scan("\\{[A-Za-z][A-Za-z0-9_]*\\}")' "$manifest" 2>/dev/null | tr -d '\r' | sort -u)
 }
 
+validate_adapter_object_fields() {
+  local manifest="$1" path="$2" allowed="$3" label="$4" key
+  while IFS= read -r key; do
+    [ -z "$key" ] && continue
+    if ! printf '%s\n' "$allowed" | grep -qxF "$key"; then
+      if [ -n "$label" ]; then
+        adapter_validation_error "unsupported field '$label.$key'"
+      else
+        adapter_validation_error "unsupported top-level field '$key'"
+      fi
+    fi
+  done < <(jq -r "$path // {} | keys[]?" "$manifest" 2>/dev/null | tr -d '\r')
+}
+
+validate_adapter_fields() {
+  local manifest="$1" schema_version="$2" top_level
+  top_level=$'schemaVersion\nid\ndisplayName\nkind\nbinary\nisolation\ninstall\nversionCommand'
+  if [ "$schema_version" -eq 1 ]; then
+    top_level+=$'\nshare\nsession\nstatus'
+  else
+    top_level+=$'\naccount\nnormalState\nconcurrency\nsupport'
+  fi
+  validate_adapter_object_fields "$manifest" '.' "$top_level" ''
+  validate_adapter_object_fields "$manifest" '.isolation' $'strategy\nmode\nenv\nclearEnv\nargs\nshareFromRealHome' 'isolation'
+  if [ "$schema_version" -eq 1 ]; then
+    validate_adapter_object_fields "$manifest" '.share' $'systemHome\nlinkable\nneverLink' 'share'
+    validate_adapter_object_fields "$manifest" '.session' $'portable\npaths\ncredentials\nreason\nresumeHint' 'session'
+    return
+  fi
+  validate_adapter_object_fields "$manifest" '.account' $'mechanism\ncredentialFiles\ncredentialPrecedence\nlogoutScope\nreason\nsecret' 'account'
+  validate_adapter_object_fields "$manifest" '.account.secret' 'environmentVariable' 'account.secret'
+  validate_adapter_object_fields "$manifest" '.normalState' $'root\nruntimeSubdir\nsharedPaths\nsessionPaths\nfilePaths\nunsafePaths' 'normalState'
+  validate_adapter_object_fields "$manifest" '.normalState.root' $'windows\nmacos\nlinux' 'normalState.root'
+  validate_adapter_object_fields "$manifest" '.concurrency' $'level\nsingletonScope' 'concurrency'
+  validate_adapter_object_fields "$manifest" '.support' $'windows\nmacos\nlinux' 'support'
+  local platform
+  for platform in windows macos linux; do
+    validate_adapter_object_fields "$manifest" ".support.$platform" $'level\nreason' "support.$platform"
+  done
+}
+
 # Platform keys must be exactly windows/macos/linux; schema-v2 additionally
 # requires at least one binary candidate per platform.
 validate_adapter_binary() {
@@ -115,30 +156,30 @@ validate_adapter_v1() {
   validate_adapter_path_separation "$manifest" '.session.paths' 'session path' '.session.credentials' 'credential path'
 }
 
-# Every platform row needs a level; 'verified' must cite evidence, the other
-# levels must cite a reason.
+# Every platform row needs a level: 'supported' (reason optional, encouraged
+# for mode requirements) or 'unsupported' (reason required). The retired
+# verified/experimental levels are rejected with an explicit message.
 validate_adapter_support() {
-  local manifest="$1" platform level reason evidence
+  local manifest="$1" platform level reason
   for platform in windows macos linux; do
     level="$(jq -r ".support.$platform.level // empty" "$manifest")"
     case "$level" in
-      verified)
-        evidence="$(jq -r ".support.$platform.evidenceId // empty" "$manifest")"
-        [ -n "$evidence" ] || adapter_validation_error "support.$platform.evidenceId is required for verified support"
-        ;;
-      experimental|unsupported)
+      supported) ;;
+      unsupported)
         reason="$(jq -r ".support.$platform.reason // empty" "$manifest")"
-        [ -n "$reason" ] || adapter_validation_error "support.$platform.reason is required for level '$level'"
+        [ -n "$reason" ] || adapter_validation_error "support.$platform.reason is required for level 'unsupported'"
         ;;
-      *) adapter_validation_error "support.$platform.level must be verified, experimental, or unsupported" ;;
+      verified|experimental)
+        adapter_validation_error "support.$platform.level '$level' was retired; use 'supported' or 'unsupported'"
+        ;;
+      *) adapter_validation_error "support.$platform.level must be supported or unsupported" ;;
     esac
   done
 }
 
 # Schema-v2 (accountOverlay): account mechanism with its required fields,
 # concurrency declaration, per-platform state roots, and full separation
-# between credential, shared, session, and unsafe path lists. An inseparable
-# adapter may never claim verified support.
+# between credential, shared, session, and unsafe path lists.
 validate_adapter_v2() {
   local manifest="$1" strategy mode mechanism concurrency reason
   strategy="$(jq -r '.isolation.strategy // empty' "$manifest")"
@@ -190,13 +231,6 @@ validate_adapter_v2() {
   validate_adapter_path_separation "$manifest" '.account.credentialFiles' 'credential path' '.normalState.unsafePaths' 'unsafe path'
   validate_adapter_path_separation "$manifest" '.normalState.sharedPaths' 'shared path' '.normalState.unsafePaths' 'unsafe path'
   validate_adapter_path_separation "$manifest" '.normalState.sessionPaths' 'session path' '.normalState.unsafePaths' 'unsafe path'
-  if [ "$mechanism" = inseparable ]; then
-    local support_level
-    for platform in windows macos linux; do
-      support_level="$(jq -r ".support.$platform.level // empty" "$manifest")"
-      [ "$support_level" != verified ] || adapter_validation_error "support.$platform.level cannot be verified for inseparable state"
-    done
-  fi
   validate_adapter_support "$manifest"
 }
 
@@ -224,9 +258,13 @@ validate_adapter_manifest() {
   case "$schema_version" in
     1) validate_adapter_v1 "$manifest" ;;
     2) validate_adapter_v2 "$manifest" ;;
-    *) adapter_validation_error "schemaVersion '$schema_version' is not supported" ;;
+    *)
+      adapter_validation_error "schemaVersion '$schema_version' is not supported"
+      return 1
+      ;;
   esac
 
+  validate_adapter_fields "$manifest" "$schema_version"
   validate_adapter_binary "$manifest" "$schema_version"
   validate_adapter_placeholders "$manifest"
   [ "${#ADAPTER_VALIDATION_ERRORS[@]}" -eq 0 ]

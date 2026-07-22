@@ -4,13 +4,13 @@
 
 **同时运行多个 AI 编程工具的账户配置。**
 
-Schema-v2 配置文件会隔离账户凭证与配额身份，并在厂商提供安全边界时共享工具的正常状态 — 会话、配置、agents、skills 和插件。对于将认证与会话或固定钥匙串状态捆绑在一起的产品，multi-cli 会明确标记为实验性或不支持，而不会给出虚假的隔离声明。目前尚无任何适配器通过双账户验证门槛；各产品、平台与认证模式的确切状态请见[支持矩阵](docs/support-matrix.md)。
+Schema-v2 配置文件会隔离账户凭证与配额，并在边界安全时共享会话、配置和扩展。若厂商将认证与会话绑定，multi-cli 会使用独立的操作系统用户，或通过 `--isolated` 创建整根隔离配置文件。[支持矩阵](docs/support-matrix.md)列出每个平台的准确模式和前置条件。
 
 现有的 schema-v1 配置文件在迁移之前仍为旧版整根配置文件 — 见[旧版配置文件](#旧版配置文件)。
 
-[![GitHub repository](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Spielewoy/multi-codex)
+[![GitHub repository](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Spielewoy/multi-cli)
 [![GitHub profile](https://img.shields.io/badge/GitHub-Spielewoy-lightgrey?logo=github)](https://github.com/Spielewoy)
-[![GitHub stars](https://img.shields.io/github/stars/Spielewoy/multi-codex?style=social)](https://github.com/Spielewoy/multi-codex/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/Spielewoy/multi-cli?style=social)](https://github.com/Spielewoy/multi-cli/stargazers)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#安装)
 [![License](https://img.shields.io/badge/license-MIT-green)](#许可证)
 
@@ -18,27 +18,27 @@ Schema-v2 配置文件会隔离账户凭证与配额身份，并在厂商提供�
 
 ## 支持的工具
 
-本仓库附带 17 个适配器。状态按操作系统区分：`experimental`（实验性）表示已有文档记载的候选边界，但完整的双账户验证尚未通过；`unsupported`（不支持）表示 multi-cli 拒绝声称账户隔离。目前没有任何一项经过验证。权威来源为 [docs/support-matrix.md](docs/support-matrix.md)。
+本仓库包含 17 个适配器。`supported` 表示 multi-cli 在该系统上至少提供一种可用的隔离模式；`unsupported` 表示产品或隔离模式在该系统上不可用。权威来源为 [docs/support-matrix.md](docs/support-matrix.md)。
 
 | 工具 | 类型 | Windows | macOS | Linux |
 |------|------|---------|-------|-------|
-| [Claude Code](claude-cli/) | CLI | 实验性 | 不支持（存储的 OAuth） | 实验性 |
-| [OpenAI Codex CLI](codex/) | CLI | 实验性 | 实验性 | 实验性 |
-| [Gemini CLI](gemini-cli/) | CLI | 实验性 | 实验性 | 实验性 |
-| [OpenCode](opencode/) | CLI | 不支持 | 不支持 | 不支持 |
-| [Command Code](commandcode/) | CLI | 不支持 | 不支持 | 不支持 |
-| [Cursor Desktop](cursor/) | IDE | 不支持 | 不支持 | 不支持 |
-| [Cursor CLI](cursor-cli/) | CLI | 实验性 | 实验性 | 实验性 |
-| [Antigravity](antigravity/) | IDE | 实验性 | 不支持 | 不支持 |
-| [AGY CLI](agy-cli/) | CLI | 实验性 | 不支持 | 不支持 |
-| [Kiro](kiro/) | IDE | 实验性 | 不支持 | 不支持 |
-| [Zed](zed/) | IDE | 不支持 | 不支持 | 实验性 |
-| [Devin Desktop / Windsurf](windsurf/) | IDE | 实验性 | 不支持 | 不支持 |
-| [GitHub Copilot CLI](copilot-cli/) | CLI | 实验性 | 实验性 | 实验性 |
-| [Copilot in VS Code](copilot-vscode/) | IDE | 实验性 | 不支持 | 不支持 |
-| [Kimi Code CLI](kimi-cli/) | CLI | 实验性 | 实验性 | 实验性 |
-| [Codex Windows App](codex-gui/) | IDE | 不支持 | 不支持 | 不支持 |
-| [Grok Build CLI](grok-cli/) | CLI/TUI | 实验性 | 实验性 | 实验性 |
+| [Claude Code](claude-cli/) | CLI | supported (file overlay) | supported for API-key profiles only; subscription OAuth is unsupported | supported (file overlay) |
+| [OpenAI Codex CLI](codex/) | CLI | supported (file overlay; file credential store mode) | supported | supported |
+| [Gemini CLI](gemini-cli/) | CLI | supported (file overlay) | supported | supported |
+| [OpenCode](opencode/) | CLI | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Command Code](commandcode/) | CLI | supported (file overlay; use `commandcode`, bare `cmd` collides with cmd.exe) | supported | supported |
+| [Cursor Desktop](cursor/) | IDE | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Cursor CLI](cursor-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Antigravity](antigravity/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [AGY CLI](agy-cli/) | CLI | supported (OS-user isolation; elevated terminal) | unsupported (owned-user Keychain isolation not proven) | unsupported (owned-user Secret Service session not implemented) |
+| [Kiro](kiro/) | IDE | supported (OS-user isolation) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Zed](zed/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [Devin Desktop / Windsurf](windsurf/) | IDE | supported (OS-user isolation; elevated terminal) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [GitHub Copilot CLI](copilot-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Copilot in VS Code](copilot-vscode/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [Kimi Code CLI](kimi-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Codex Desktop App](codex-gui/) | IDE | supported (OS-user isolation when the Store app is installed) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (no desktop app) |
+| [Grok Build CLI](grok-cli/) | CLI/TUI | supported (process token via `multi-cli auth set`) | supported | supported |
 
 每个工具在仓库根目录下都有自己的文件夹，其中的 `adapter.json` 描述了账户边界、共享的正常状态以及升级为“已验证”所需的证据。
 
@@ -49,13 +49,13 @@ Schema-v2 配置文件会隔离账户凭证与配额身份，并在厂商提供�
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/install.sh | bash
 ```
 
 **Windows** — 打开 PowerShell：
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/install.ps1 | iex
 ```
 
 > 安装后，**请重启终端**以使 PATH 更改生效。
@@ -63,8 +63,8 @@ irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install
 ### 从源码安装
 
 ```bash
-git clone https://github.com/Spielewoy/multi-codex.git
-cd multi-codex
+git clone https://github.com/Spielewoy/multi-cli.git
+cd multi-cli
 ./scripts/install.sh --local        # macOS/Linux
 .\scripts\install.ps1 -Local        # Windows
 ```
@@ -103,13 +103,14 @@ multi-cli claude-cli/work
 
 | 命令 | 说明 |
 |------|------|
-| `multi-cli new <tool>/<name>` | 创建新的隔离配置文件 |
-| `multi-cli new <tool>/<name> --shared` | 轻量配置文件（共享设置，隔离认证） |
+| `multi-cli new <tool>/<name>` | 创建账户配置文件（凭据独立，常规状态共享） |
+| `multi-cli new <tool>/<name> --isolated` | 创建不共享任何状态的整根隔离配置文件 |
+| `multi-cli new <tool>/<name> --shared` | 旧版 schema-v1 共享配置文件；schema-v2 配置文件默认已共享声明的常规状态 |
 | `multi-cli new <tool>/<name> --from <tpl>` | 从已保存的模板创建 |
 | `multi-cli <tool>/<name>` | 启动配置文件（简写） |
 | `multi-cli launch <tool>/<name>` | 启动配置文件 |
 | `multi-cli list [<tool>]` | 列出所有配置文件 |
-| `multi-cli status` | 显示运行状态、类型、最后使用时间和大小 |
+| `multi-cli status` | List profiles with their type and disk size |
 | `multi-cli clone <tool>/<src> <tool>/<dest>` | 复制现有配置文件 |
 | `multi-cli rename <tool>/<old> <tool>/<new>` | 重命名配置文件 |
 | `multi-cli delete <tool>/<name>` | 删除配置文件及其所有数据 |
@@ -171,7 +172,7 @@ Schema-v2 适配器将账户机制与正常状态分开声明：
 |------|----------|
 | `fileOverlay` | 凭证保留在配置文件内；声明的正常状态链接到工具的原生共享主目录。 |
 | `processSecret` | 将每个配置文件独有的、最高优先级的凭证仅注入子进程。在配置好安全的密钥存储之前，启动保持禁用。 |
-| `osUserCredentialStore` | 用 multi-cli 拥有的操作系统用户来分离固定的钥匙串身份。在验证所有权和清理逻辑之前保持禁用。 |
+| `osUserCredentialStore` | Uses a multi-cli-owned OS user for tools with a fixed credential identity. Windows requires elevation; macOS/Linux require `sudo`. |
 | `inseparable` | 厂商将认证与正常状态捆绑在一起；合规启动会以失败关闭的方式拒绝，并显示该限制。 |
 
 版本 1 配置文件保留早期的整根 `env`、`userDataDir`、`redirectHome`、`appdata` 和 `sandboxUser` 行为以保持兼容。每个 `<id>/adapter.json` 声明了产品/平台能力和证据要求。
@@ -211,7 +212,7 @@ codex resume <session-id>                        # resume the same chat (codex �
 
 **不支持：** `opencode`（会话与凭证共用一个 SQLite 数据库）和 `cursor`（聊天存储在按工作区路径键控的 SQLite 中）。
 
-> 新配置文件默认从 `base` 播种 — 会话状态，以及完整配置文件的技能/配置资源。向 `multi-cli new` 传入 `--no-seed` 可从空白开始。
+> 旧版 schema-v1 配置文件默认从 `base` 播种。schema-v2 账户配置文件会直接从共享的原生根目录读取声明的会话和配置；隔离配置文件从空白开始。使用 `multi-cli continue` 将支持的会话复制到隔离配置文件或从中复制出来。
 
 ---
 
@@ -219,9 +220,10 @@ codex resume <session-id>                        # resume the same chat (codex �
 
 | 参数 | 含义 |
 |------|------|
-| *（无）* | **完全隔离** — 全新的认证和配置。 |
-| `--shared` | **共享** — 符号链接主安装的设置/扩展，认证保持隔离。 |
-| `--cli` | **CLI** — 标记为仅终端启动（跳过 GUI 发现）。 |
+| *（无）* | **默认共享** — 账户凭证隔离；适配器允许时共享会话和配置。 |
+| `-i`、`--isolate`、`--isolated` | **完全隔离** — 工具的整个根目录都在配置文件内，不共享任何内容。 |
+| `--shared` | 适配器支持时，共享模式的旧版别名。 |
+| `--cli` | **CLI** — 仅从终端启动。 |
 | `--from <tpl>` | 从已保存的模板克隆。 |
 
 ---
@@ -270,13 +272,13 @@ multi-cli completion bash   # or zsh, powershell
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/uninstall.sh | bash
 ```
 
 **Windows**
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/uninstall.ps1 | iex
 ```
 
 卸载前会询问是否删除配置文件数据 — 未经确认不会删除任何内容。
@@ -288,7 +290,7 @@ irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/uninsta
 - [支持矩阵](docs/support-matrix.md) — 按产品、按操作系统的隔离状态及验证门槛
 - [安全策略](SECURITY.md)
 - [许可证](LICENSE)
-- [GitHub 仓库](https://github.com/Spielewoy/multi-codex)
+- [GitHub 仓库](https://github.com/Spielewoy/multi-cli)
 
 ---
 

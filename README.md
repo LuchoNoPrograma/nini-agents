@@ -4,13 +4,13 @@
 
 **Run multiple account profiles for AI coding tools simultaneously.**
 
-A schema-v2 profile isolates the account credential and quota identity while sharing the tool's normal state — conversations, configuration, agents, skills, and plugins — where the vendor exposes a safe boundary. Products that combine auth with sessions or fixed keychain state are marked experimental or unsupported instead of being given a false isolation claim. No adapter has passed the verified dual-account gate yet; see [the support matrix](docs/support-matrix.md) for the exact product, platform, and auth-mode status.
+By default, each profile gets separate account credentials while conversations, configuration, agents, skills, and plugins stay shared where the tool allows it. Use `--isolated` when you want the entire tool home separated. Tools whose login cannot be separated safely use OS-user isolation instead. See the [support matrix](docs/support-matrix.md) for per-platform requirements.
 
-Existing schema-v1 profiles remain legacy whole-root profiles until migrated — see [Legacy Profiles](#legacy-profiles).
+Profiles created by older multi-cli versions keep their whole-root behavior until migrated — see [Legacy Profiles](#legacy-profiles).
 
-[![GitHub repository](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Spielewoy/multi-codex)
+[![GitHub repository](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/Spielewoy/multi-cli)
 [![GitHub profile](https://img.shields.io/badge/GitHub-Spielewoy-lightgrey?logo=github)](https://github.com/Spielewoy)
-[![GitHub stars](https://img.shields.io/github/stars/Spielewoy/multi-codex?style=social)](https://github.com/Spielewoy/multi-codex/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/Spielewoy/multi-cli?style=social)](https://github.com/Spielewoy/multi-cli/stargazers)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#install)
 [![License](https://img.shields.io/badge/license-MIT-green)](#license)
 
@@ -18,29 +18,29 @@ Existing schema-v1 profiles remain legacy whole-root profiles until migrated —
 
 ## Supported Tools
 
-17 adapters ship in this repository. Status is per operating system: `experimental` means a documented candidate boundary exists but full dual-account verification has not passed, and `unsupported` means multi-cli refuses to claim account isolation. Nothing is verified yet. The authoritative source is [docs/support-matrix.md](docs/support-matrix.md).
+17 adapters ship in this repository. Status is per operating system and binary: `supported` means multi-cli provides account isolation on that OS (any mode requirements are noted), and `unsupported` means no isolation mode works there. The authoritative source is [docs/support-matrix.md](docs/support-matrix.md).
 
 | Tool | Kind | Windows | macOS | Linux |
 |------|------|---------|-------|-------|
-| [Claude Code](claude-cli/) | CLI | experimental | unsupported (stored OAuth) | experimental |
-| [OpenAI Codex CLI](codex/) | CLI | experimental | experimental | experimental |
-| [Gemini CLI](gemini-cli/) | CLI | experimental | experimental | experimental |
-| [OpenCode](opencode/) | CLI | unsupported | unsupported | unsupported |
-| [Command Code](commandcode/) | CLI | unsupported | unsupported | unsupported |
-| [Cursor Desktop](cursor/) | IDE | unsupported | unsupported | unsupported |
-| [Cursor CLI](cursor-cli/) | CLI | experimental | experimental | experimental |
-| [Antigravity](antigravity/) | IDE | experimental | unsupported | unsupported |
-| [AGY CLI](agy-cli/) | CLI | experimental | unsupported | unsupported |
-| [Kiro](kiro/) | IDE | experimental | unsupported | unsupported |
-| [Zed](zed/) | IDE | unsupported | unsupported | experimental |
-| [Devin Desktop / Windsurf](windsurf/) | IDE | experimental | unsupported | unsupported |
-| [GitHub Copilot CLI](copilot-cli/) | CLI | experimental | experimental | experimental |
-| [Copilot in VS Code](copilot-vscode/) | IDE | experimental | unsupported | unsupported |
-| [Kimi Code CLI](kimi-cli/) | CLI | experimental | experimental | experimental |
-| [Codex Windows App](codex-gui/) | IDE | unsupported | unsupported | unsupported |
-| [Grok Build CLI](grok-cli/) | CLI/TUI | experimental | experimental | experimental |
+| [Claude Code](claude-cli/) | CLI | supported (file overlay) | supported for API-key profiles only; subscription OAuth is unsupported | supported (file overlay) |
+| [OpenAI Codex CLI](codex/) | CLI | supported (file overlay; file credential store mode) | supported | supported |
+| [Gemini CLI](gemini-cli/) | CLI | supported (file overlay) | supported | supported |
+| [OpenCode](opencode/) | CLI | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Command Code](commandcode/) | CLI | supported (file overlay; use `commandcode`, bare `cmd` collides with cmd.exe) | supported | supported |
+| [Cursor Desktop](cursor/) | IDE | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Cursor CLI](cursor-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Antigravity](antigravity/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [AGY CLI](agy-cli/) | CLI | supported (OS-user isolation; elevated terminal) | unsupported (owned-user Keychain isolation not proven) | unsupported (owned-user Secret Service session not implemented) |
+| [Kiro](kiro/) | IDE | supported (OS-user isolation) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [Zed](zed/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [Devin Desktop / Windsurf](windsurf/) | IDE | supported (OS-user isolation; elevated terminal) | supported (`--isolated` whole-root) | supported (`--isolated` whole-root) |
+| [GitHub Copilot CLI](copilot-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Copilot in VS Code](copilot-vscode/) | IDE | supported (OS-user isolation; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |
+| [Kimi Code CLI](kimi-cli/) | CLI | supported (process token via `multi-cli auth set`) | supported | supported |
+| [Codex Desktop App](codex-gui/) | IDE | supported (OS-user isolation when the Store app is installed) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (no desktop app) |
+| [Grok Build CLI](grok-cli/) | CLI/TUI | supported (process token via `multi-cli auth set`) | supported | supported |
 
-Each tool has its own folder at the repo root with an `adapter.json` describing the account boundary, the shared normal state, and the evidence required for promotion to verified.
+Each tool has its own folder at the repo root with an `adapter.json` describing the account boundary, the shared normal state, and the per-OS support status.
 
 ---
 
@@ -49,13 +49,13 @@ Each tool has its own folder at the repo root with an `adapter.json` describing 
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/install.sh | bash
 ```
 
 **Windows** — open PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/install.ps1 | iex
 ```
 
 > After install, **restart your terminal** for PATH changes to take effect.
@@ -63,8 +63,8 @@ irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/install
 ### From source
 
 ```bash
-git clone https://github.com/Spielewoy/multi-codex.git
-cd multi-codex
+git clone https://github.com/Spielewoy/multi-cli.git
+cd multi-cli
 ./scripts/install.sh --local        # macOS/Linux
 .\scripts\install.ps1 -Local        # Windows
 ```
@@ -93,7 +93,7 @@ Each profile gets an automatic shell alias:
 | Platform | Location |
 |----------|----------|
 | macOS / Linux | `~/MultiCliProfiles/bin/` (add to `PATH`) |
-| Windows | Start Menu shortcuts created automatically |
+| Windows | CLI aliases in `~/MultiCliProfiles/bin/`; Start Menu shortcuts for GUI profiles |
 
 ---
 
@@ -103,13 +103,14 @@ Each profile gets an automatic shell alias:
 
 | Command | Description |
 |---------|-------------|
-| `multi-cli new <tool>/<name>` | Create a new isolated profile |
-| `multi-cli new <tool>/<name> --shared` | Lightweight profile (shared settings, isolated auth) |
+| `multi-cli new <tool>/<name>` | Create an account profile (credentials separate; normal state shared) |
+| `multi-cli new <tool>/<name> --isolated` | Fully isolated schema-v2 profile — shares nothing (whole tool root inside the profile) |
+| `multi-cli new <tool>/<name> --shared` | Legacy schema-v1 shared profile; schema-v2 profiles already share declared normal state by default |
 | `multi-cli new <tool>/<name> --from <tpl>` | Create from a saved template |
 | `multi-cli <tool>/<name>` | Launch a profile (shorthand) |
 | `multi-cli launch <tool>/<name>` | Launch a profile |
 | `multi-cli list [<tool>]` | List all profiles |
-| `multi-cli status` | Show running state, type, last used, and size |
+| `multi-cli status` | List profiles with their type and disk size |
 | `multi-cli clone <tool>/<src> <tool>/<dest>` | Copy an existing profile |
 | `multi-cli rename <tool>/<old> <tool>/<new>` | Rename a profile |
 | `multi-cli delete <tool>/<name>` | Delete a profile and all its data |
@@ -171,10 +172,20 @@ Schema-v2 adapters declare an account mechanism separately from normal state:
 |-----------|--------------|
 | `fileOverlay` | Credentials stay under the profile; declared normal state links to the native shared tool home. |
 | `processSecret` | A per-profile, highest-precedence credential is injected into only the child process. Launch remains disabled until secure secret storage is configured. |
-| `osUserCredentialStore` | Fixed keychain identities are separated with a multi-cli-owned OS user. This remains disabled until ownership and cleanup are verified. |
+| `osUserCredentialStore` | Fixed keychain identities are separated with a multi-cli-owned OS user. Provisioning requires an elevated terminal on Windows. |
 | `inseparable` | The vendor combines auth and normal state; compliant launch fails closed and the limitation is shown. |
 
-Version-1 profiles retain the earlier whole-root `env`, `userDataDir`, `redirectHome`, `appdata`, and `sandboxUser` behavior for compatibility. Each `<id>/adapter.json` states product/platform capabilities and evidence requirements.
+Version-1 profiles retain the earlier whole-root `env`, `userDataDir`, `redirectHome`, `appdata`, and `sandboxUser` behavior for compatibility. Each `<id>/adapter.json` states product/platform capabilities and per-OS support status.
+
+---
+
+## Shared vs Isolated Profiles
+
+Profiles are **shared** by default: account credentials are separate, while conversations, configuration, and skills use the tool's normal shared location. `--isolated` puts the tool's entire home/config directory inside the profile, so nothing is shared. Isolated profiles can still be used with `continue` to copy supported conversations between accounts. For tools whose login cannot be split from normal state, `--isolated` is the direct whole-root option and avoids creating a separate OS user.
+
+```bash
+multi-cli new codex/acme --isolated   # CODEX_HOME is the profile dir; ~/.codex is never touched
+```
 
 ---
 
@@ -211,7 +222,7 @@ After copying, resume inside the destination profile with the tool's own command
 
 **Not supported:** `opencode` (sessions and credentials live in one shared SQLite database) and `cursor` (chats are stored in SQLite keyed to the workspace path).
 
-> New profiles are seeded from `base` by default — conversation state, plus skills/config assets for full profiles. Pass `--no-seed` to `multi-cli new` to start empty.
+> Legacy schema-v1 profiles are seeded from `base` by default. Schema-v2 account profiles already read declared conversations and configuration from the shared native root; isolated profiles start empty. Use `multi-cli continue` to copy supported conversations into or out of an isolated profile.
 
 ---
 
@@ -219,10 +230,11 @@ After copying, resume inside the destination profile with the tool's own command
 
 | Flag | Meaning |
 |------|---------|
-| *(none)* | **Full** — completely isolated. Fresh auth, fresh config. |
-| `--shared` | **Shared** — symlinks settings/extensions from your main install. Auth stays isolated. |
+| *(none)* | **Account profile** — separate credentials with declared conversations/config shared through the native tool root. |
+| `--isolated`, `--isolate`, `-i` | **Whole-root isolated** — shares nothing with the native tool root. |
+| `--shared` | **Legacy shared profile** — links settings/extensions for schema-v1 adapters; cannot be combined with `--isolated`. |
 | `--cli` | **CLI** — marks the profile for terminal-only launch (skips GUI discovery). |
-| `--from <tpl>` | Clone from a saved template. |
+| `--from <tpl>` | Create from a validated, credential-free template. |
 
 ---
 
@@ -270,13 +282,13 @@ Follow the instructions to add it to your `.zshrc`, `.bashrc`, or PowerShell `$P
 **macOS / Linux**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/uninstall.sh | bash
 ```
 
 **Windows**
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-codex/main/scripts/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/scripts/uninstall.ps1 | iex
 ```
 
 You'll be asked whether to remove your profile data — nothing is deleted without confirmation.
@@ -285,10 +297,10 @@ You'll be asked whether to remove your profile data — nothing is deleted witho
 
 ## Links
 
-- [Support matrix](docs/support-matrix.md) — per-product, per-OS isolation status and the verification gate
+- [Support matrix](docs/support-matrix.md) — per-product, per-OS isolation status and mode requirements
 - [Security policy](SECURITY.md)
 - [License](LICENSE)
-- [GitHub repository](https://github.com/Spielewoy/multi-codex)
+- [GitHub repository](https://github.com/Spielewoy/multi-cli)
 
 ---
 

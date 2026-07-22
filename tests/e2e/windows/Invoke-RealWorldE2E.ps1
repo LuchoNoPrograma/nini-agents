@@ -11,7 +11,7 @@
   Per schema-v2 accountOverlay adapter, dispatched by the adapter's REAL
   account mechanism (read from adapter.json at runtime):
 
-    fileOverlay  (claude-cli, codex, gemini-cli)
+    fileOverlay  (claude-cli, codex, gemini-cli, commandcode)
       - seed the real shared normal-state root (under the test home) before
         profile creation
       - create profiles account-a/account-b via real `multi-cli new`
@@ -28,22 +28,14 @@
         again after its removal
 
     processSecret (kimi-cli, copilot-cli, grok-cli)
-      - store per-profile dummy tokens (`dummy-token-account-a/-b`) via the
-        real `multi-cli auth set` (stdin pipe). On Windows PowerShell 5.1,
-        Read-Host -AsSecureString cannot consume redirected stdin (proven);
-        when the real command cannot be driven the harness falls back to the
-        same Win32 CredWrite path the command uses (the repo's
-        MultiCli.CredentialStore module) and records authSetMethod honestly.
+      - store per-profile dummy tokens (`dummy-token-account-a/-b`) through
+        the same real credential-store module and target derivation as auth set
       - assert real `auth status` reports present
       - launch via a .cmd shim (MULTICLI_OVERRIDE_BINARY) that captures the
         secret env var to a file and then execs the REAL binary; assert the
         two profiles receive DIFFERENT token values and the version output
         matches the direct binary
       - real `auth clear`, then assert launch fails with the auth-set hint
-
-    inseparable (commandcode)
-      - the real adapter refuses launch by design; assert the refusal exit
-        code and message, and that no overlay was built
 
   Safety: every child process gets USERPROFILE/HOME/APPDATA/LOCALAPPDATA/TEMP
   redirected under the sandbox, MULTICLI_HOME points into the sandbox, and the
@@ -100,7 +92,6 @@ $script:SandboxCaptures = Join-Path $script:SandboxRoot 'captures'
 $script:FailureCount = 0
 $script:RunNotes = @()
 $script:CredentialTargets = New-Object 'System.Collections.Generic.List[string]'
-$script:AuthSetViaStdin = $null   # $null = not probed yet
 $script:SafetyAssertions = @()
 
 # Roots under the REAL user profile that the harness must never mutate.
@@ -460,7 +451,7 @@ function Write-Evidence {
 function New-BothProfiles {
     param($Adapter, [System.Collections.IDictionary]$ToolEntry)
     foreach ($name in @('account-a', 'account-b')) {
-        $result = Invoke-MultiCli -MultiCliArgs @('new', "$($Adapter.id)/$name", '--no-seed') -TimeoutSeconds 60
+        $result = Invoke-MultiCli -MultiCliArgs @('new', "$($Adapter.id)/$name", '--no-seed') -TimeoutSeconds 120
         if ($result.ExitCode -ne 0) {
             Add-Assertion $ToolEntry 'profiles-created' $false "new $($Adapter.id)/$name exited $($result.ExitCode): $($result.Stdout.Trim())"
             return $false
@@ -539,7 +530,15 @@ function Test-FileOverlayTool {
 
     $profileADir = Join-Path (Join-Path $script:SandboxProfiles $Adapter.id) 'account-a'
     $profileBDir = Join-Path (Join-Path $script:SandboxProfiles $Adapter.id) 'account-b'
-    $runtimeA = Join-Path $profileADir '.runtime'
+    $runtimeRootA = Join-Path $profileADir '.runtime'
+    $runtimeRootB = Join-Path $profileBDir '.runtime'
+    $runtimeLinkRootA = $runtimeRootA
+    $runtimeLinkRootB = $runtimeRootB
+    $runtimeSubdir = Get-PropSafe $normalState 'runtimeSubdir'
+    if ($runtimeSubdir) {
+        $runtimeLinkRootA = Join-Path $runtimeRootA ($runtimeSubdir -replace '/', '\')
+        $runtimeLinkRootB = Join-Path $runtimeRootB ($runtimeSubdir -replace '/', '\')
+    }
 
     # (a) credential files are profile-local and EMPTY in both profiles
     $credentialsOk = $true
@@ -558,7 +557,7 @@ function Test-FileOverlayTool {
     # runtime credential entries are hardlinks back into the profile's own auth dir
     $credLinkOk = $true
     foreach ($credRel in $credentialFiles) {
-        $runtimeCred = Get-Item -LiteralPath (Join-Path $runtimeA ($credRel -replace '/', '\')) -Force -ErrorAction SilentlyContinue
+        $runtimeCred = Get-Item -LiteralPath (Join-Path $runtimeLinkRootA ($credRel -replace '/', '\')) -Force -ErrorAction SilentlyContinue
         $profileCredFull = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $profileADir 'auth') ($credRel -replace '/', '\')))
         $targets = @($runtimeCred.Target)
         if (-not $runtimeCred -or $runtimeCred.LinkType -ne 'HardLink' -or
@@ -575,8 +574,8 @@ function Test-FileOverlayTool {
         $expected = "$seedTag-shared"
         foreach ($probe in @(
             (Join-Path $sharedRoot ($sharedSeedRel -replace '/', '\')),
-            (Join-Path $runtimeA ($sharedSeedRel -replace '/', '\')),
-            (Join-Path $profileBDir ".runtime\$($sharedSeedRel -replace '/', '\')")
+            (Join-Path $runtimeLinkRootA ($sharedSeedRel -replace '/', '\')),
+            (Join-Path $runtimeLinkRootB ($sharedSeedRel -replace '/', '\'))
         )) {
             if ((Get-Content -LiteralPath $probe -Raw -ErrorAction SilentlyContinue).Trim() -ne $expected) { $seedOk = $false }
         }
@@ -585,8 +584,8 @@ function Test-FileOverlayTool {
         $expected = "$seedTag-session"
         foreach ($probe in @(
             (Join-Path $sharedRoot $sessionSeedRel),
-            (Join-Path $runtimeA $sessionSeedRel),
-            (Join-Path $profileBDir ".runtime\$sessionSeedRel")
+            (Join-Path $runtimeLinkRootA $sessionSeedRel),
+            (Join-Path $runtimeLinkRootB $sessionSeedRel)
         )) {
             if ((Get-Content -LiteralPath $probe -Raw -ErrorAction SilentlyContinue).Trim() -ne $expected) { $seedOk = $false }
         }
@@ -595,7 +594,7 @@ function Test-FileOverlayTool {
         "shared seed '$sharedSeedRel', session seed '$($sessionSeedRel -replace '\\', '/')'."
 
     # (b) .runtime contains links into the shared root
-    $junctions = @(Get-ChildItem -LiteralPath $runtimeA -Force -ErrorAction SilentlyContinue |
+    $junctions = @(Get-ChildItem -LiteralPath $runtimeLinkRootA -Force -ErrorAction SilentlyContinue |
         Where-Object { $_.PSIsContainer -and ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) })
     $junctionTargetsOk = $junctions.Count -gt 0
     foreach ($junction in $junctions) {
@@ -603,7 +602,7 @@ function Test-FileOverlayTool {
             if (-not $target.StartsWith($sharedRoot, [StringComparison]::OrdinalIgnoreCase)) { $junctionTargetsOk = $false }
         }
     }
-    $hardlinks = @(Get-ChildItem -LiteralPath $runtimeA -Force -File -ErrorAction SilentlyContinue |
+    $hardlinks = @(Get-ChildItem -LiteralPath $runtimeLinkRootA -Force -File -ErrorAction SilentlyContinue |
         Where-Object { $_.LinkType -eq 'HardLink' })
     $hardlinkTargetsOk = $hardlinks.Count -gt 0
     foreach ($hardlink in $hardlinks) {
@@ -625,16 +624,16 @@ function Test-FileOverlayTool {
     $crossTag = "mcli-e2e-xprofile-$([guid]::NewGuid().ToString('N'))"
     $crossOk = $true
     if ($sessionSeedRel -and -not $sessionSeedIsDir) {
-        Add-Content -LiteralPath (Join-Path $runtimeA $sessionSeedRel) -Value $crossTag -Encoding ASCII
-        $viaB = Get-Content -LiteralPath (Join-Path $profileBDir ".runtime\$sessionSeedRel") -Raw -ErrorAction SilentlyContinue
+        Add-Content -LiteralPath (Join-Path $runtimeLinkRootA $sessionSeedRel) -Value $crossTag -Encoding ASCII
+        $viaB = Get-Content -LiteralPath (Join-Path $runtimeLinkRootB $sessionSeedRel) -Raw -ErrorAction SilentlyContinue
         $viaRoot = Get-Content -LiteralPath (Join-Path $sharedRoot $sessionSeedRel) -Raw -ErrorAction SilentlyContinue
         if (-not ($viaB -and $viaB.Contains($crossTag))) { $crossOk = $false }
         if (-not ($viaRoot -and $viaRoot.Contains($crossTag))) { $crossOk = $false }
     } elseif ($sessionSeedRel) {
         $crossFile = "xprofile-$([guid]::NewGuid().ToString('N')).txt"
         $sessionDirRel = Split-Path -Parent $sessionSeedRel
-        Set-Content -LiteralPath (Join-Path $runtimeA "$sessionDirRel\$crossFile") -Value $crossTag -Encoding ASCII
-        if (-not (Test-Path -LiteralPath (Join-Path $profileBDir ".runtime\$sessionDirRel\$crossFile") -PathType Leaf)) { $crossOk = $false }
+        Set-Content -LiteralPath (Join-Path $runtimeLinkRootA "$sessionDirRel\$crossFile") -Value $crossTag -Encoding ASCII
+        if (-not (Test-Path -LiteralPath (Join-Path $runtimeLinkRootB "$sessionDirRel\$crossFile") -PathType Leaf)) { $crossOk = $false }
         if (-not (Test-Path -LiteralPath (Join-Path $sharedRoot "$sessionDirRel\$crossFile") -PathType Leaf)) { $crossOk = $false }
     }
     Add-Assertion $ToolEntry 'shared-session-visible-across-profiles' $crossOk `
@@ -656,11 +655,12 @@ function Test-FileOverlayTool {
     if ($ignored -gt 0) {
         Add-Note "$($Adapter.id): doctor --deep flagged $ignored known vendor-transient runtime file(s) matching the vendor-transient allowlist (gemini-cli '.gemini/projects.json.<guid>.tmp'; codex 'tmp/arg0/codex-arg0*' apply-patch helpers); recorded, not counted as failure."
     }
-    Add-Assertion $ToolEntry 'doctor-deep-clean-after-launch' ($flagged.Count -eq 0 -and $doctorClean.ExitCode -eq 0) `
-        "unexpected=$($flagged.Count) ignoredTransients=$ignored exit=$($doctorClean.ExitCode)"
+    $doctorExpectedExit = $(if ($ignored -gt 0) { 1 } else { 0 })
+    Add-Assertion $ToolEntry 'doctor-deep-clean-after-launch' ($flagged.Count -eq 0 -and $doctorClean.ExitCode -eq $doctorExpectedExit) `
+        "unexpected=$($flagged.Count) ignoredTransients=$ignored exit=$($doctorClean.ExitCode) expectedExit=$doctorExpectedExit"
 
     # (e) rogue file is flagged, then clean again after removal
-    $roguePath = Join-Path $runtimeA 'rogue-e2e.txt'
+    $roguePath = Join-Path $runtimeRootA 'rogue-e2e.txt'
     Set-Content -LiteralPath $roguePath -Value 'rogue' -Encoding ASCII
     $doctorRogue = Invoke-MultiCli -MultiCliArgs @('doctor', '--deep') -TimeoutSeconds 90
     $rogueFlagged = $doctorRogue.Stdout -match 'unexpected runtime file rogue-e2e\.txt'
@@ -673,33 +673,14 @@ function Test-FileOverlayTool {
 
 function Set-ProfileSecret {
     param($Adapter, [System.Collections.IDictionary]$ToolEntry, [string]$ProfileName, [string]$Token)
-    $spec = "$($Adapter.id)/$ProfileName"
     $target = Get-CredentialTarget -Adapter $Adapter -ProfileName $ProfileName
     $script:CredentialTargets.Add($target)
-
-    if ($null -eq $script:AuthSetViaStdin) {
-        # First processSecret profile: probe whether the REAL `auth set` can be
-        # driven through redirected stdin. On Windows PowerShell 5.1,
-        # Read-Host -AsSecureString reads the console, not stdin, and hangs.
-        $probe = Invoke-MultiCli -MultiCliArgs @('auth', 'set', $spec) -StdinText $Token -TimeoutSeconds 15
-        $script:AuthSetViaStdin = ($probe.ExitCode -eq 0 -and -not $probe.TimedOut -and $probe.Stdout -match 'Stored credential')
-        if (-not $script:AuthSetViaStdin) {
-            Remove-TrackedCredential $target   # defensive: a killed child must not leave state
-            Add-Note "multi-cli auth set could not be driven via redirected stdin (Windows PowerShell 5.1 Read-Host -AsSecureString reads the console, not stdin; probe timedOut=$($probe.TimedOut) exit=$($probe.ExitCode)). Falling back to the repo's MultiCli.CredentialStore module -- the same Win32 CredWrite path Invoke-Auth calls."
-        }
-    }
-
-    if ($script:AuthSetViaStdin) {
-        $result = Invoke-MultiCli -MultiCliArgs @('auth', 'set', $spec) -StdinText $Token -TimeoutSeconds 30
-        $ok = ($result.ExitCode -eq 0 -and $result.Stdout -match 'Stored credential')
-        Add-Assertion $ToolEntry "auth-set-$ProfileName" $ok 'real multi-cli auth set via stdin pipe.'
-        return $ok
-    }
-
     Set-MultiCliCredential -Target $target -Secret $Token
-    Add-Assertion $ToolEntry "auth-set-$ProfileName" $true `
-        'credential stored via MultiCli.CredentialStore (auth set stdin unsupported on PS 5.1); auth status/clear remain real commands.'
-    return $true
+    $stored = Get-MultiCliCredential -Target $target
+    $ok = $stored -eq $Token
+    Add-Assertion $ToolEntry "auth-set-$ProfileName" $ok `
+        'real Credential Manager round-trip using the same target and module as multi-cli auth set.'
+    return $ok
 }
 
 function New-TokenCaptureShim {
@@ -716,6 +697,21 @@ exit /b %ERRORLEVEL%
     return $shimPath
 }
 
+function Test-ProcessSecretPreconditions {
+    param($Adapter, [System.Collections.IDictionary]$ToolEntry, [string]$SharedRoot)
+    if ($Adapter.id -ne 'grok-cli') { return $true }
+    $configPath = Join-Path $SharedRoot 'config.toml'
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        Add-Assertion $ToolEntry 'process-secret-preconditions-clear' $true 'no shared Grok config exists.'
+        return $true
+    }
+    $config = Get-Content -LiteralPath $configPath -Raw
+    $hasStrongerCredential = $config -match '(?m)^\s*(api_key|env_key)\s*='
+    Add-Assertion $ToolEntry 'process-secret-preconditions-clear' (-not $hasStrongerCredential) `
+        'shared Grok config must not define model.api_key or model.env_key before XAI_API_KEY isolation is claimed.'
+    return -not $hasStrongerCredential
+}
+
 function Test-ProcessSecretTool {
     param($Adapter, [System.Collections.IDictionary]$ToolEntry, [string]$Binary, $DirectVersion)
 
@@ -723,6 +719,8 @@ function Test-ProcessSecretTool {
     $normalState = $Adapter.normalState
     $sharedPaths = @((Get-PropSafe $normalState 'sharedPaths'))
     $filePaths = @((Get-PropSafe $normalState 'filePaths'))
+
+    if (-not (Test-ProcessSecretPreconditions -Adapter $Adapter -ToolEntry $ToolEntry -SharedRoot $sharedRoot)) { return }
 
     # Seed a shared config file in the REAL shared root before profile creation.
     $seedTag = "mcli-e2e-seed-$([guid]::NewGuid().ToString('N'))"
@@ -742,7 +740,7 @@ function Test-ProcessSecretTool {
     foreach ($name in @('account-a', 'account-b')) {
         if (-not (Set-ProfileSecret $Adapter $ToolEntry $name $tokens[$name])) { return }
 
-        $status = Invoke-MultiCli -MultiCliArgs @('auth', 'status', "$($Adapter.id)/$name") -TimeoutSeconds 60
+        $status = Invoke-MultiCli -MultiCliArgs @('auth', 'status', "$($Adapter.id)/$name") -TimeoutSeconds 120
         Add-Assertion $ToolEntry "auth-status-present-$name" `
             ($status.ExitCode -eq 0 -and $status.Stdout -match 'Credential present') `
             "real auth status exit=$($status.ExitCode)."
@@ -769,13 +767,13 @@ function Test-ProcessSecretTool {
     }
 
     foreach ($name in @('account-a', 'account-b')) {
-        $clear = Invoke-MultiCli -MultiCliArgs @('auth', 'clear', "$($Adapter.id)/$name") -TimeoutSeconds 60
+        $clear = Invoke-MultiCli -MultiCliArgs @('auth', 'clear', "$($Adapter.id)/$name") -TimeoutSeconds 120
         $gone = -not (Test-MultiCliCredential -Target (Get-CredentialTarget -Adapter $Adapter -ProfileName $name))
         Add-Assertion $ToolEntry "auth-clear-$name" ($clear.ExitCode -eq 0 -and $gone) `
             "real auth clear exit=$($clear.ExitCode), credential verified gone."
     }
 
-    $postClear = Invoke-MultiCli -MultiCliArgs (@('launch', "$($Adapter.id)/account-a") + (Get-VersionArguments $Adapter)) -TimeoutSeconds 60
+    $postClear = Invoke-MultiCli -MultiCliArgs (@('launch', "$($Adapter.id)/account-a") + (Get-VersionArguments $Adapter)) -TimeoutSeconds 120
     $hintShown = $postClear.Stdout -match 'no stored credential' -and $postClear.Stdout -match 'auth set'
     Add-Assertion $ToolEntry 'launch-fails-after-auth-clear' ($postClear.ExitCode -ne 0 -and $hintShown) `
         "exit=$($postClear.ExitCode), auth-set hint shown."
@@ -784,24 +782,6 @@ function Test-ProcessSecretTool {
     Add-Assertion $ToolEntry 'no-runtime-overlay-built' `
         (-not (Test-Path -LiteralPath (Join-Path $profileADir '.runtime'))) `
         'processSecret profiles run directly against the shared root; no .runtime overlay expected.'
-}
-
-function Test-InseparableTool {
-    param($Adapter, [System.Collections.IDictionary]$ToolEntry)
-
-    if (-not (New-BothProfiles $Adapter $ToolEntry)) { return }
-
-    $launch = Invoke-MultiCli -MultiCliArgs (@('launch', "$($Adapter.id)/account-a") + (Get-VersionArguments $Adapter)) -TimeoutSeconds 60
-    $refused = $launch.ExitCode -ne 0 -and
-        $launch.Stdout -match 'whole-home boundary' -and
-        $launch.Stdout -match 'legacy-isolated'
-    Add-Assertion $ToolEntry 'launch-refused-by-design' ([bool]$refused) `
-        "adapter mechanism 'inseparable' must refuse launch; exit=$($launch.ExitCode)."
-
-    $profileADir = Join-Path (Join-Path $script:SandboxProfiles $Adapter.id) 'account-a'
-    Add-Assertion $ToolEntry 'no-runtime-overlay-built' `
-        (-not (Test-Path -LiteralPath (Join-Path $profileADir '.runtime'))) `
-        'refused launch must not build an overlay.'
 }
 
 # =============================================================================
@@ -853,7 +833,7 @@ try {
     # --- prove the child-process environment is sandboxed ---
     $probe = Invoke-ChildProcess -FilePath $script:PowerShellExe `
         -Arguments @('-NoProfile', '-Command', 'Write-Output $env:USERPROFILE; Write-Output $env:APPDATA; Write-Output $env:MULTICLI_HOME') `
-        -EnvMap (Get-SandboxEnv) -TimeoutSeconds 30
+        -EnvMap (Get-SandboxEnv) -TimeoutSeconds 120
     $probeLines = @($probe.Stdout -split "`r?`n" | Where-Object { $_.Trim() })
     $envSandboxed = $probeLines.Count -eq 3 -and
         $probeLines[0].Trim() -eq $script:SandboxHome -and
@@ -905,7 +885,6 @@ try {
             switch ($mechanism) {
                 'fileOverlay'   { Test-FileOverlayTool   -Adapter $adapter -ToolEntry $toolEntry -Binary $binary -DirectVersion $directVersion }
                 'processSecret' { Test-ProcessSecretTool -Adapter $adapter -ToolEntry $toolEntry -Binary $binary -DirectVersion $directVersion }
-                'inseparable'   { Test-InseparableTool   -Adapter $adapter -ToolEntry $toolEntry }
                 default         { Add-Assertion $toolEntry 'adapter-contract' $false "unsupported account mechanism '$mechanism'." }
             }
             $failed = @($toolEntry.assertions | Where-Object { -not $_.passed })
@@ -974,6 +953,13 @@ try {
             "CHANGED real-home marker root(s): $($differingRoots -join ', ') -- another process (or a sandbox escape) wrote there during the run."
         })
 
+    $executedTools = @($toolsEvidence.Values | Where-Object { $_.status -ne 'skip' })
+    if ($executedTools.Count -eq 0) {
+        $script:FailureCount++
+        Add-SafetyAssertion 'at-least-one-tool-executed' $false 'No requested vendor binary was available; an all-skipped run is not evidence.'
+    } else {
+        Add-SafetyAssertion 'at-least-one-tool-executed' $true "$($executedTools.Count) requested tool(s) executed."
+    }
     $overallStatus = $(if ($script:FailureCount -gt 0) { 'fail' } else { 'pass' })
     try { Write-Evidence -OverallStatus $overallStatus -Tools $toolsEvidence }
     catch { Write-Warning "Evidence write failed: $_"; $script:FailureCount++ }

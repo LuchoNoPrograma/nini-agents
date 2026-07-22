@@ -34,13 +34,13 @@ Shared root: `%USERPROFILE%\.cursor` (Windows), `~/.cursor` (macOS/Linux). Share
 
 ## Known limitations
 
-- Direct-key precedence and authenticated concurrency E2E are pending per `adapter.json`.
-- Browser-login desktop state is out of scope for this adapter; see `cursor` (unsupported) for the IDE.
+- `CURSOR_API_KEY` is the sole declared credential; store it per profile with `multi-cli auth set`.
+- Browser-login desktop state is out of scope for this adapter; see `cursor` (`--isolated` whole-root) for the IDE.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| experimental | experimental | experimental |
+| supported (process token via `multi-cli auth set`) | supported | supported |
 
-`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.
+`supported` means multi-cli provides account isolation on that OS (mode requirements noted); `unsupported` means no isolation mode works there.

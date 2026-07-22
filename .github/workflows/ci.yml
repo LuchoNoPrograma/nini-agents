@@ -131,7 +131,10 @@ jobs:
         run: |
           if command -v apt-get >/dev/null 2>&1; then
             sudo apt-get update -y
-            sudo apt-get install -y bats jq
+            # libsecret-tools + gnome-keyring + dbus-x11: the auth/processSecret
+            # tests exercise the real Linux Secret Service backend (secret-tool),
+            # which needs both the CLI and a running keyring daemon.
+            sudo apt-get install -y bats jq libsecret-tools gnome-keyring dbus-x11 acl
           elif command -v brew >/dev/null 2>&1; then
             brew install bats-core jq
           else
@@ -144,8 +147,75 @@ jobs:
       - name: Validate adapter contracts
         run: bash scripts/validate-adapters.sh
 
+      # macOS: `security` against the default login keychain can block on a GUI
+      # unlock/access prompt on a headless runner, hanging the whole suite.
+      # Give the run a dedicated ephemeral keychain with a known password,
+      # unlocked, partition-listed, and made default so no prompt can appear.
+      - name: Prepare an ephemeral CI keychain (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          KEYCHAIN="multicli-ci-$(uuidgen).keychain"
+          KEYCHAIN_PASSWORD="multicli-ci"
+          PREVIOUS_DEFAULT="$(security default-keychain -d user | tr -d '"' | xargs)"
+          echo "MULTICLI_CI_KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+          echo "MULTICLI_PREVIOUS_DEFAULT_KEYCHAIN=$PREVIOUS_DEFAULT" >> "$GITHUB_ENV"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security default-keychain -d user -s "$KEYCHAIN"
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
       - name: Run the bats suite
-        run: bash tests/run-bats.sh
+        run: |
+          if [ "$(uname -s)" = "Linux" ]; then
+            # Secret Service needs a session bus and an unlocked keyring.
+            # Smoke-check the store first so a broken keyring setup fails here
+            # with a clear error instead of obscure test failures.
+            dbus-run-session -- bash -c '
+              set -euo pipefail
+              printf "\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+              printf "ci-smoke" | secret-tool store --label=ci-smoke service multicli-ci target smoke
+              [ "$(secret-tool lookup service multicli-ci target smoke)" = "ci-smoke" ]
+              secret-tool clear service multicli-ci target smoke
+              exec bash tests/run-bats.sh
+            '
+          else
+            bash tests/run-bats.sh
+          fi
+
+      - name: Run the real POSIX OS-user lifecycle
+        timeout-minutes: 10
+        run: bash tests/e2e/posix-osuser.sh
+
+      - name: Remove the ephemeral CI keychain (macOS)
+        if: runner.os == 'macOS' && always()
+        run: |
+          if [ -n "${MULTICLI_PREVIOUS_DEFAULT_KEYCHAIN:-}" ]; then
+            security default-keychain -d user -s "$MULTICLI_PREVIOUS_DEFAULT_KEYCHAIN"
+          fi
+          if [ -n "${MULTICLI_CI_KEYCHAIN:-}" ]; then
+            security delete-keychain "$MULTICLI_CI_KEYCHAIN"
+          fi
+
+  bash-coverage:
+    name: bash coverage (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install coverage dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y kcov bats jq libsecret-tools gnome-keyring dbus-x11 acl
+      - name: Enforce Bash coverage
+        env:
+          COVERAGE_BASELINE: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+        run: |
+          dbus-run-session -- bash -c '
+            set -euo pipefail
+            printf "\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
+            exec env COVERAGE_BASELINE="$COVERAGE_BASELINE" bash tests/coverage/run-bash-coverage.sh
+          '
 
   # The PowerShell session-continuation suite (Pester). Uses the Pester 3.4
   # shipped with Windows PowerShell 5.1 (the suite is 3.4-compatible). The
@@ -168,8 +238,15 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Validate-Adapters.ps1
 
       - name: Run the Pester suite
+        timeout-minutes: 30
         shell: powershell
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-pester.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-pester.ps1 -CI
+
+      - name: Enforce PowerShell module coverage
+        shell: powershell
+        env:
+          COVERAGE_BASELINE: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/coverage/Invoke-ModuleCoverage.ps1 -MinimumPercent 95
 
   windows-install-smoke:
     name: install + run (windows-latest)

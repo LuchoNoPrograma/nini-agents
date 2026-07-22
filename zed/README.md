@@ -1,8 +1,8 @@
 # zed — Zed
 
-**Account boundary:** `osUserCredentialStore` — Zed namespaces credentials through its `credentials_url` keychain entry; the declared boundary combines that namespace with a per-profile process and data root.
+**Account boundary:** `osUserCredentialStore` — each profile runs under a multi-cli-owned OS user, separating Zed's credential store, process namespace, and data root.
 
-Zed is a singleton per release channel and OS user. On Linux, separate data roots plus credential namespaces are a candidate boundary; on Windows and macOS the same-channel singleton/IPC prevents truthful same-user concurrent accounts.
+Zed is a singleton per release channel and OS user. An owned OS user gives each profile a separate process and credential namespace, including same-channel concurrent profiles.
 
 ## Install
 
@@ -10,7 +10,7 @@ Zed is a singleton per release channel and OS user. On Linux, separate data root
 
 Binary discovery: `zed` or `zeditor` (Linux), `zed.exe` (Windows), `/usr/local/bin/zed` (macOS).
 
-## Quickstart (Linux only)
+## Quickstart
 
 ```bash
 multi-cli new zed/work
@@ -19,12 +19,12 @@ multi-cli new zed/personal
 multi-cli launch zed/personal
 ```
 
-Windows and macOS launches fail closed.
+The first launch requires an elevated terminal on Windows so multi-cli can provision the owned OS user. macOS and Linux remain unsupported until a real owned-user desktop credential session is implemented and verified.
 
 ## Account boundary
 
-- Profile-local credentials: the Zed `credentials_url` keychain namespace.
-- Logout scope: credential namespace.
+- Profile-local credentials: Zed's credential store under the profile-owned OS user.
+- Logout scope: OS user.
 - Singleton scope: release channel and OS user (`releaseChannelAndOsUser`).
 
 ## Shared normal state
@@ -35,13 +35,11 @@ The `db/` directory (SQLite) is declared unsafe and is never shared until dual-p
 
 ## Known limitations
 
-- Linux is the only candidate platform, and custom data roots plus credential namespaces still need a live dual-process/database E2E pass.
-- Windows and macOS are unsupported: same-channel singleton/IPC and the shared database make same-user concurrent accounts untruthful.
+- Same-channel singleton behavior requires separate OS users for concurrent Windows windows; macOS/Linux owned-user GUI sessions are not yet supported.
+- The `db/` tree is never shared across profiles.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| unsupported | unsupported | experimental |
-
-`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.
+| supported (owned OS user; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (owned-user GUI/Secret Service session not implemented) |

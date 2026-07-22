@@ -57,9 +57,9 @@ function Write-MigrationAdapter {
   },
   "concurrency": { "level": "multiWriter", "singletonScope": "none" },
   "support": {
-    "windows": { "level": "experimental", "reason": "Fixture only." },
-    "macos": { "level": "experimental", "reason": "Fixture only." },
-    "linux": { "level": "experimental", "reason": "Fixture only." }
+    "windows": { "level": "supported", "reason": "Fixture only." },
+    "macos": { "level": "supported", "reason": "Fixture only." },
+    "linux": { "level": "supported", "reason": "Fixture only." }
   },
   "install": "https://example.test/install",
   "versionCommand": ["--version"]
@@ -187,10 +187,14 @@ function Invoke-MigrationLauncher {
     if ($Probe) { $process.EnvironmentVariables['MULTICLI_OVERRIDE_BINARY'] = $Probe }
     if ($Capture) { $process.EnvironmentVariables['CAPTURE_OUTPUT'] = $Capture }
     $child = [System.Diagnostics.Process]::Start($process)
-    $stdout = $child.StandardOutput.ReadToEnd()
-    $stderr = $child.StandardError.ReadToEnd()
-    $child.WaitForExit()
-    return [pscustomobject]@{ ExitCode = $child.ExitCode; Output = "$stdout$stderr" }
+    $stdoutTask = $child.StandardOutput.ReadToEndAsync()
+    $stderrTask = $child.StandardError.ReadToEndAsync()
+    $timedOut = -not $child.WaitForExit(120000)
+    if ($timedOut) { try { $child.Kill() } catch { }; $child.WaitForExit() }
+    return [pscustomobject]@{
+        ExitCode = $(if ($timedOut) { -1 } else { $child.ExitCode })
+        Output = "$($stdoutTask.Result)$($stderrTask.Result)"
+    }
 }
 
 Describe 'Test-MultiCliLegacyProfile' {

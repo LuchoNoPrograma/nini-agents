@@ -20,9 +20,9 @@
   },
   "concurrency": { "level": "singleWriter", "singletonScope": "osUser" },
   "support": {
-    "windows": { "level": "experimental", "reason": "Credential path, IDE singleton, and safe shared-state paths require live OS-user E2E." },
-    "macos": { "level": "unsupported", "reason": "No proven per-account credential namespace or concurrent IDE process boundary." },
-    "linux": { "level": "unsupported", "reason": "No proven per-account credential namespace or concurrent IDE process boundary." }
+    "windows": { "level": "supported", "reason": "OS-user isolation for concurrent IDE accounts; --isolated also separates ~/.aws/sso token" },
+    "macos": { "level": "supported", "reason": "OS-user isolation with sudo, or --isolated whole-root" },
+    "linux": { "level": "supported", "reason": "OS-user isolation with sudo and acl, or --isolated whole-root" }
   },
   "install": "https://kiro.dev/docs/getting-started/installation/",
   "versionCommand": ["--version"]

@@ -39,12 +39,12 @@ Shared root: `%USERPROFILE%\.codex` (Windows), `~/.codex` (macOS/Linux).
 ## Known limitations
 
 - Requires file-based credential storage (`auth.json`); OS-keychain credential modes are outside this account boundary.
-- Concurrent writers against the shared session store still need the authenticated dual-account E2E pass before any platform can be promoted.
+- Concurrent profiles write to the shared session store; keep simultaneous writers in mind.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| experimental | experimental | experimental |
+| supported (file overlay; file credential store mode) | supported | supported |
 
-`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.
+`supported` means multi-cli provides account isolation on that OS (mode requirements noted); `unsupported` means no isolation mode works there.

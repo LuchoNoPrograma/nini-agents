@@ -10,6 +10,7 @@ setup() {
   export APPDATA="$HOME/AppData/Roaming"
   export LOCALAPPDATA="$HOME/AppData/Local"
   export MULTICLI_TOOLS_DIR="$TOOLS_ROOT"
+  export PATH="$MULTICLI_HOME/bin:$PATH"
   export MULTICLI_OVERRIDE_BINARY="$MULTICLI_SCRATCH/capture-child"
   export CAPTURE_OUTPUT="$MULTICLI_SCRATCH/capture.json"
   cat > "$MULTICLI_OVERRIDE_BINARY" <<'PROBE'
@@ -70,9 +71,9 @@ write_fixture_adapter() {
     "singletonScope": "none"
   },
   "support": {
-    "windows": { "level": "experimental", "reason": "Fixture only." },
-    "macos": { "level": "experimental", "reason": "Fixture only." },
-    "linux": { "level": "experimental", "reason": "Fixture only." }
+    "windows": { "level": "supported", "reason": "Fixture only." },
+    "macos": { "level": "supported", "reason": "Fixture only." },
+    "linux": { "level": "supported", "reason": "Fixture only." }
   },
   "install": "https://example.test/install",
   "versionCommand": ["--version"]
@@ -91,6 +92,30 @@ JSON
   [ -d "$MULTICLI_HOME/fixture/account-a/auth" ]
   [ ! -e "$MULTICLI_HOME/fixture/account-a/history.jsonl" ]
   run jq -er '.schemaVersion == 2 and .adapterId == "fixture" and (.profileId | test("^[a-f0-9-]{36}$"))' "$MULTICLI_HOME/fixture/account-a/.profile.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "concurrent launches leave a complete reusable runtime overlay" {
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  local first="$MULTICLI_SCRATCH/first.log"
+  local second="$MULTICLI_SCRATCH/second.log"
+
+  multicli launch fixture/account-a >"$first" 2>&1 &
+  local first_pid=$!
+  multicli launch fixture/account-a >"$second" 2>&1 &
+  local second_pid=$!
+  local first_status=0 second_status=0
+  wait "$first_pid" || first_status=$?
+  wait "$second_pid" || second_status=$?
+
+  [ "$first_status" -eq 0 ]
+  [ "$second_status" -eq 0 ]
+  [ -f "$MULTICLI_HOME/fixture/account-a/.runtime/.runtime-manifest" ]
+  [ -e "$MULTICLI_HOME/fixture/account-a/.runtime/config.toml" ]
+  [ -e "$MULTICLI_HOME/fixture/account-a/.runtime/auth.json" ]
+
+  run multicli launch fixture/account-a
   [ "$status" -eq 0 ]
 }
 
@@ -150,7 +175,7 @@ JSON
 
   printf 'rogue\n' > "$MULTICLI_HOME/fixture/account-a/.runtime/rogue.txt"
   run multicli doctor --deep
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 1 ]
   [[ "$output" == *"unexpected runtime file rogue.txt"* ]]
 }
 
@@ -181,4 +206,35 @@ JSON
   [ "$status" -eq 1 ]
   [ ! -e "$MULTICLI_HOME/fixture/account-a" ]
   [[ "$output" == *"Invalid adapter 'fixture'"* ]]
+}
+
+@test "tools and doctor show supported-mode prerequisites" {
+  jq '.support.windows.reason="requires --isolated whole-root" | .support.macos.reason="requires --isolated whole-root" | .support.linux.reason="requires --isolated whole-root"' "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+
+  run multicli tools
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fixture"* ]]
+  [[ "$output" == *"requires --isolated whole-root"* ]]
+
+  run multicli doctor
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"supported: requires --isolated whole-root"* ]]
+}
+
+@test "inseparable default profiles direct users to --isolated" {
+  jq '.account={"mechanism":"inseparable","credentialFiles":[],"credentialPrecedence":[],"logoutScope":"user","reason":"Auth and sessions share one database."} | .support.linux.reason="requires --isolated whole-root"' \
+    "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+
+  run multicli launch fixture/account-a
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Create this profile with --isolated"* ]]
+  [[ "$output" != *"legacy-isolated"* ]]
 }

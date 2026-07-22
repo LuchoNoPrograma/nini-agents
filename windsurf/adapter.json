@@ -17,9 +17,9 @@
   },
   "normalState": {
     "root": {
-      "windows": "%APPDATA%\\Devin",
-      "macos": "$HOME/Library/Application Support/Devin",
-      "linux": "$HOME/.config/Devin"
+      "windows": "%USERPROFILE%\\.codeium\\windsurf",
+      "macos": "$HOME/.codeium/windsurf",
+      "linux": "$HOME/.codeium/windsurf"
     },
     "sharedPaths": [],
     "sessionPaths": [],
@@ -28,9 +28,9 @@
   },
   "concurrency": { "level": "singleWriter", "singletonScope": "unknown" },
   "support": {
-    "windows": { "level": "experimental", "reason": "Current/legacy data roots, .codeium leakage, auth storage, and multi-instance behavior require OS-user E2E." },
-    "macos": { "level": "unsupported", "reason": "No documented profile auth namespace or concurrent-instance contract." },
-    "linux": { "level": "unsupported", "reason": "No documented profile auth namespace or concurrent-instance contract." }
+    "windows": { "level": "supported", "reason": "OS-user isolation; elevated terminal required" },
+    "macos": { "level": "supported", "reason": "OS-user isolation with sudo, or --isolated whole-root" },
+    "linux": { "level": "supported", "reason": "OS-user isolation with sudo and acl, or --isolated whole-root" }
   },
   "install": "https://docs.devin.ai/desktop/getting-started",
   "versionCommand": ["--version"]

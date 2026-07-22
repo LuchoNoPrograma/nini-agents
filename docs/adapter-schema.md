@@ -19,7 +19,16 @@ Schema-v2 adapters describe an account boundary separately from the tool's norma
 - `fileOverlay`: declared credential files live under the profile's `auth/`; declared normal state is linked to the product's native shared root.
 - `processSecret`: the product supports a higher-priority per-process credential. Launch remains fail-closed until the secret has been stored through the secure credential command.
 - `osUserCredentialStore`: the product uses a fixed keychain identity and requires a multi-cli-owned OS user.
-- `inseparable`: auth and ordinary state cannot yet be divided safely. The schema records the limitation and compliant launches fail closed.
+- `inseparable`: auth and ordinary state cannot be divided safely. The schema records the limitation; account-overlay launches fail closed and whole-root `--isolated` profiles carry the isolation instead.
+
+## Support levels
+
+`support.windows|macos|linux.level` is binary: `supported` or `unsupported`.
+
+- `supported`: multi-cli provides account isolation on that OS through at least one mode. `reason` is optional but encouraged for mode requirements (for example, "OS-user isolation; elevated terminal required").
+- `unsupported`: no isolation mode works on that OS. `reason` is required and must say why.
+
+The retired `verified`/`experimental` levels and the `evidenceId` field are rejected by validation.
 
 ## Placeholders
 

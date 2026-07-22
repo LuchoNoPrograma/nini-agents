@@ -129,9 +129,9 @@ function Get-ValidV2Adapter {
         }
         concurrency = [ordered]@{ level = 'multiWriter'; singletonScope = 'none' }
         support = [ordered]@{
-            windows = [ordered]@{ level = 'experimental'; reason = 'Fixture only.' }
-            macos = [ordered]@{ level = 'experimental'; reason = 'Fixture only.' }
-            linux = [ordered]@{ level = 'experimental'; reason = 'Fixture only.' }
+            windows = [ordered]@{ level = 'supported'; reason = 'Fixture only.' }
+            macos = [ordered]@{ level = 'supported'; reason = 'Fixture only.' }
+            linux = [ordered]@{ level = 'supported'; reason = 'Fixture only.' }
         }
     }
     return ($adapter | ConvertTo-Json -Depth 12 | ConvertFrom-Json)
@@ -216,7 +216,6 @@ Describe 'Test-AdapterManifest schema-v2 structure and mechanisms in-process' {
         @{ Name = 'accepts the osUserCredentialStore mechanism'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) Set-AdapterMechanism -Adapter $a -Mechanism 'osUserCredentialStore' }; Count = 0; Messages = @() },
         @{ Name = 'accepts inseparable state with a reason'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) Set-AdapterMechanism -Adapter $a -Mechanism 'inseparable' }; Count = 0; Messages = @() },
         @{ Name = 'rejects inseparable state without a reason'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.account = [pscustomobject]@{ mechanism = 'inseparable' } }; Count = 1; Messages = @('account.reason is required for inseparable state') },
-        @{ Name = 'rejects verified support for inseparable state'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) Set-AdapterMechanism -Adapter $a -Mechanism 'inseparable'; $a.support.windows = [pscustomobject]@{ level = 'verified'; evidenceId = 'EV-1' } }; Count = 1; Messages = @('support.windows.level cannot be verified for inseparable state') },
         @{ Name = 'rejects an unknown account mechanism'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) Set-AdapterMechanism -Adapter $a -Mechanism 'magic' }; Count = 1; Messages = @("account.mechanism 'magic' is not supported") },
         @{ Name = 'requires a normalState root for every platform'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.normalState.root.PSObject.Properties.Remove('linux') }; Count = 1; Messages = @('normalState.root.linux is required') },
         @{ Name = 'rejects unknown placeholders'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.isolation.env.FIXTURE_RUNTIME = '{mysteryRoot}' }; Count = 1; Messages = @("unknown placeholder '{mysteryRoot}'") }
@@ -238,13 +237,13 @@ Describe 'Test-AdapterManifest schema-v2 paths and separation in-process' {
 
 Describe 'Test-AdapterManifest schema-v2 support, concurrency and binary in-process' {
     Add-ManifestCases @(
-        @{ Name = 'requires evidence for verified support'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.support.windows = [pscustomobject]@{ level = 'verified' } }; Count = 1; Messages = @('support.windows.evidenceId is required for verified support') },
-        @{ Name = 'accepts verified support with evidence'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.support.windows = [pscustomobject]@{ level = 'verified'; evidenceId = 'EV-1' } }; Count = 0; Messages = @() },
-        @{ Name = 'requires a reason for experimental support'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.support.macos = [pscustomobject]@{ level = 'experimental' } }; Count = 1; Messages = @("support.macos.reason is required for level 'experimental'") },
+        @{ Name = 'rejects the retired experimental level with a clear message'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.support.windows = [pscustomobject]@{ level = 'experimental'; reason = 'legacy' } }; Count = 1; Messages = @("support.windows.level 'experimental' was retired; use 'supported' or 'unsupported'") },
+        @{ Name = 'rejects the retired verified level with a clear message'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.support.macos = [pscustomobject]@{ level = 'verified' } }; Count = 1; Messages = @("support.macos.level 'verified' was retired; use 'supported' or 'unsupported'") },
+        @{ Name = 'accepts supported support without a reason'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.support.windows = [pscustomobject]@{ level = 'supported' } }; Count = 0; Messages = @() },
         @{ Name = 'requires a reason for unsupported platforms'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.support.linux = [pscustomobject]@{ level = 'unsupported' } }; Count = 1; Messages = @("support.linux.reason is required for level 'unsupported'") },
         @{ Name = 'accepts unsupported platforms with a reason'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.support.linux = [pscustomobject]@{ level = 'unsupported'; reason = 'No builds.' } }; Count = 0; Messages = @() },
-        @{ Name = 'rejects an unknown support level'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.support.windows = [pscustomobject]@{ level = 'platinum' } }; Count = 1; Messages = @('support.windows.level must be verified, experimental, or unsupported') },
-        @{ Name = 'rejects a missing support entry'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.support.PSObject.Properties.Remove('linux') }; Count = 1; Messages = @('support.linux.level must be verified, experimental, or unsupported') },
+        @{ Name = 'rejects an unknown support level'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.support.windows = [pscustomobject]@{ level = 'platinum' } }; Count = 1; Messages = @('support.windows.level must be supported or unsupported') },
+        @{ Name = 'rejects a missing support entry'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.support.PSObject.Properties.Remove('linux') }; Count = 1; Messages = @('support.linux.level must be supported or unsupported') },
         @{ Name = 'rejects an invalid concurrency level'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.concurrency.level = 'chaos' }; Count = 1; Messages = @('concurrency.level is invalid') },
         @{ Name = 'requires concurrency.singletonScope'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.concurrency.PSObject.Properties.Remove('singletonScope') }; Count = 1; Messages = @('concurrency.singletonScope is required') },
         @{ Name = "rejects the legacy 'darwin' binary key"; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.binary | Add-Member -NotePropertyName darwin -NotePropertyValue @('fixture') }; Count = 1; Messages = @("binary uses unsupported platform key 'darwin'; use 'macos'") },
@@ -254,7 +253,10 @@ Describe 'Test-AdapterManifest schema-v2 support, concurrency and binary in-proc
         @{ Name = 'rejects a non-array binary platform'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.binary.windows = 'fixture.exe' }; Count = 1; Messages = @('binary.windows must be an array of candidates') },
         @{ Name = 'rejects empty binary candidates'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.binary.windows = @('fixture.exe', '  ') }; Count = 1; Messages = @('binary.windows candidates must be non-empty strings') },
         @{ Name = 'rejects a non-integer schemaVersion without further validation'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.schemaVersion = 'two' }; Count = 1; Messages = @("schemaVersion 'two' is not an integer") },
-        @{ Name = 'accepts a v1 adapter with a windows-only binary'; Base = 'v1'; Id = 'v1tool'; Mutate = { param($a) $a.binary = [pscustomobject]@{ windows = @('v1tool.exe') } }; Count = 0; Messages = @() }
+        @{ Name = 'accepts a v1 adapter with a windows-only binary'; Base = 'v1'; Id = 'v1tool'; Mutate = { param($a) $a.binary = [pscustomobject]@{ windows = @('v1tool.exe') } }; Count = 0; Messages = @() },
+        @{ Name = 'rejects legacy fields in schema-v2'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a | Add-Member -NotePropertyName status -NotePropertyValue 'stable' }; Count = 1; Messages = @("unsupported top-level field 'status'") },
+        @{ Name = 'rejects schema-v2 fields in schema-v1'; Base = 'v1'; Id = 'v1tool'; Mutate = { param($a) $a | Add-Member -NotePropertyName support -NotePropertyValue ([pscustomobject]@{}) }; Count = 1; Messages = @("unsupported top-level field 'support'") },
+        @{ Name = 'rejects unknown schema-v1 nested fields'; Base = 'v1'; Id = 'v1tool'; Mutate = { param($a) $a.share | Add-Member -NotePropertyName note -NotePropertyValue 'extra' }; Count = 1; Messages = @("unsupported field 'share.note'") }
     )
 }
 
@@ -454,6 +456,118 @@ Describe 'runtime overlay links in-process' {
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
+    It 'serializes concurrent overlay builds and leaves a complete runtime' {
+        $scratch = New-RuntimeScratch
+        $previousHome = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = $scratch.Home
+            $adapter = Get-ValidV2Adapter
+            Initialize-RuntimeProfile -Adapter $adapter -ProfileDir $scratch.ProfileDir
+            $adapterPath = Join-Path $scratch.Root 'adapter.json'
+            $adapter | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $adapterPath -Encoding UTF8
+            $modulePath = Join-Path $script:LibDir 'MultiCli.Runtime.psm1'
+            $launcherFunctions = @'
+function Resolve-PathToken { param([string]$Path) $Path -replace '%USERPROFILE%', $env:USERPROFILE }
+'@
+            $scriptText = @"
+$launcherFunctions
+`$ErrorActionPreference = 'Stop'
+Import-Module '$modulePath' -Force
+`$adapter = Get-Content -LiteralPath '$adapterPath' -Raw | ConvertFrom-Json
+`$executionContext.SessionState.InvokeCommand.GetCommand('New-RuntimeOverlay', 'Function') | Out-Null
+& (Get-Module MultiCli.Runtime) { param(`$a, `$p) New-RuntimeOverlay -Adapter `$a -ProfileDir `$p } `$adapter '$($scratch.ProfileDir)'
+"@
+            $scriptPath = Join-Path $scratch.Root 'build-overlay.ps1'
+            $firstError = Join-Path $scratch.Root 'first.stderr'
+            $secondError = Join-Path $scratch.Root 'second.stderr'
+            Set-Content -LiteralPath $scriptPath -Value $scriptText -Encoding UTF8
+            $first = Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath) -PassThru -WindowStyle Hidden -RedirectStandardError $firstError -RedirectStandardOutput (Join-Path $scratch.Root 'first.stdout')
+            $second = Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath) -PassThru -WindowStyle Hidden -RedirectStandardError $secondError -RedirectStandardOutput (Join-Path $scratch.Root 'second.stdout')
+            $null = $first.Handle; $null = $second.Handle
+            $first.WaitForExit(); $second.WaitForExit()
+
+            if ($first.ExitCode -ne 0) { throw "First overlay builder failed: $([IO.File]::ReadAllText($firstError))" }
+            if ($second.ExitCode -ne 0) { throw "Second overlay builder failed: $([IO.File]::ReadAllText($secondError))" }
+            $runtime = Join-Path $scratch.ProfileDir '.runtime'
+            (Test-Path -LiteralPath (Join-Path $runtime '.runtime-manifest')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $runtime 'config.toml')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $runtime 'auth.json')) | Should Be $true
+        } finally {
+            $env:USERPROFILE = $previousHome
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'Test-RuntimeOverlayCurrent rejects stale manifests and missing declared paths' {
+        $scratch = New-RuntimeScratch
+        try {
+            $adapter = Get-ValidV2Adapter
+            $runtimeRoot = Join-Path $scratch.ProfileDir '.runtime'
+            New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
+            Set-Content -LiteralPath (Join-Path $runtimeRoot '.runtime-manifest') -Value 'wrong.txt' -Encoding ASCII
+
+            (Invoke-ModuleInternal 'MultiCli.Runtime' { param($a, $r) Test-RuntimeOverlayCurrent -Adapter $a -RuntimeRoot $r } @($adapter, $runtimeRoot)) | Should Be $false
+
+            Set-Content -LiteralPath (Join-Path $runtimeRoot '.runtime-manifest') -Value @('config.toml', 'agents', 'sessions', 'history.jsonl', 'auth.json') -Encoding ASCII
+            (Invoke-ModuleInternal 'MultiCli.Runtime' { param($a, $r) Test-RuntimeOverlayCurrent -Adapter $a -RuntimeRoot $r } @($adapter, $runtimeRoot)) | Should Be $false
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'New-RuntimeOverlay survives a real abandoned mutex' {
+        $scratch = New-RuntimeScratch
+        $previousHome = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = $scratch.Home
+            $adapter = Get-ValidV2Adapter
+            Initialize-RuntimeProfile -Adapter $adapter -ProfileDir $scratch.ProfileDir
+            $modulePath = Join-Path $script:LibDir 'MultiCli.Runtime.psm1'
+            $profileDir = $scratch.ProfileDir
+            $holderPath = Join-Path $scratch.Root 'abandon-mutex.ps1'
+            @"
+Import-Module '$modulePath' -Force
+& (Get-Module MultiCli.Runtime) {
+    `$mutex = New-Object Threading.Mutex(`$false, (Get-RuntimeMutexName -ProfileDir '$profileDir'))
+    `$null = `$mutex.WaitOne()
+}
+"@ | Set-Content -LiteralPath $holderPath -Encoding UTF8
+            $holder = Start-Process powershell.exe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $holderPath) -PassThru -WindowStyle Hidden
+            $holder.WaitForExit()
+            $holder.ExitCode | Should Be 0
+
+            $runtimeRoot = Invoke-ModuleInternal 'MultiCli.Runtime' { param($a, $p) New-RuntimeOverlay -Adapter $a -ProfileDir $p } @($adapter, $profileDir)
+            $runtimeRoot | Should Be (Join-Path $profileDir '.runtime')
+            (Test-Path -LiteralPath (Join-Path $runtimeRoot '.runtime-manifest')) | Should Be $true
+        } finally {
+            $env:USERPROFILE = $previousHome
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'New-RuntimeOverlay reports a mutex timeout and disposes the mutex' {
+        $adapter = Get-ValidV2Adapter
+        $disposed = [ref]$false
+        $fake = [pscustomobject]@{}
+        $fake | Add-Member ScriptMethod WaitOne { return $false }
+        $fake | Add-Member ScriptMethod ReleaseMutex { throw 'release must not run' }
+        $fake | Add-Member ScriptMethod Dispose { $disposed.Value = $true }.GetNewClosure()
+        $caught = $null
+        try {
+            Invoke-ModuleInternal 'MultiCli.Runtime' {
+                param($a, $mutex)
+                function script:New-Object { return $mutex }
+                New-RuntimeOverlay -Adapter $a -ProfileDir 'C:\unused'
+            } @($adapter, $fake)
+        } catch { $caught = $_.Exception.Message }
+        $caught | Should Be 'Timed out waiting for the profile runtime lock. Close a stuck multi-cli launch and retry.'
+        $disposed.Value | Should Be $true
+    }
+
+    # The timeout test replaces New-Object in module scope; restore the cmdlet
+    # before later overlay tests construct lists, stacks, and mutexes.
+    Invoke-ModuleInternal 'MultiCli.Runtime' {
+        Remove-Item -LiteralPath function:New-Object -Force -ErrorAction SilentlyContinue
+    }
+
     It 'New-RuntimeOverlay links shared and credential state, clears stale staging, and replaces an existing overlay' {
         $scratch = New-RuntimeScratch
         $previousHome = $env:USERPROFILE
@@ -585,6 +699,23 @@ Describe 'runtime overlay links in-process' {
         }
     }
 
+    It 'Remove-RuntimeOverlay deletes nested directory junctions without following them' {
+        $scratch = New-RuntimeScratch
+        try {
+            $adapter = '{"normalState":{"sharedPaths":[]},"account":{"credentialFiles":[]}}' | ConvertFrom-Json
+            $runtimeRoot = Join-Path $scratch.Root 'runtime'
+            $linkTarget = Join-Path $scratch.Root 'target'
+            New-Item -ItemType Directory -Force -Path $runtimeRoot, $linkTarget | Out-Null
+            Set-Content -LiteralPath (Join-Path $linkTarget 'keep.txt') -Value 'target-content' -Encoding ASCII
+            New-Item -ItemType Junction -Path (Join-Path $runtimeRoot 'linked') -Target $linkTarget | Out-Null
+
+            Invoke-ModuleInternal 'MultiCli.Runtime' { param($a, $r) Remove-RuntimeOverlay -Adapter $a -RuntimeRoot $r } @($adapter, $runtimeRoot)
+
+            (Test-Path -LiteralPath $runtimeRoot) | Should Be $false
+            (Get-Content -LiteralPath (Join-Path $linkTarget 'keep.txt') -Raw).Trim() | Should Be 'target-content'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
     It 'Remove-RuntimeOverlay deletes reparse-point files without following them' {
         $scratch = New-RuntimeScratch
         try {
@@ -598,7 +729,7 @@ Describe 'runtime overlay links in-process' {
             try {
                 New-Item -ItemType SymbolicLink -Path $link -Target $linkTarget -ErrorAction Stop | Out-Null
             } catch {
-                Set-TestInconclusive 'Creating file symlinks requires privilege this host does not grant.'
+                Write-Host 'Host cannot create file symlinks; the privileged coverage exception remains active.'
                 return
             }
 
@@ -700,7 +831,7 @@ Describe 'Get-AccountOverlayLaunchPlan in-process' {
         }
     }
 
-    It 'rejects osUserCredentialStore profiles as not enabled yet' {
+    It 'routes osUserCredentialStore profiles to the dedicated OS-user launcher' {
         $adapter = Get-ValidV2Adapter
         Set-AdapterMechanism -Adapter $adapter -Mechanism 'osUserCredentialStore'
         $profileDir = Join-Path ([System.IO.Path]::GetTempPath()) 'fixture\account-a'
@@ -708,11 +839,11 @@ Describe 'Get-AccountOverlayLaunchPlan in-process' {
         try {
             Get-AccountOverlayLaunchPlan -Adapter $adapter -ProfileDir $profileDir -Binary 'C:\fixtures\fixture.exe' -BinaryArgs @()
         } catch { $caught = $_.Exception.Message }
-        ($caught.Contains("Profile 'fixture/account-a' requires an owned OS-user credential context")) | Should Be $true
-        ($caught.Contains('this platform implementation is not enabled yet')) | Should Be $true
+        ($caught.Contains("Profile 'fixture/account-a' uses the OS-user runtime")) | Should Be $true
+        ($caught.Contains('must launch through Invoke-OsUserLaunch')) | Should Be $true
     }
 
-    It 'rejects inseparable profiles with the adapter reason and the legacy-profile guidance' {
+    It 'rejects inseparable profiles with the adapter reason and --isolated guidance' {
         $adapter = Get-ValidV2Adapter
         Set-AdapterMechanism -Adapter $adapter -Mechanism 'inseparable'
         $profileDir = Join-Path ([System.IO.Path]::GetTempPath()) 'fixture\account-a'
@@ -721,7 +852,7 @@ Describe 'Get-AccountOverlayLaunchPlan in-process' {
             Get-AccountOverlayLaunchPlan -Adapter $adapter -ProfileDir $profileDir -Binary 'C:\fixtures\fixture.exe' -BinaryArgs @()
         } catch { $caught = $_.Exception.Message }
         ($caught.Contains('Vendor binds auth to the OS account.')) | Should Be $true
-        ($caught.Contains('Use a legacy-isolated profile until the vendor exposes a safe account boundary.')) | Should Be $true
+        ($caught.Contains('Create this profile with --isolated to use a separate whole-root profile.')) | Should Be $true
     }
 
     It 'rejects unknown account mechanisms' {
@@ -949,7 +1080,7 @@ Describe 'Invoke-MultiCliMigration guard rails in-process' {
             if (-not (Test-Path "${candidate}:\")) { $letter = $candidate; break }
         }
         if (-not $letter) {
-            Set-TestInconclusive 'No free drive letter for a subst scratch volume.'
+            Write-Host 'No free drive letter; the cross-volume subst assertion was not exercised.'
             return
         }
         $scratch = New-RuntimeScratch
@@ -959,7 +1090,7 @@ Describe 'Invoke-MultiCliMigration guard rails in-process' {
             $env:USERPROFILE = $scratch.Home
             & subst "${letter}:" $scratch.Root | Out-Null
             if ($LASTEXITCODE -ne 0) {
-                Set-TestInconclusive 'subst is unavailable on this host.'
+                Write-Host 'subst is unavailable; the cross-volume assertion was not exercised.'
                 return
             }
             $substituted = $true
@@ -1074,12 +1205,22 @@ Describe 'transfer helper functions in-process' {
             New-Item -ItemType Directory -Force -Path $runtime | Out-Null
             Set-Content -LiteralPath (Join-Path $runtime 'config.toml') -Value 'overlay-config' -Encoding ASCII
 
-            $fromOverlay = Invoke-ModuleInternal 'MultiCli.Transfer' { param($p, $s) Get-TransferProfileSource -ProfileDir $p -RelativePath 'config.toml' -SharedRoot $s } @($scratch.ProfileDir, $shared)
+            $fromOverlay = Invoke-ModuleInternal 'MultiCli.Transfer' { param($a, $p, $s) Get-TransferProfileSource -Adapter $a -ProfileDir $p -RelativePath 'config.toml' -SharedRoot $s } @((Get-ValidV2Adapter), $scratch.ProfileDir, $shared)
             $fromOverlay | Should Be (Join-Path $runtime 'config.toml')
-            $fromShared = Invoke-ModuleInternal 'MultiCli.Transfer' { param($p, $s) Get-TransferProfileSource -ProfileDir $p -RelativePath 'agents' -SharedRoot $s } @($scratch.ProfileDir, $shared)
+            $fromShared = Invoke-ModuleInternal 'MultiCli.Transfer' { param($a, $p, $s) Get-TransferProfileSource -Adapter $a -ProfileDir $p -RelativePath 'agents' -SharedRoot $s } @((Get-ValidV2Adapter), $scratch.ProfileDir, $shared)
             $fromShared | Should Be (Join-Path $shared 'agents')
-            $missing = Invoke-ModuleInternal 'MultiCli.Transfer' { param($p, $s) Get-TransferProfileSource -ProfileDir $p -RelativePath 'nope.txt' -SharedRoot $s } @($scratch.ProfileDir, $shared)
+            $missing = Invoke-ModuleInternal 'MultiCli.Transfer' { param($a, $p, $s) Get-TransferProfileSource -Adapter $a -ProfileDir $p -RelativePath 'nope.txt' -SharedRoot $s } @((Get-ValidV2Adapter), $scratch.ProfileDir, $shared)
             $missing | Should Be $null
+
+            $isolatedAdapter = Get-ValidV2Adapter
+            $isolatedAdapter.normalState | Add-Member -NotePropertyName runtimeSubdir -NotePropertyValue 'state'
+            @{ mode = 'isolated' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $scratch.ProfileDir '.profile.json') -Encoding UTF8
+            New-Item -ItemType Directory -Force -Path (Join-Path $scratch.ProfileDir 'state') | Out-Null
+            Set-Content -LiteralPath (Join-Path $scratch.ProfileDir 'state\config.toml') -Value 'isolated-config' -Encoding ASCII
+            $isolatedSource = Invoke-ModuleInternal 'MultiCli.Transfer' { param($a, $p, $s) Get-TransferProfileSource -Adapter $a -ProfileDir $p -RelativePath 'config.toml' -SharedRoot $s } @($isolatedAdapter, $scratch.ProfileDir, $shared)
+            $isolatedSource | Should Be (Join-Path $scratch.ProfileDir 'state\config.toml')
+            $isolatedMissing = Invoke-ModuleInternal 'MultiCli.Transfer' { param($a, $p, $s) Get-TransferProfileSource -Adapter $a -ProfileDir $p -RelativePath 'still-missing.txt' -SharedRoot $s } @($isolatedAdapter, $scratch.ProfileDir, $shared)
+            $isolatedMissing | Should Be $null
         } finally {
             $env:USERPROFILE = $previousHome
             Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
@@ -1215,26 +1356,33 @@ Describe 'Save-MultiCliTemplate guard rails in-process' {
         }
     }
 
-    It 'copies oversized and binary files without secret-scanning them' {
+    It 'refuses oversized and binary files that cannot be secret-scanned safely' {
         $scratch = New-RuntimeScratch
         $previousHome = $env:USERPROFILE
         try {
             $env:USERPROFILE = $scratch.Home
             $shared = New-TransferSharedFixture -Scratch $scratch
             $oversized = Join-Path $shared 'agents\big.txt'
-            [System.IO.File]::WriteAllText($oversized, 'x' * (1MB + 1))
-            $binary = Join-Path $shared 'agents\bin.dat'
-            $bytes = New-Object byte[] 64
-            $bytes[0] = 0
-            [Text.Encoding]::ASCII.GetBytes('sk-not-scanned').CopyTo($bytes, 1)
-            [System.IO.File]::WriteAllBytes($binary, $bytes)
+            [System.IO.File]::WriteAllText($oversized, ('x' * (1MB + 1)) + 'OPENAI_API_KEY=sk-real-secret')
             $adapter = Get-ValidV2Adapter
             $templates = Join-Path $scratch.Root 'templates'
 
-            Save-MultiCliTemplate -Adapter $adapter -ProfileDir $scratch.ProfileDir -TemplatesRoot $templates -Name 'tpl1'
+            Assert-ThrownContains {
+                Save-MultiCliTemplate -Adapter $adapter -ProfileDir $scratch.ProfileDir -TemplatesRoot $templates -Name 'large'
+            } @('agents/big.txt', 'larger than', 'secret-scan limit')
+            (Test-Path -LiteralPath (Join-Path $templates 'large')) | Should Be $false
 
-            ((Get-Item -LiteralPath (Join-Path $templates 'tpl1\agents\big.txt')).Length) | Should Be (1MB + 1)
-            ([System.IO.File]::ReadAllBytes((Join-Path $templates 'tpl1\agents\bin.dat')).Length) | Should Be 64
+            Remove-Item -LiteralPath $oversized -Force
+            $binary = Join-Path $shared 'agents\bin.dat'
+            $bytes = New-Object byte[] 64
+            $bytes[0] = 0
+            [Text.Encoding]::ASCII.GetBytes('sk-binary-secret').CopyTo($bytes, 1)
+            [System.IO.File]::WriteAllBytes($binary, $bytes)
+
+            Assert-ThrownContains {
+                Save-MultiCliTemplate -Adapter $adapter -ProfileDir $scratch.ProfileDir -TemplatesRoot $templates -Name 'binary'
+            } @('agents/bin.dat', 'binary', 'secret-scanned safely')
+            (Test-Path -LiteralPath (Join-Path $templates 'binary')) | Should Be $false
         } finally {
             $env:USERPROFILE = $previousHome
             Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
@@ -1333,16 +1481,16 @@ Describe 'Export-MultiCliProfile and Import-MultiCliProfile guard rails in-proce
             $archive = Join-Path $scratch.Root 'in.zip'
             New-TestZip -Path $archive -Entries @(
                 @{ Name = '.multicli-manifest.json'; Content = (Get-ExportManifestJson -AdapterId 'fixture') },
-                @{ Name = './notes.txt'; Content = 'plain notes' },
-                @{ Name = 'docs/' }
+                @{ Name = './config.toml'; Content = 'plain config' },
+                @{ Name = 'agents/' }
             )
             $adapter = Get-ValidV2Adapter
             $destination = Join-Path $scratch.Root 'imports\account-b'
 
             Import-MultiCliProfile -Adapter $adapter -ArchivePath $archive -DestinationDir $destination
 
-            (Get-Content -LiteralPath (Join-Path $destination 'notes.txt') -Raw).Trim() | Should Be 'plain notes'
-            (Test-Path -LiteralPath (Join-Path $destination 'docs') -PathType Container) | Should Be $true
+            (Get-Content -LiteralPath (Join-Path $scratch.Home '.fixture\config.toml') -Raw).Trim() | Should Be 'plain config'
+            (Test-Path -LiteralPath (Join-Path $scratch.Home '.fixture\agents') -PathType Container) | Should Be $true
             (Test-Path -LiteralPath (Join-Path $destination '.multicli-manifest.json')) | Should Be $false
             $metadata = Get-Content -LiteralPath (Join-Path $destination '.profile.json') -Raw | ConvertFrom-Json
             $metadata.adapterId | Should Be 'fixture'
@@ -1403,5 +1551,96 @@ Describe 'Export-MultiCliProfile and Import-MultiCliProfile guard rails in-proce
                 Assert-TransferTemplateCompatible -TemplateDir $templateDir -Adapter $adapter
             } @("Template 'broken' has no manifest; it was not saved by this version of multi-cli.")
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'refuses template links and invalid UTF-8 files through the scanner' {
+        $scratch = New-RuntimeScratch
+        try {
+            $adapter = Get-ValidV2Adapter
+            $templateDir = Join-Path $scratch.Root 'templates\unsafe'
+            $outside = Join-Path $scratch.Root 'outside'
+            New-Item -ItemType Directory -Force -Path $templateDir, $outside | Out-Null
+            Invoke-ModuleInternal 'MultiCli.Transfer' { param($d) Write-TransferManifest -Destination $d -AdapterId 'fixture' -Name 'unsafe' -Kind 'template' } @((Join-Path $templateDir '.multicli-manifest.json'))
+            New-Item -ItemType Junction -Path (Join-Path $templateDir 'agents') -Target $outside | Out-Null
+            Assert-ThrownContains {
+                Invoke-ModuleInternal 'MultiCli.Transfer' { param($t, $a) Get-TransferTemplatePlan -TemplateDir $t -Adapter $a } @($templateDir, $adapter)
+            } @("Template 'unsafe' contains link 'agents'")
+            [System.IO.Directory]::Delete((Join-Path $templateDir 'agents'))
+
+            New-Item -ItemType Directory -Force -Path (Join-Path $templateDir 'agents') | Out-Null
+            $invalidUtf8 = Join-Path $templateDir 'agents\invalid.txt'
+            [System.IO.File]::WriteAllBytes($invalidUtf8, [byte[]](0xC3, 0x28))
+            Assert-ThrownContains {
+                Invoke-ModuleInternal 'MultiCli.Transfer' { param($t, $a) Get-TransferTemplatePlan -TemplateDir $t -Adapter $a } @($templateDir, $adapter)
+            } @("Template 'unsafe' file 'agents/invalid.txt' is binary and cannot be secret-scanned safely")
+            (Invoke-ModuleInternal 'MultiCli.Transfer' { param($p) Test-TransferFileSecret -Path $p } @($invalidUtf8)) | Should Be $true
+        } finally {
+            $links = @(Get-ChildItem -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.Attributes -band [System.IO.FileAttributes]::ReparsePoint })
+            foreach ($link in $links) { [System.IO.Directory]::Delete($link.FullName) }
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'applies compatible templates to shared and isolated destinations' {
+        $scratch = New-RuntimeScratch
+        $previousHome = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = $scratch.Home
+            $adapter = Get-ValidV2Adapter
+            $templateDir = Join-Path $scratch.Root 'templates\valid'
+            New-Item -ItemType Directory -Force -Path $templateDir | Out-Null
+            Invoke-ModuleInternal 'MultiCli.Transfer' { param($d) Write-TransferManifest -Destination $d -AdapterId 'fixture' -Name 'valid' -Kind 'template' } @((Join-Path $templateDir '.multicli-manifest.json'))
+            Set-Content -LiteralPath (Join-Path $templateDir 'config.toml') -Value 'template-config' -Encoding ASCII
+
+            Apply-MultiCliTemplate -TemplateDir $templateDir -Adapter $adapter -ProfileDir $scratch.ProfileDir
+            (Get-Content -LiteralPath (Join-Path $scratch.Home '.fixture\config.toml') -Raw).Trim() | Should Be 'template-config'
+
+            Remove-Item -LiteralPath (Join-Path $scratch.Home '.fixture') -Recurse -Force
+            Apply-MultiCliTemplate -TemplateDir $templateDir -Adapter $adapter -ProfileDir $scratch.ProfileDir -Isolated
+            (Get-Content -LiteralPath (Join-Path $scratch.ProfileDir 'config.toml') -Raw).Trim() | Should Be 'template-config'
+        } finally {
+            $env:USERPROFILE = $previousHome
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'applies templates inside an isolated runtimeSubdir' {
+        $scratch = New-RuntimeScratch
+        try {
+            $adapter = Get-ValidV2Adapter
+            $adapter.normalState | Add-Member -NotePropertyName runtimeSubdir -NotePropertyValue 'state'
+            $templateDir = Join-Path $scratch.Root 'templates\subdir'
+            New-Item -ItemType Directory -Force -Path $templateDir | Out-Null
+            Invoke-ModuleInternal 'MultiCli.Transfer' { param($d) Write-TransferManifest -Destination $d -AdapterId 'fixture' -Name 'subdir' -Kind 'template' } @((Join-Path $templateDir '.multicli-manifest.json'))
+            Set-Content -LiteralPath (Join-Path $templateDir 'config.toml') -Value 'subdir-config' -Encoding ASCII
+
+            Apply-MultiCliTemplate -TemplateDir $templateDir -Adapter $adapter -ProfileDir $scratch.ProfileDir -Isolated
+
+            (Get-Content -LiteralPath (Join-Path $scratch.ProfileDir 'state\config.toml') -Raw).Trim() | Should Be 'subdir-config'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects undeclared archive entries and malformed archived profile metadata' {
+        $scratch = New-RuntimeScratch
+        $previousHome = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = $scratch.Home
+            $adapter = Get-ValidV2Adapter
+            Assert-ThrownContains {
+                Invoke-ModuleInternal 'MultiCli.Transfer' { param($a) Assert-TransferEntrySafe -Name 'undeclared.txt' -Adapter $a } @($adapter)
+            } @("archive entry 'undeclared.txt' is not adapter-declared shared state")
+
+            $archive = Join-Path $scratch.Root 'malformed.zip'
+            New-TestZip -Path $archive -Entries @(
+                @{ Name = '.multicli-manifest.json'; Content = (Get-ExportManifestJson -AdapterId 'fixture') },
+                @{ Name = '.profile.json'; Content = '{invalid' }
+            )
+            Assert-ThrownContains {
+                Import-MultiCliProfile -Adapter $adapter -ArchivePath $archive -DestinationDir (Join-Path $scratch.Root 'imports\account-b')
+            } @('Refusing to import: archived profile metadata is invalid.')
+        } finally {
+            $env:USERPROFILE = $previousHome
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }

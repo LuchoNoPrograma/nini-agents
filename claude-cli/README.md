@@ -40,12 +40,12 @@ Shared root: `%USERPROFILE%\.claude` (Windows), `~/.claude` (macOS/Linux).
 ## Known limitations
 
 - Do not put `ANTHROPIC_API_KEY` or other auth environment into the shared `settings.json` — it would apply to every profile at once.
-- macOS is unsupported for stored OAuth: Claude Code uses a fixed Keychain context, so two same-user profiles would overwrite each other. Use an explicit process token until a keychain namespace is proven.
+- macOS subscription OAuth lives in a fixed Keychain context, so same-user profiles can overwrite each other's login. This adapter supports API-key profiles there; subscription OAuth is unsupported because this adapter does not provide a separate macOS login/Keychain session.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| experimental | unsupported (stored OAuth) | experimental |
+| supported (file overlay) | supported for API-key profiles only; subscription OAuth is unsupported | supported (file overlay) |
 
-`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.
+`supported` means multi-cli provides account isolation on that OS (mode requirements noted); `unsupported` means no isolation mode works there.

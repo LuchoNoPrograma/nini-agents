@@ -12,13 +12,14 @@ Binary discovery: `%LOCALAPPDATA%\Programs\cursor\Cursor.exe` (Windows), `/Appli
 
 ## Quickstart
 
-Unsupported on all platforms; legacy whole-home profiles remain launchable:
+Use a whole-root profile for Cursor Desktop:
 
 ```bash
-multi-cli launch cursor/<legacy-profile>
+multi-cli new cursor/work --isolated
+multi-cli launch cursor/work
 ```
 
-For a working account boundary, use the Cursor CLI adapter (`cursor-cli`), which isolates via a per-process API key.
+For a process-token boundary, use the Cursor CLI adapter (`cursor-cli`).
 
 ## Account boundary
 
@@ -39,6 +40,4 @@ None claimed. `adapter.json` declares no shared, session, or file paths under th
 
 | Windows | macOS | Linux |
 |---|---|---|
-| unsupported | unsupported | unsupported |
-
-`unsupported` means multi-cli refuses to claim the account-overlay contract.
+| supported (`--isolated`) | supported (`--isolated`) | supported (`--isolated`) |

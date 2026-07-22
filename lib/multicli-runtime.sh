@@ -167,17 +167,71 @@ runtime_link_credentials() {
   done < <(runtime_json_arr '.account.credentialFiles' "$manifest")
 }
 
-# Build the overlay in a PID-unique staging dir (sweeping stale stagings from
-# crashed runs) and swap it into place. Prints the runtime root. Aborts on a
-# hostile staging symlink instead of removing it.
+runtime_expected_manifest() {
+  local manifest="$1" state_subdir
+  state_subdir="$(runtime_json_str '.normalState.runtimeSubdir' "$manifest")"
+  if [ -n "$state_subdir" ]; then
+    runtime_json_arr '.normalState.sharedPaths' "$manifest" | sed "s|^|$state_subdir/|"
+    runtime_json_arr '.normalState.sessionPaths' "$manifest" | sed "s|^|$state_subdir/|"
+    runtime_json_arr '.account.credentialFiles' "$manifest" | sed "s|^|$state_subdir/|"
+    return
+  fi
+  runtime_json_arr '.normalState.sharedPaths' "$manifest"
+  runtime_json_arr '.normalState.sessionPaths' "$manifest"
+  runtime_json_arr '.account.credentialFiles' "$manifest"
+}
+
+runtime_overlay_is_current() {
+  local manifest="$1" runtime_root="$2" expected actual relative
+  [ -f "$runtime_root/.runtime-manifest" ] || return 1
+  expected="$(runtime_expected_manifest "$manifest")"
+  actual="$(tr -d '\r' < "$runtime_root/.runtime-manifest")"
+  [ "$actual" = "$expected" ] || return 1
+  while IFS= read -r relative; do
+    [ -z "$relative" ] && continue
+    [ -e "$runtime_root/$relative" ] || [ -L "$runtime_root/$relative" ] || return 1
+  done <<< "$expected"
+}
+
+# Serialize builds across processes. A current overlay is reused so launching a
+# second process never removes the runtime tree from beneath the first.
 runtime_build_overlay() {
+  local manifest="$1" profile_dir="$2" lock_dir owner attempts=0
+  lock_dir="$profile_dir/.runtime.lock"
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    [ ! -L "$lock_dir" ] || abort "Refusing to build overlay: '$lock_dir' is a symlink."
+    owner="$(tr -dc '0-9' < "$lock_dir/pid" 2>/dev/null || true)"
+    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
+      rm -f "$lock_dir/pid" 2>/dev/null || true
+      rmdir "$lock_dir" 2>/dev/null || true
+      continue
+    fi
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt 600 ] || abort "Timed out waiting for profile runtime lock '$lock_dir'. Close a stuck multi-cli launch and retry."
+    sleep 0.05
+  done
+  printf '%s\n' "${BASHPID:-$$}" > "$lock_dir/pid"
+  (
+    trap 'rm -f "$lock_dir/pid" 2>/dev/null || true; rmdir "$lock_dir" 2>/dev/null || true' EXIT
+    runtime_build_overlay_locked "$manifest" "$profile_dir"
+  )
+}
+
+# Build in a PID-unique staging dir and swap it into place while holding the
+# profile runtime lock. Staging leftovers can therefore never belong to a live
+# builder.
+runtime_build_overlay_locked() {
   local manifest="$1" profile_dir="$2" shared_root runtime_root staging state_subdir link_root
   shared_root="$(runtime_platform_root "$manifest")"
   [ -n "$shared_root" ] || abort "Adapter '$TOOL' has no normal-state root for $(platform)."
   mkdir -p "$shared_root"
   runtime_root="$profile_dir/.runtime"
+  if runtime_overlay_is_current "$manifest" "$runtime_root"; then
+    printf '%s\n' "$runtime_root"
+    return
+  fi
   state_subdir="$(runtime_json_str '.normalState.runtimeSubdir' "$manifest")"
-  staging="$profile_dir/.runtime.staging.$$"
+  staging="$profile_dir/.runtime.staging.${BASHPID:-$$}"
   link_root="$staging"
   [ -n "$state_subdir" ] && link_root="$staging/$state_subdir"
   local stale
@@ -194,17 +248,7 @@ runtime_build_overlay() {
   runtime_link_state_list "$manifest" "$shared_root" "$link_root" '.normalState.sharedPaths'
   runtime_link_state_list "$manifest" "$shared_root" "$link_root" '.normalState.sessionPaths'
   runtime_link_credentials "$manifest" "$profile_dir" "$link_root"
-  {
-    if [ -n "$state_subdir" ]; then
-      runtime_json_arr '.normalState.sharedPaths' "$manifest" | sed "s|^|$state_subdir/|"
-      runtime_json_arr '.normalState.sessionPaths' "$manifest" | sed "s|^|$state_subdir/|"
-      runtime_json_arr '.account.credentialFiles' "$manifest" | sed "s|^|$state_subdir/|"
-    else
-      runtime_json_arr '.normalState.sharedPaths' "$manifest"
-      runtime_json_arr '.normalState.sessionPaths' "$manifest"
-      runtime_json_arr '.account.credentialFiles' "$manifest"
-    fi
-  } > "$staging/.runtime-manifest"
+  runtime_expected_manifest "$manifest" > "$staging/.runtime-manifest"
   runtime_remove_overlay "$manifest" "$runtime_root"
   mv "$staging" "$runtime_root"
   printf '%s\n' "$runtime_root"
@@ -247,8 +291,12 @@ runtime_launch_account_overlay() {
       process_secret="$(mc_cred_get "$secret_target")" || \
         abort "Profile '$tool/$(basename "$profile_dir")' has no stored credential. Run: multi-cli auth set $tool/$(basename "$profile_dir")"
       ;;
-    osUserCredentialStore) abort "Profile '$tool/$(basename "$profile_dir")' requires an owned OS-user credential context; this platform implementation is not enabled yet." ;;
-    inseparable) abort "$(runtime_json_str '.account.reason' "$manifest") Use a legacy-isolated profile until the vendor exposes a safe account boundary." ;;
+    osUserCredentialStore)
+      mc_osuser_ensure "$tool" "$profile_dir" "$manifest"
+      mc_osuser_launch "$tool" "$profile_dir" "$binary" "$@"
+      return
+      ;;
+    inseparable) abort "$(runtime_json_str '.account.reason' "$manifest") Create this profile with --isolated to use a separate whole-root profile." ;;
     *) abort "Unsupported schema-v2 account mechanism '$mechanism'." ;;
   esac
   auth_dir="$profile_dir/auth"

@@ -111,6 +111,17 @@ multicli() {
   "$MULTICLI_BIN" "$@"
 }
 
+# Compare paths after normalizing separators and, on Windows, drive notation.
+assert_same_path() {
+  local left="$1" right="$2"
+  if _multicli_is_windows; then
+    command -v cygpath >/dev/null 2>&1 || return 1
+    left="$(cygpath -m "$left")"
+    right="$(cygpath -m "$right")"
+  fi
+  [ "${left//\\//}" = "${right//\\//}" ]
+}
+
 # --- Fixture builders (real files, real content) ---------------------------
 
 # A genuine Codex rollout file: first line is a real session_meta record,

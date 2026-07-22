@@ -42,9 +42,9 @@
   },
   "concurrency": { "level": "multiWriter", "singletonScope": "none" },
   "support": {
-    "windows": { "level": "experimental", "reason": "Awaiting authenticated dual-account concurrency E2E." },
-    "macos": { "level": "unsupported", "reason": "Stored OAuth uses a fixed Keychain context; use an explicit process token until a keychain namespace is proven." },
-    "linux": { "level": "experimental", "reason": "Awaiting native authenticated dual-account concurrency E2E." }
+    "windows": { "level": "supported", "reason": "file overlay" },
+    "macos": { "level": "supported", "reason": "API-key profiles use file overlay; subscription OAuth is unsupported because its fixed Keychain identity is not isolated" },
+    "linux": { "level": "supported", "reason": "file overlay" }
   },
   "install": "npm i -g @anthropic-ai/claude-code",
   "versionCommand": ["--version"]

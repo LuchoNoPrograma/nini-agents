@@ -14,11 +14,11 @@ Binary discovery: `%APPDATA%\npm\opencode.cmd` (Windows), `/usr/local/bin/openco
 
 ## Quickstart
 
-Account-overlay launch fails closed on all platforms. Existing legacy whole-home profiles remain launchable:
+Stored-login profiles use whole-root isolation:
 
 ```bash
-multi-cli launch opencode/<legacy-profile>
-multi-cli doctor                      # shows the exact unsupported reason
+multi-cli new opencode/work --isolated
+multi-cli launch opencode/work
 ```
 
 ## Account boundary
@@ -42,6 +42,4 @@ No session paths are declared shareable, and no profile-local credentials can be
 
 | Windows | macOS | Linux |
 |---|---|---|
-| unsupported | unsupported | unsupported |
-
-`unsupported` means multi-cli refuses to claim the account-overlay contract. Legacy whole-home profiles keep their previous behavior.
+| supported (`--isolated`) | supported (`--isolated`) | supported (`--isolated`) |

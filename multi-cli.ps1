@@ -28,6 +28,9 @@ param (
     [Parameter(Position = 2, Mandatory = $false)]
     [string]$Arg2,
 
+    [Alias('i')]
+    [switch]$WholeRoot,
+
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$ForwardArgs
 )
@@ -36,6 +39,7 @@ $ErrorActionPreference = 'Stop'
 $VERSION = '0.1.0'
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$MultiCliLauncherPath = $MyInvocation.MyCommand.Definition
 $ToolsDir  = if ($env:MULTICLI_TOOLS_DIR) { $env:MULTICLI_TOOLS_DIR } else { $ScriptDir }
 $BASE = if ($env:MULTICLI_HOME) { $env:MULTICLI_HOME } else { Join-Path $env:USERPROFILE 'MultiCliProfiles' }
 
@@ -111,16 +115,57 @@ function Resolve-PathToken {
 
 # First binary candidate that exists (path or PATH lookup); $null when none
 # resolve. MULTICLI_OVERRIDE_BINARY wins.
+function Test-UriProtocol {
+    param([string]$Scheme)
+    $key = [Microsoft.Win32.Registry]::ClassesRoot.OpenSubKey($Scheme)
+    if ($null -eq $key) { return $false }
+    try {
+        if ($null -eq $key.GetValue('URL Protocol', $null)) { return $false }
+        $command = $key.OpenSubKey('shell\open\command')
+        if ($null -eq $command) { return $false }
+        try { return -not [string]::IsNullOrWhiteSpace([string]$command.GetValue('')) } finally { $command.Dispose() }
+    } finally { $key.Dispose() }
+}
+
+function Test-UriBinary {
+    param([string]$Binary)
+    return ($Binary -match '(?i)[\\/]explorer\.exe$')
+}
+
+function Get-AppxAdapterBinary {
+    param([string]$PackageFamilyName)
+    $package = Get-AppxPackage -PackageTypeFilter Main -ErrorAction SilentlyContinue |
+        Where-Object { $_.PackageFamilyName -eq $PackageFamilyName } |
+        Select-Object -First 1
+    if ($null -eq $package) { return $null }
+    $manifest = Get-AppxPackageManifest -Package $package
+    $application = @($manifest.Package.Applications.Application) | Select-Object -First 1
+    if ($null -eq $application -or [string]::IsNullOrWhiteSpace([string]$application.Executable)) { return $null }
+    $executable = Join-Path $package.InstallLocation ([string]$application.Executable)
+    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { return $null }
+    return $executable
+}
+
 function Find-AdapterBinary {
     param($Adapter)
     if ($env:MULTICLI_OVERRIDE_BINARY) { return $env:MULTICLI_OVERRIDE_BINARY }
     $candidates = @()
     if ($Adapter.binary.windows) { $candidates += $Adapter.binary.windows }
-    foreach ($c in $candidates) {
-        $resolved = Resolve-PathToken $c
+    foreach ($candidate in $candidates) {
+        if ($candidate -like 'appx:*') {
+            $appxBinary = Get-AppxAdapterBinary -PackageFamilyName $candidate.Substring(5)
+            if ($appxBinary) { return $appxBinary }
+            continue
+        }
+        if ($candidate -like 'uri:*') {
+            $scheme = $candidate.Substring(4)
+            if (Test-UriProtocol -Scheme $scheme) { return (Get-Command explorer.exe).Source }
+            continue
+        }
+        $resolved = Resolve-PathToken $candidate
         if (Test-Path $resolved -ErrorAction SilentlyContinue) { return $resolved }
-        $cmd = Get-Command $resolved -ErrorAction SilentlyContinue
-        if ($cmd) { return $cmd.Source }
+        $command = Get-Command $resolved -ErrorAction SilentlyContinue
+        if ($command) { return $command.Source }
     }
     return $null
 }
@@ -229,6 +274,25 @@ function Test-IsReparsePoint {
     return (($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
 }
 
+# Return regular files below a session entry without following reparse-point
+# directories. An explicit stack is required because Get-ChildItem -Recurse
+# traverses nested junctions before their child files can be identified as links.
+function Get-SessionFilesNoReparse {
+    param([string]$Root)
+    $files = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
+    $stack = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
+    $stack.Push((Get-Item -LiteralPath $Root -Force))
+    while ($stack.Count -gt 0) {
+        $directory = $stack.Pop()
+        foreach ($item in (Get-ChildItem -LiteralPath $directory.FullName -Force -ErrorAction SilentlyContinue)) {
+            if (Test-IsReparsePoint $item) { continue }
+            if ($item.PSIsContainer) { $stack.Push($item); continue }
+            $files.Add($item)
+        }
+    }
+    return $files
+}
+
 # Copy every adapter-declared session entry (file or directory, merged
 # per-file). Reparse points are skipped so credential targets never travel;
 # Copied/Skipped are ref counters shared across the whole run.
@@ -244,18 +308,13 @@ function Copy-SessionEntry {
         [ref]$Skipped
     )
     $srcItem = Get-Item -LiteralPath $Source -Force -ErrorAction SilentlyContinue
-    if (-not $srcItem) { return }
-    if (Test-IsReparsePoint $srcItem) { return }
-    if (Test-Path -LiteralPath $Source -PathType Leaf) {
+    if (-not $srcItem -or (Test-IsReparsePoint $srcItem)) { return }
+    if (-not $srcItem.PSIsContainer) {
         Copy-SessionFile -Source $Source -Destination $Destination -NoMerge $NoMerge -DryRun $DryRun -Copied $Copied -Skipped $Skipped
         return
     }
-    $sourceRoot = [System.IO.Path]::GetFullPath($Source)
-    $items = Get-ChildItem -LiteralPath $sourceRoot -Recurse -File -Force -ErrorAction SilentlyContinue
-    foreach ($item in $items) {
-        if (Test-IsReparsePoint $item) { continue }
-        $resolved = [System.IO.Path]::GetFullPath($item.FullName)
-        if (-not $resolved.StartsWith($sourceRoot, [StringComparison]::OrdinalIgnoreCase)) { continue }
+    $sourceRoot = [System.IO.Path]::GetFullPath($Source).TrimEnd('\', '/')
+    foreach ($item in (Get-SessionFilesNoReparse -Root $sourceRoot)) {
         $relative = $item.FullName.Substring($sourceRoot.Length).TrimStart('\', '/')
         if (Test-IsCredentialName -RelativePath "$RelativeRoot/$relative" -Credentials $Credentials) { continue }
         $target = Join-Path $Destination $relative
@@ -315,13 +374,22 @@ function Invoke-Auth {
     Import-Module (Resolve-MultiCliModulePath 'MultiCli.CredentialStore.psm1') -Force
     switch ($Action) {
         'set' {
-            $secureSecret = Read-Host "Enter $environmentVariable for $Spec" -AsSecureString
-            $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureSecret)
+            $plainSecret = $null
+            if ([Console]::IsInputRedirected) {
+                $plainSecret = [Console]::In.ReadLine()
+                if ([string]::IsNullOrEmpty($plainSecret)) { throw 'Credential input was empty.' }
+            } else {
+                $secureSecret = Read-Host "Enter $environmentVariable for $Spec" -AsSecureString
+                $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureSecret)
+                try {
+                    $plainSecret = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
+                } finally {
+                    if ($pointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
+                }
+            }
             try {
-                $plainSecret = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
                 Set-MultiCliCredential -Target $target -Secret $plainSecret
             } finally {
-                if ($pointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
                 $plainSecret = $null
             }
             Write-Host "Stored credential for $Spec."
@@ -339,6 +407,33 @@ function Invoke-Auth {
     }
 }
 
+# Throw if any schema-v2 session path is unsafe or overlaps a declared
+# credential -- the same invariant Test-SessionAdapterBug enforces for
+# schema-v1 adapters, read from the v2 field names.
+function Test-IsolatedSessionAdapterBug {
+    param($Adapter)
+    $normalState = Get-ObjectPropertySafe -Object $Adapter -Name 'normalState'
+    $paths = @($normalState.sessionPaths)
+    $creds = @($Adapter.account.credentialFiles)
+    foreach ($cred in $creds) {
+        Assert-RelPathSafe -Path $cred -Kind 'credential' -ToolId $Adapter.id
+    }
+    foreach ($path in $paths) {
+        if (-not $path) { continue }
+        Assert-RelPathSafe -Path $path -Kind 'session path' -ToolId $Adapter.id
+        $normPath = ($path -replace '\\', '/').TrimEnd('/')
+        foreach ($cred in $creds) {
+            if (-not $cred) { continue }
+            $normCred = ($cred -replace '\\', '/').TrimEnd('/')
+            if ($normPath -eq $normCred -or
+                $normPath -like "$normCred/*" -or
+                $normCred -like "$normPath/*") {
+                throw "Adapter bug: session path '$path' overlaps credential '$cred' for '$($Adapter.id)'. Refusing to copy credentials."
+            }
+        }
+    }
+}
+
 # multi-cli continue <tool> <src> <dest>: copy adapter-declared session state
 # between endpoints ('base' = the tool's real home). Merge policy keeps the
 # newer file; credential paths never travel. Schema-v2 tools already share
@@ -351,7 +446,57 @@ function Invoke-Continue {
     $adapter = Get-Adapter $Tool
 
     if ((Get-ObjectPropertySafe -Object $adapter -Name 'schemaVersion') -eq 2) {
-        Write-Host "$($adapter.displayName) profiles already share conversations through the shared normal state; nothing to continue."
+        # Isolated profiles share nothing, so continuation is a real copy
+        # between them (and 'base'), exactly like legacy endpoints. Shared
+        # schema-v2 profiles keep the no-op.
+        if ($SrcName -eq $DestName) { throw "Source and destination must differ" }
+        $srcDir  = Resolve-SessionEndpoint $adapter $Tool $SrcName
+        $destDir = Resolve-SessionEndpoint $adapter $Tool $DestName
+        if (-not (Test-Path $srcDir)) {
+            throw "Source endpoint '$SrcName' not found at $srcDir. Nothing to continue from."
+        }
+        if (-not (Test-Path $destDir)) {
+            throw "Destination profile '$DestName' does not exist. Create it with: multi-cli new $Tool/$DestName"
+        }
+        $srcIsolated  = Test-Path -LiteralPath (Join-Path $srcDir '.isolated')
+        $destIsolated = Test-Path -LiteralPath (Join-Path $destDir '.isolated')
+        if (-not $srcIsolated -and -not $destIsolated) {
+            Write-Host "$($adapter.displayName) profiles already share conversations through the shared normal state; nothing to continue."
+            return
+        }
+        $normalState = Get-ObjectPropertySafe -Object $adapter -Name 'normalState'
+        $sessionPaths = @($normalState.sessionPaths)
+        if ($sessionPaths.Count -eq 0) {
+            throw "$($adapter.displayName) declares no session paths; nothing to continue."
+        }
+        Test-IsolatedSessionAdapterBug $adapter
+
+        $sourceState = $srcDir
+        $destinationState = $destDir
+        $runtimeSubdir = Get-ObjectPropertySafe -Object $normalState -Name 'runtimeSubdir'
+        if ($runtimeSubdir) {
+            $sourceState = Join-Path $srcDir ($runtimeSubdir -replace '/', '\')
+            $destinationState = Join-Path $destDir ($runtimeSubdir -replace '/', '\')
+        }
+        $credentials = @($adapter.account.credentialFiles)
+        $copied = 0; $skipped = 0; $found = $false
+        if ($DryRun) { Write-Host "Dry run -- no files will be written." }
+        foreach ($entry in $sessionPaths) {
+            if (-not $entry) { continue }
+            if (Test-IsCredentialName -RelativePath $entry -Credentials $credentials) { continue }
+            $src = Join-Path $sourceState ($entry -replace '/', '\')
+            if (-not (Test-Path $src)) { continue }
+            $found = $true
+            $dst = Join-Path $destinationState ($entry -replace '/', '\')
+            $c = [ref]$copied; $s = [ref]$skipped
+            Copy-SessionEntry -Source $src -Destination $dst -NoMerge $NoMerge -DryRun $DryRun -Credentials $credentials -RelativeRoot $entry -Copied $c -Skipped $s
+            $copied = $c.Value; $skipped = $s.Value
+        }
+        if (-not $found) {
+            Write-Host "No session data found at source '$SrcName'. Nothing to continue."
+            return
+        }
+        Write-Host "Continued ${Tool}: $SrcName -> $DestName ($copied copied, $skipped skipped (same-or-newer))"
         return
     }
 
@@ -403,10 +548,11 @@ function Get-SessionStateSize {
     $total = 0
     foreach ($entry in @($Adapter.session.paths)) {
         if (-not $entry) { continue }
-        $p = Join-Path $Root ($entry -replace '/', '\')
-        if (-not (Test-Path $p)) { continue }
-        $sum = (Get-ChildItem -LiteralPath $p -Recurse -File -Force -ErrorAction SilentlyContinue |
-                Measure-Object -Property Length -Sum).Sum
+        $path = Join-Path $Root ($entry -replace '/', '\')
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        if (-not $item -or (Test-IsReparsePoint $item)) { continue }
+        $files = if ($item.PSIsContainer) { Get-SessionFilesNoReparse -Root $path } else { @($item) }
+        $sum = ($files | Measure-Object -Property Length -Sum).Sum
         if ($sum) { $total += $sum }
     }
     return $total
@@ -501,16 +647,36 @@ function Get-TemplatesDir { Join-Path $BASE '.templates' }
 # Profile CRUD
 # =============================================================================
 
+# Write .profile.json for any isolated schema-v2 profile atomically. The
+# unique profileId keeps lifecycle and optional OS-store credentials distinct.
+function Write-IsolatedProfileMetadata {
+    param($Adapter, [string]$ProfileDir)
+    $metadata = [ordered]@{
+        schemaVersion = 2
+        adapterId = $Adapter.id
+        profileId = [guid]::NewGuid().ToString()
+        mode = 'isolated'
+    }
+    $temporaryPath = Join-Path $ProfileDir '.profile.json.tmp'
+    $metadata | ConvertTo-Json | Set-Content -LiteralPath $temporaryPath -Encoding UTF8
+    Move-Item -LiteralPath $temporaryPath -Destination (Join-Path $ProfileDir '.profile.json') -Force
+}
+
 # multi-cli new <tool>/<name>: create the profile dir, seed from base unless
 # suppressed, wire schema-v2 runtime metadata when the adapter is
 # accountOverlay, then create the alias and (for non-CLI kinds) a shortcut.
 function New-Profile {
-    param([string]$Spec, [bool]$Shared = $false, [bool]$Cli = $false, [string]$FromTemplate = '', [bool]$NoSeed = $false)
+    param([string]$Spec, [bool]$Shared = $false, [bool]$Cli = $false, [string]$FromTemplate = '', [bool]$NoSeed = $false, [bool]$Isolated = $false)
 
     $p = Split-ProfileSpec $Spec
     Test-ProfileName $p.Name
     $adapter = Get-Adapter $p.Tool
     $profileDir = Get-ProfileDir $p.Tool $p.Name
+
+    if ($Shared -and $Isolated) { throw '--shared and --isolated are mutually exclusive: choose one profile mode.' }
+    if ($Isolated -and $adapter.isolation.strategy -ne 'accountOverlay') {
+        throw "--isolated applies to schema-v2 (accountOverlay) adapters; '$($p.Tool)' uses '$($adapter.isolation.strategy)', which already isolates the whole root per profile."
+    }
 
     if (Test-Path $profileDir) { throw "Profile '$Spec' already exists" }
     New-Item -ItemType Directory -Force -Path (Get-ToolProfilesDir $p.Tool) | Out-Null
@@ -518,13 +684,16 @@ function New-Profile {
     if ($FromTemplate) {
         $tplDir = Join-Path (Get-TemplatesDir) $FromTemplate
         if (-not (Test-Path $tplDir)) { throw "Template '$FromTemplate' not found" }
-        # Compatibility must be proven before anything is copied; an
-        # incompatible template must not leave a half-created profile behind.
         if ($adapter.isolation.strategy -eq 'accountOverlay') {
             Import-Module (Resolve-MultiCliModulePath 'MultiCli.Transfer.psm1') -Force
-            Assert-TransferTemplateCompatible -TemplateDir $tplDir -Adapter $adapter
+            # Validation runs before creating the profile, then payload files go
+            # to the state location the selected mode actually launches.
+            [void](Assert-TransferTemplateCompatible -TemplateDir $tplDir -Adapter $adapter)
+            New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+            Apply-MultiCliTemplate -TemplateDir $tplDir -Adapter $adapter -ProfileDir $profileDir -Isolated:$Isolated
+        } else {
+            Copy-Item -Path $tplDir -Destination $profileDir -Recurse
         }
-        Copy-Item -Path $tplDir -Destination $profileDir -Recurse
     } elseif ($Shared) {
         New-SharedProfile -Adapter $adapter -ProfileDir $profileDir
     } else {
@@ -535,7 +704,15 @@ function New-Profile {
         Initialize-ProfileSeed -Adapter $adapter -ProfileDir $profileDir -Shared $Shared
     }
 
-    if ($adapter.isolation.strategy -eq 'accountOverlay') {
+    if ($Isolated) {
+        New-Item -ItemType File -Force -Path (Join-Path $profileDir '.isolated') | Out-Null
+        # Every isolated schema-v2 profile carries a unique profileId. Lifecycle
+        # operations then stay on the allowlisted transfer path instead of the
+        # legacy whole-directory clone/export path.
+        if (-not (Test-Path -LiteralPath (Join-Path $profileDir '.profile.json'))) {
+            Write-IsolatedProfileMetadata -Adapter $adapter -ProfileDir $profileDir
+        }
+    } elseif ($adapter.isolation.strategy -eq 'accountOverlay') {
         Import-RuntimeModule
         Initialize-RuntimeProfile -Adapter $adapter -ProfileDir $profileDir
     }
@@ -553,7 +730,8 @@ function New-Profile {
         New-StartMenuShortcut -Tool $p.Tool -Name $p.Name -Adapter $adapter | Out-Null
     }
 
-    Write-Host "Created profile $Spec ($($adapter.displayName), strategy=$($adapter.isolation.strategy))"
+    $modeNote = if ($Isolated) { ', isolated' } else { '' }
+    Write-Host "Created profile $Spec ($($adapter.displayName), strategy=$($adapter.isolation.strategy)$modeNote)"
     # Never persist a custom (test/scratch) MULTICLI_HOME into the user's PATH;
     # only the default profile root belongs there permanently.
     if (-not $env:MULTICLI_HOME -and -not (Test-AliasDirInPath)) {
@@ -623,8 +801,24 @@ function Remove-Profile {
     $profileDir = Get-ProfileDir $p.Tool $p.Name
     if (-not (Test-Path $profileDir)) { throw "Profile '$Spec' does not exist" }
 
-    $confirm = Read-Host "Delete profile '$Spec' and all its data? [y/N]"
+    # Read-Host consults the console on some hosts even when stdin is piped,
+    # silently returning an empty answer and aborting scripted deletes. Read
+    # the redirected stream directly so piped confirmations are honored.
+    if ([Console]::IsInputRedirected) {
+        Write-Host "Delete profile '$Spec' and all its data? [y/N]"
+        $confirm = [Console]::In.ReadLine()
+    } else {
+        $confirm = Read-Host "Delete profile '$Spec' and all its data? [y/N]"
+    }
     if ($confirm -notmatch '^[Yy]$') { Write-Host "Aborted."; return }
+
+    # An OS-user profile owns a sandbox user, optional legacy scheduled tasks,
+    # and a Credential Manager entry; remove them before deleting the profile dir.
+    # The helper verifies ownership and is a no-op without a record.
+    if (Test-Path -LiteralPath (Join-Path $profileDir '.osuser.json')) {
+        Import-Module (Resolve-MultiCliModulePath 'MultiCli.OsUser.psm1') -Force
+        Remove-OsUserIsolation -ProfileDir $profileDir
+    }
 
     # A process-secret profile owns a Credential Manager entry keyed by its
     # profileId; delete must not orphan it in the store. A missing adapter
@@ -667,8 +861,8 @@ function Rename-Profile {
     Write-Host "Renamed '$OldSpec' to '$NewSpec'"
 }
 
-# multi-cli clone: legacy profiles only. Schema-v2 profiles carry a unique
-# profileId and refuse to clone (see Copy-ProfileTo guard).
+# Clone a profile. Schema-v2 clones receive a fresh identity and copy only the
+# profile-local mode/state boundary; credentials and disposable runtime do not.
 function Copy-ProfileTo {
     param([string]$SrcSpec, [string]$DestSpec)
     $a = Split-ProfileSpec $SrcSpec
@@ -680,14 +874,40 @@ function Copy-ProfileTo {
     $destDir = Get-ProfileDir $b.Tool $b.Name
     if (-not (Test-Path $srcDir)) { throw "Source profile '$SrcSpec' does not exist" }
     if (Test-Path $destDir) { throw "Destination profile '$DestSpec' already exists" }
-    # A schema-v2 profile carries a unique profileId that keys its credential
-    # store entries; a copy would make two profiles share one account identity.
-    if (Test-Path -LiteralPath (Join-Path $srcDir '.profile.json')) {
-        throw 'Cloning schema-v2 profiles requires the transfer implementation; it is not enabled yet.'
+    $adapter = Get-Adapter $a.Tool
+    $metadataPath = Join-Path $srcDir '.profile.json'
+    if (Test-Path -LiteralPath $metadataPath) {
+        $mode = (Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json).mode
+        New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+        if ($mode -eq 'isolated') {
+            $normalState = Get-ObjectPropertySafe -Object $adapter -Name 'normalState'
+            $sourceState = $srcDir
+            $destinationState = $destDir
+            $runtimeSubdir = Get-ObjectPropertySafe -Object $normalState -Name 'runtimeSubdir'
+            if ($runtimeSubdir) {
+                $sourceState = Join-Path $srcDir ($runtimeSubdir -replace '/', '\')
+                $destinationState = Join-Path $destDir ($runtimeSubdir -replace '/', '\')
+            }
+            foreach ($relativePath in @($normalState.sharedPaths) + @($normalState.sessionPaths)) {
+                if (-not $relativePath) { continue }
+                $source = Join-Path $sourceState ($relativePath -replace '/', '\')
+                if (-not (Test-Path -LiteralPath $source)) { continue }
+                $destination = Join-Path $destinationState ($relativePath -replace '/', '\')
+                $parent = Split-Path -Parent $destination
+                if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+                Copy-Item -LiteralPath $source -Destination $destination -Recurse
+            }
+            New-Item -ItemType File -Path (Join-Path $destDir '.isolated') | Out-Null
+            Write-IsolatedProfileMetadata -Adapter $adapter -ProfileDir $destDir
+        } else {
+            Import-RuntimeModule
+            Initialize-RuntimeProfile -Adapter $adapter -ProfileDir $destDir
+        }
+    } else {
+        Copy-Item -Path $srcDir -Destination $destDir -Recurse
     }
-    Copy-Item -Path $srcDir -Destination $destDir -Recurse
     New-AliasScript -Tool $b.Tool -Name $b.Name
-    New-StartMenuShortcut -Tool $b.Tool -Name $b.Name -Adapter (Get-Adapter $b.Tool) | Out-Null
+    New-StartMenuShortcut -Tool $b.Tool -Name $b.Name -Adapter $adapter | Out-Null
     Write-Host "Cloned '$SrcSpec' to '$DestSpec'"
 }
 
@@ -748,9 +968,7 @@ function New-StartMenuShortcut {
         $WshShell = New-Object -ComObject WScript.Shell
         $shortcut = $WshShell.CreateShortcut($linkPath)
         $shortcut.TargetPath = 'powershell.exe'
-        $scriptPath = $MyInvocation.MyCommand.Definition
-        if (-not $scriptPath) { $scriptPath = $PSCommandPath }
-        $shortcut.Arguments = "-ExecutionPolicy Bypass -File `"$scriptPath`" launch $Tool/$Name"
+        $shortcut.Arguments = "-ExecutionPolicy Bypass -File `"$MultiCliLauncherPath`" launch $Tool/$Name"
         $shortcut.Save()
         return $linkPath
     } catch {
@@ -777,11 +995,25 @@ function Invoke-Launch {
     $adapter = Get-Adapter $p.Tool
     $profileDir = Get-ProfileDir $p.Tool $p.Name
     if (-not (Test-Path $profileDir)) { throw "Profile '$Spec' does not exist. Create with: multi-cli new $Spec" }
+    if ($adapter.support.windows.level -eq 'unsupported') {
+        throw "$($adapter.displayName) is unsupported on windows: $($adapter.support.windows.reason)"
+    }
 
     $binary = Find-AdapterBinary $adapter
     if (-not $binary) {
-        $hint = if ($adapter.install) { " ($($adapter.install))" } else { '' }
+        $hint = if ($adapter.install) { " Install with: $($adapter.install)" } else { '' }
         throw "$($adapter.displayName) binary not found.$hint"
+    }
+    if (Test-UriBinary -Binary $binary) {
+        $BinaryArgs = @($adapter.isolation.args) + @($BinaryArgs)
+    }
+
+    # Isolated profiles share nothing: the profile dir is the tool's whole
+    # root, so the account-overlay runtime (shared links, overlay) is bypassed.
+    if ($adapter.isolation.strategy -eq 'accountOverlay' -and (Test-Path -LiteralPath (Join-Path $profileDir '.isolated'))) {
+        Write-Host "Launching $($adapter.displayName) profile '$Spec' [$($adapter.isolation.strategy), isolated]"
+        Invoke-LaunchIsolated -Adapter $adapter -ProfileDir $profileDir -Binary $binary -BinaryArgs $BinaryArgs
+        return
     }
 
     Write-Host "Launching $($adapter.displayName) profile '$Spec' [$($adapter.isolation.strategy)]"
@@ -853,9 +1085,90 @@ function Start-LaunchPlan {
 # overlay, injected secret); the launcher only starts it.
 function Invoke-LaunchAccountOverlay {
     param($Adapter, [string]$ProfileDir, [string]$Binary, [string[]]$BinaryArgs)
+    if ($Adapter.account.mechanism -eq 'osUserCredentialStore') {
+        Import-Module (Resolve-MultiCliModulePath 'MultiCli.OsUser.psm1') -Force
+        $exitCode = Invoke-OsUserLaunch -Adapter $Adapter -ProfileDir $ProfileDir -Binary $Binary -BinaryArgs $BinaryArgs
+        if ($exitCode -ne 0) {
+            $global:LASTEXITCODE = $exitCode
+            exit $exitCode
+        }
+        return
+    }
     Import-RuntimeModule
     $plan = Get-AccountOverlayLaunchPlan -Adapter $Adapter -ProfileDir $ProfileDir -Binary $Binary -BinaryArgs $BinaryArgs
     Start-LaunchPlan -Plan $plan
+}
+
+# Isolated launch for schema-v2 profiles created with --isolated: the profile
+# dir is the tool's whole root. No runtime overlay, no shared links, nothing
+# read from or written to the native shared root. fileOverlay and
+# processSecret point the adapter's home env at the profile dir itself;
+# processSecret additionally injects the per-profile credential (fail-closed
+# until `multi-cli auth set`). osUserCredentialStore and inseparable get a
+# whole-home redirect into <profile>\_home -- no OS user, no shared state.
+function Invoke-LaunchIsolated {
+    param($Adapter, [string]$ProfileDir, [string]$Binary, [string[]]$BinaryArgs)
+    $mechanism = $Adapter.account.mechanism
+    $profileId = ''
+    $metadataPath = Join-Path $ProfileDir '.profile.json'
+    if (Test-Path -LiteralPath $metadataPath) {
+        $profileId = (Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json).profileId
+    }
+
+    # Both {runtimeRoot} and {sharedStateRoot} resolve to the profile dir: in
+    # isolated mode the profile is the root, so no placeholder can leak a path
+    # into the native shared root.
+    $environment = @{}
+    foreach ($property in $Adapter.isolation.env.PSObject.Properties) {
+        $environment[$property.Name] = $property.Value.
+            Replace('{profileDir}', $ProfileDir).
+            Replace('{profileId}', $profileId).
+            Replace('{authDir}', (Join-Path $ProfileDir 'auth')).
+            Replace('{runtimeRoot}', $ProfileDir).
+            Replace('{sharedStateRoot}', $ProfileDir).
+            Replace('{realHome}', $env:USERPROFILE)
+    }
+    if ($profileId) { $environment['MULTICLI_PROFILE_ID'] = $profileId }
+
+    if ($mechanism -eq 'processSecret') {
+        $environmentVariable = $Adapter.account.secret.environmentVariable
+        if (-not $environmentVariable) { throw "Adapter '$($Adapter.id)' is missing account.secret.environmentVariable." }
+        if (-not $profileId) { throw "Profile '$($Adapter.id)/$(Split-Path $ProfileDir -Leaf)' is missing schema-v2 metadata." }
+        Import-Module (Resolve-MultiCliModulePath 'MultiCli.CredentialStore.psm1') -Force
+        $target = "multi-cli/$($Adapter.id)/$profileId/$environmentVariable"
+        $secret = Get-MultiCliCredential -Target $target
+        if ([string]::IsNullOrEmpty($secret)) {
+            throw "Profile '$($Adapter.id)/$(Split-Path $ProfileDir -Leaf)' has no stored credential. Run: multi-cli auth set $($Adapter.id)/$(Split-Path $ProfileDir -Leaf)"
+        }
+        $environment[$environmentVariable] = $secret
+    }
+
+    if ($mechanism -ne 'fileOverlay' -and $mechanism -ne 'processSecret') {
+        $homeDir = Join-Path $ProfileDir '_home'
+        $appdata = Join-Path $homeDir 'AppData\Roaming'
+        $localApp = Join-Path $homeDir 'AppData\Local'
+        $tempDir = Join-Path $homeDir 'AppData\Local\Temp'
+        New-Item -ItemType Directory -Force -Path $homeDir  | Out-Null
+        New-Item -ItemType Directory -Force -Path $appdata  | Out-Null
+        New-Item -ItemType Directory -Force -Path $localApp | Out-Null
+        New-Item -ItemType Directory -Force -Path $tempDir  | Out-Null
+        $environment['USERPROFILE']  = $homeDir
+        $environment['HOME']         = $homeDir
+        $environment['HOMEDRIVE']    = $homeDir.Substring(0, 2)
+        $environment['HOMEPATH']     = $homeDir.Substring(2)
+        $environment['APPDATA']      = $appdata
+        $environment['LOCALAPPDATA'] = $localApp
+        $environment['TEMP']         = $tempDir
+        $environment['TMP']          = $tempDir
+    }
+
+    Start-LaunchPlan -Plan ([pscustomobject]@{
+        Binary = $Binary
+        Arguments = @($BinaryArgs)
+        Environment = $environment
+        ClearEnvironment = @($Adapter.isolation.clearEnv)
+        Mode = $Adapter.isolation.mode
+    })
 }
 
 # userDataDir strategy: pass the adapter's --user-data-dir-style args and
@@ -1060,6 +1373,7 @@ function Show-List {
         foreach ($prof in $profiles) {
             $type = if (Test-Path (Join-Path $prof.FullName '.cli')) { 'cli' }
                     elseif (Test-Path (Join-Path $prof.FullName '.shared')) { 'shared' }
+                    elseif (Test-Path (Join-Path $prof.FullName '.isolated')) { 'isolated' }
                     else { 'full' }
             Write-Host ("  {0,-20} {1,-8} {2}" -f $prof.Name, $type, (Get-FolderSize $prof.FullName))
         }
@@ -1075,9 +1389,10 @@ function Show-Tools {
         $bin = Find-AdapterBinary $a
         $installed = if ($bin) { "yes" } else { 'no' }
         $color = if ($bin) { 'Green' } else { 'DarkGray' }
-        $platformSupport = if ($a.support -and $a.support.windows) { $a.support.windows.level } else { $null }
-        $status = if ($platformSupport) { $platformSupport } elseif ($a.status) { $a.status } else { '?' }
+        $platformSupport = if ($a.support -and $a.support.windows) { $a.support.windows } else { $null }
+        $status = if ($platformSupport.level) { $platformSupport.level } elseif ($a.status) { $a.status } else { '?' }
         Write-Host ("  {0,-18} {1,-12} {2,-15} {3,-10} {4}" -f $a.id, $a.kind, $a.isolation.strategy, $status, $installed) -ForegroundColor $color
+        if ($platformSupport.reason) { Write-Host "    $($platformSupport.reason)" }
     }
 }
 
@@ -1114,8 +1429,12 @@ function Show-Doctor {
             $hint = if ($a.install) { "  install: $($a.install)" } else { '' }
             Write-Host "  [MISS] $($a.id)$hint" -ForegroundColor DarkGray
         }
-        if ($support -and $support.level -ne 'verified') {
-            Write-Host "         $($support.level): $($support.reason)" -ForegroundColor Yellow
+        if ($support -and $support.reason) {
+            if ($support.level -eq 'unsupported') {
+                Write-Host "         $($support.level): $($support.reason)" -ForegroundColor Yellow
+            } else {
+                Write-Host "         $($support.level): $($support.reason)"
+            }
         }
     }
 
@@ -1150,9 +1469,17 @@ function Show-Doctor {
     }
 
     Write-Host ""
-    if ($errors -eq 0 -and $warnings -eq 0) { Write-Host "All good." -ForegroundColor Green }
-    elseif ($errors -eq 0) { Write-Host "$warnings warning(s)." -ForegroundColor Yellow }
-    else { Write-Host "$errors error(s), $warnings warning(s)." -ForegroundColor Red }
+    if ($errors -eq 0 -and $warnings -eq 0) {
+        Write-Host "All good." -ForegroundColor Green
+        return
+    }
+    if ($errors -eq 0) {
+        Write-Host "$warnings warning(s)." -ForegroundColor Yellow
+        if ($Deep -ne '--deep') { return }
+    } else {
+        Write-Host "$errors error(s), $warnings warning(s)." -ForegroundColor Red
+    }
+    exit 1
 }
 
 function Show-Stats {
@@ -1196,7 +1523,7 @@ function Invoke-Template {
             $dest = Join-Path $tplDir $B
             if (Test-Path $dest) { throw "Template '$B' already exists" }
             Copy-Item -Path $srcDir -Destination $dest -Recurse
-            foreach ($f in @('.shared', '.cli', 'auth.json', '.credentials.json', 'oauth_creds.json')) {
+            foreach ($f in @('.shared', '.cli', '.isolated', 'auth.json', '.credentials.json', 'oauth_creds.json')) {
                 $strip = Join-Path $dest $f
                 if (Test-Path $strip) { Remove-Item -Recurse -Force $strip }
             }
@@ -1311,7 +1638,7 @@ USAGE
   multi-cli <command> [args]
 
 COMMANDS
-  new <tool>/<name> [--shared] [--cli] [--from <tpl>] [--no-seed]   Create a profile
+  new <tool>/<name> [--shared] [--isolated] [--cli] [--from <tpl>] [--no-seed]   Create a profile
   launch <tool>/<name> [-- args...]                     Launch the profile
   continue <tool> <src> <dest> [--no-merge] [--dry-run] Copy a chat session src->dest ('base' = real home)
   migrate <tool>/<name> [--dry-run] [--prefer-profile]  Migrate a legacy profile to schema-v2
@@ -1339,7 +1666,8 @@ ENVIRONMENT
 
 EXAMPLES
   multi-cli new claude-cli/work
-  multi-cli new cursor/personal --shared
+  multi-cli new codex/acme --isolated
+  multi-cli new opencode/personal --isolated
   multi-cli launch codex/acme -- exec --search "fix the build"
   multi-cli continue codex rate-limited fresh-account   # resume a chat under another account
   claude-cli-work          # via auto-generated alias on `$PATH
@@ -1392,20 +1720,28 @@ function Split-LaunchArgs {
     return [pscustomobject]@{ Pre = $All; Post = @(); HadDelim = $false }
 }
 
-# Parse 'new' flags (--shared/--cli/--no-seed/--from <tpl>) from the token
-# list; unknown tokens are ignored so forward compatibility holds.
+# Parse 'new' flags (--shared/--isolated/--cli/--no-seed/--from <tpl>) from
+# the token list; unknown tokens are ignored so forward compatibility holds.
 function Read-NewFlags {
     param([string[]]$Tokens)
-    $shared = $false; $cli = $false; $tpl = ''; $noSeed = $false
+    $shared = $false; $cli = $false; $tpl = ''; $noSeed = $false; $isolated = $false
     for ($i = 0; $i -lt $Tokens.Count; $i++) {
         switch ($Tokens[$i]) {
             '--shared'  { $shared = $true }
+            '--isolated' { $isolated = $true }
+            '--isolate'  { $isolated = $true }
+            '-i'         { $isolated = $true }
             '--cli'     { $cli = $true }
             '--no-seed' { $noSeed = $true }
-            '--from'    { $i++; if ($i -lt $Tokens.Count) { $tpl = $Tokens[$i] } }
+            '--from' {
+                $i++
+                if ($i -ge $Tokens.Count -or $Tokens[$i].StartsWith('-')) { throw 'Usage: --from <template>' }
+                $tpl = $Tokens[$i]
+            }
+            default { throw "Unknown option for new: '$($Tokens[$i])'. Run: multi-cli help" }
         }
     }
-    return [pscustomobject]@{ Shared = $shared; Cli = $cli; FromTemplate = $tpl; NoSeed = $noSeed }
+    return [pscustomobject]@{ Shared = $shared; Cli = $cli; FromTemplate = $tpl; NoSeed = $noSeed; Isolated = $isolated }
 }
 
 # Parse 'continue' args: flags anywhere, positionals are tool, src, dest.
@@ -1435,7 +1771,7 @@ try {
             if ($Arg2) { $tokens += $Arg2 }
             if ($ForwardArgs) { $tokens += $ForwardArgs }
             $flags = Read-NewFlags $tokens
-            New-Profile -Spec $Arg1 -Shared $flags.Shared -Cli $flags.Cli -FromTemplate $flags.FromTemplate -NoSeed $flags.NoSeed
+            New-Profile -Spec $Arg1 -Shared $flags.Shared -Cli $flags.Cli -FromTemplate $flags.FromTemplate -NoSeed $flags.NoSeed -Isolated ($flags.Isolated -or $WholeRoot)
         }
         'auth' {
             $action = $Arg1

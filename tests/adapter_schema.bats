@@ -58,9 +58,9 @@ valid_v2_adapter() {
     "singletonScope": "none"
   },
   "support": {
-    "windows": { "level": "experimental", "reason": "Awaiting dual-account E2E." },
-    "macos": { "level": "experimental", "reason": "Awaiting native E2E." },
-    "linux": { "level": "experimental", "reason": "Awaiting native E2E." }
+    "windows": { "level": "supported", "reason": "File overlay with profile-local auth.json." },
+    "macos": { "level": "supported" },
+    "linux": { "level": "supported" }
   },
   "install": "https://example.test/install",
   "versionCommand": ["--version"]
@@ -157,26 +157,79 @@ JSON
   [[ "$output" == *"unknown placeholder '{mysteryRoot}'"* ]]
 }
 
-@test "validator requires reasons for non-verified support" {
+@test "validator requires a reason for unsupported support" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.support.windows={"level":"unsupported"}')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"support.windows.reason is required for level 'unsupported'"* ]]
+}
+
+@test "validator accepts supported support without a reason" {
   local adapter
   adapter="$(valid_v2_adapter | jq 'del(.support.windows.reason)')"
   write_adapter test-cli "$adapter"
 
   run bash "$VALIDATOR" "$TOOLS_ROOT"
 
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"support.windows.reason is required for level 'experimental'"* ]]
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Validated 1 adapter(s)"* ]]
 }
 
-@test "validator requires evidence for verified support" {
+@test "validator rejects the retired experimental level with a clear message" {
   local adapter
-  adapter="$(valid_v2_adapter | jq '.support.windows={"level":"verified"}')"
+  adapter="$(valid_v2_adapter | jq '.support.windows={"level":"experimental","reason":"legacy"}')"
   write_adapter test-cli "$adapter"
 
   run bash "$VALIDATOR" "$TOOLS_ROOT"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"support.windows.evidenceId is required for verified support"* ]]
+  [[ "$output" == *"support.windows.level 'experimental' was retired; use 'supported' or 'unsupported'"* ]]
+}
+
+@test "validator rejects retired evidenceId metadata" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.evidenceId="EV-1"')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unsupported top-level field 'evidenceId'"* ]]
+}
+
+@test "validator rejects unknown nested fields" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.support.windows.note="not part of the contract"')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unsupported field 'support.windows.note'"* ]]
+}
+
+@test "validator rejects legacy fields in schema-v2" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.status="stable"')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unsupported top-level field 'status'"* ]]
+}
+
+@test "validator rejects unknown schema-v1 nested fields" {
+  write_adapter legacy '{"id":"legacy","displayName":"Legacy","kind":"cli","binary":{"windows":["legacy"],"macos":["legacy"],"linux":["legacy"]},"isolation":{"strategy":"env","env":{"HOME":"{profileDir}"}},"share":{"systemHome":"$HOME/.legacy","linkable":["config"],"neverLink":["auth.json"],"note":"extra"},"status":"stable"}'
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unsupported field 'share.note'"* ]]
 }
 
 @test "validator rejects v1 linkable and neverLink overlap" {

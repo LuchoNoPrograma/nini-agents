@@ -52,9 +52,9 @@ function Get-ValidV2AdapterJson {
             singletonScope = 'none'
         }
         support = [ordered]@{
-            windows = [ordered]@{ level = 'experimental'; reason = 'Awaiting dual-account E2E.' }
-            macos = [ordered]@{ level = 'experimental'; reason = 'Awaiting native E2E.' }
-            linux = [ordered]@{ level = 'experimental'; reason = 'Awaiting native E2E.' }
+            windows = [ordered]@{ level = 'supported'; reason = 'File overlay with profile-local auth.json.' }
+            macos = [ordered]@{ level = 'supported' }
+            linux = [ordered]@{ level = 'supported' }
         }
         install = 'https://example.test/install'
         versionCommand = @('--version')
@@ -72,12 +72,13 @@ function Invoke-AdapterValidator {
     $process.RedirectStandardError = $true
     $process.CreateNoWindow = $true
     $child = [System.Diagnostics.Process]::Start($process)
-    $stdout = $child.StandardOutput.ReadToEnd()
-    $stderr = $child.StandardError.ReadToEnd()
-    $child.WaitForExit()
+    $stdoutTask = $child.StandardOutput.ReadToEndAsync()
+    $stderrTask = $child.StandardError.ReadToEndAsync()
+    $timedOut = -not $child.WaitForExit(120000)
+    if ($timedOut) { try { $child.Kill() } catch { }; $child.WaitForExit() }
     return [pscustomobject]@{
-        ExitCode = $child.ExitCode
-        Output = "$stdout$stderr"
+        ExitCode = $(if ($timedOut) { -1 } else { $child.ExitCode })
+        Output = "$($stdoutTask.Result)$($stderrTask.Result)"
     }
 }
 
@@ -143,16 +144,80 @@ Describe 'adapter schema validation' {
         } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
-    It 'requires evidence for verified support' {
+    It 'requires a reason for unsupported support' {
         $root = New-AdapterSchemaScratch
         try {
             $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
-            $adapter.support.windows = [pscustomobject]@{ level = 'verified' }
+            $adapter.support.windows = [pscustomobject]@{ level = 'unsupported' }
             Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
             $result = Invoke-AdapterValidator -Root $root
 
             $result.ExitCode | Should Be 1
-            $result.Output | Should Match 'support.windows.evidenceId is required for verified support'
+            $result.Output | Should Match "support.windows.reason is required for level 'unsupported'"
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects the retired experimental level with a clear message' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter.support.windows = [pscustomobject]@{ level = 'experimental'; reason = 'legacy' }
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 1
+            $result.Output | Should Match "support.windows.level 'experimental' was retired; use 'supported' or 'unsupported'"
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects retired evidenceId metadata' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter | Add-Member -NotePropertyName evidenceId -NotePropertyValue 'EV-1'
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 1
+            $result.Output | Should Match "unsupported top-level field 'evidenceId'"
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects unknown nested fields' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter.support.windows | Add-Member -NotePropertyName note -NotePropertyValue 'not part of the contract'
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 1
+            $result.Output | Should Match "unsupported field 'support.windows.note'"
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects legacy fields in schema-v2' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter | Add-Member -NotePropertyName status -NotePropertyValue 'stable'
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 1
+            $result.Output | Should Match "unsupported top-level field 'status'"
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects unknown schema-v1 nested fields' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $json = '{"id":"legacy","displayName":"Legacy","kind":"cli","binary":{"windows":["legacy"],"macos":["legacy"],"linux":["legacy"]},"isolation":{"strategy":"env","env":{"HOME":"{profileDir}"}},"share":{"systemHome":"$HOME/.legacy","linkable":["config"],"neverLink":["auth.json"],"note":"extra"},"status":"stable"}'
+            Write-TestAdapter -Root $root -Directory 'legacy' -Json $json
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 1
+            $result.Output | Should Match "unsupported field 'share.note'"
         } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 

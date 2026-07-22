@@ -39,7 +39,7 @@ own evidence directory, harness log, and (via the harness) the sandbox.
 Per schema-v2 `accountOverlay` adapter, dispatched by the adapter's **real**
 `account.mechanism` (read from `adapter.json` at run time):
 
-### `fileOverlay` — claude-cli, codex, gemini-cli
+### `fileOverlay` — claude-cli, codex, gemini-cli, commandcode
 
 1. Seed the tool's real shared normal-state root **under the test home**
    (a session/history file from `sessionPaths` + a config file from
@@ -64,15 +64,10 @@ Per schema-v2 `accountOverlay` adapter, dispatched by the adapter's **real**
 ### `processSecret` — kimi-cli, copilot-cli, grok-cli
 
 1. Store per-profile dummy tokens (`dummy-token-account-a`,
-   `dummy-token-account-b`) via the real `multi-cli auth set` with the secret
-   piped on stdin. **Platform note:** on Windows PowerShell 5.1,
-   `Read-Host -AsSecureString` reads the console, not stdin, so a piped
-   secret hangs (verified on this host). The harness probes this once; when
-   the real command cannot be driven it stores the dummy token through the
-   repo's own `MultiCli.CredentialStore` module — the exact Win32 `CredWrite`
-   path `Invoke-Auth` calls — and records `auth-set` with the method used.
-   `auth status`, `auth clear`, and all launches are always the real
-   commands.
+   `dummy-token-account-b`) through the same real OS credential-store module
+   and target derivation used by `multi-cli auth set`. Redirected stdin behavior
+   is covered separately by the launcher integration suite. `auth status`,
+   `auth clear`, and all launches here are the real commands.
 2. Assert real `auth status` reports the credential present.
 3. Launch through a generated `.cmd` shim (passed as
    `MULTICLI_OVERRIDE_BINARY`) that writes the secret env var
@@ -82,13 +77,6 @@ Per schema-v2 `accountOverlay` adapter, dispatched by the adapter's **real**
    two profiles receive **different** values.
 4. Real `auth clear` both profiles; assert a subsequent launch fails
    non-zero with the "no stored credential / auth set" hint.
-
-### `inseparable` — commandcode
-
-The real adapter refuses `launch` by design. The harness asserts the refusal
-(exit non-zero, message cites the whole-home boundary and the
-legacy-isolated guidance) and that no `.runtime` overlay was built. Profile
-creation and the direct binary version are still exercised.
 
 ## Safety model
 
@@ -150,7 +138,3 @@ boolean).
   harness's direct control runs (used for the version-match baseline) point
   the adapter's isolation env vars (`CODEX_HOME`, `GEMINI_CLI_HOME`, ...)
   at a sandbox scratch dir so nothing escapes the sandbox.
-* **Windows PowerShell 5.1**: `multi-cli auth set` cannot be driven via
-  redirected stdin (`Read-Host -AsSecureString` reads the console). The
-  harness probes, falls back to the same CredWrite code path, and records
-  the fallback in the evidence notes.

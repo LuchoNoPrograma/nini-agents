@@ -1,6 +1,6 @@
 # windsurf — Devin Desktop (Windsurf)
 
-**Account boundary:** `osUserCredentialStore` (candidate) — Devin account or manual API-key login has no documented per-profile namespace, so profiles are isolated by owned OS user.
+**Account boundary:** `osUserCredentialStore` — Devin account or manual API-key login has no documented per-profile namespace, so shared profiles use an owned OS user. `--isolated` provides a whole-root alternative.
 
 Windsurf is now Devin Desktop. The adapter detects both current and legacy binaries: `devin-desktop`, `surf`, `windsurf`.
 
@@ -8,7 +8,7 @@ Windsurf is now Devin Desktop. The adapter detects both current and legacy binar
 
 [docs.devin.ai/desktop/getting-started](https://docs.devin.ai/desktop/getting-started)
 
-## Quickstart (Windows only)
+## Quickstart
 
 ```bash
 multi-cli new windsurf/work
@@ -17,7 +17,7 @@ multi-cli new windsurf/personal
 multi-cli launch windsurf/personal
 ```
 
-macOS and Linux launches fail closed: no documented profile auth namespace or concurrent-instance contract exists there.
+Shared profiles use an owned OS user on every platform. `--isolated` is available for a whole-root profile.
 
 ## Account boundary
 
@@ -27,17 +27,15 @@ macOS and Linux launches fail closed: no documented profile auth namespace or co
 
 ## Shared normal state
 
-None claimed. Native roots: `%APPDATA%\Devin` (Windows), `~/Library/Application Support/Devin` (macOS), `~/.config/Devin` (Linux).
+None claimed. Persistent state uses `~/.codeium/windsurf` on Windows, macOS, and Linux (with `~` resolved to the profile-owned user's home).
 
 ## Known limitations
 
-- Current and legacy data roots, fixed `~/.codeium` state that can leak across profiles, auth storage, and multi-instance behavior all require an OS-user E2E pass before anything is shared.
-- Legacy Windsurf paths may still be read by current binaries; the boundary is not proven until those reads are traced.
+- Nothing is shared because current and legacy data roots can contain account state.
+- Legacy Windsurf paths may still be read by current binaries, so whole-root or OS-user isolation must include them.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| experimental | unsupported | unsupported |
-
-`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.
+| supported (owned OS user; elevated terminal) | supported (`--isolated`; owned-user GUI credential sessions are not claimed) | supported (`--isolated`; owned-user GUI credential sessions are not claimed) |

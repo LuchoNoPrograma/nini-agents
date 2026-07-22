@@ -80,11 +80,30 @@ transfer_path_within() {
   [[ "$child" == "$root"* ]]
 }
 
-# Where the profile resolves a declared shared path to: the overlay view when
-# it exists, otherwise the native shared root. Sets TRANSFER_SOURCE.
+# Read the schema-v2 profile mode. Missing or malformed metadata is treated as
+# the ordinary account-overlay mode for backward compatibility.
+transfer_profile_mode() {
+  local profile_dir="$1" mode=""
+  [ -f "$profile_dir/.profile.json" ] && \
+    mode="$(runtime_json_str '.mode' "$profile_dir/.profile.json" 2>/dev/null || true)"
+  [ "$mode" = isolated ] && printf '%s\n' isolated || printf '%s\n' accountOverlay
+}
+
+# Where the profile resolves a declared shared path to. Isolated profiles read
+# their own root; ordinary profiles read the runtime view or native shared root.
+# Sets TRANSFER_SOURCE.
 transfer_profile_source() {
-  local profile_dir="$1" rel="$2" shared_root="$3" candidate
+  local manifest="$1" profile_dir="$2" rel="$3" shared_root="$4" candidate state_subdir
   TRANSFER_SOURCE=""
+  if [ "$(transfer_profile_mode "$profile_dir")" = isolated ]; then
+    state_subdir="$(runtime_json_str '.normalState.runtimeSubdir' "$manifest")"
+    candidate="$profile_dir/${state_subdir:+$state_subdir/}$rel"
+    if [ -e "$candidate" ] || [ -L "$candidate" ]; then
+      TRANSFER_SOURCE="$candidate"
+      return 0
+    fi
+    return 1
+  fi
   candidate="$profile_dir/.runtime/$rel"
   if [ -e "$candidate" ] || [ -L "$candidate" ]; then
     TRANSFER_SOURCE="$candidate"
@@ -126,13 +145,29 @@ transfer_resolve_top() {
     abort "Cannot $action: '$rel' cannot be resolved."
 }
 
-# True when a text file below the scan cap matches a secret-shaped pattern;
-# oversized and binary files are never scanned (and never match).
+# Set TRANSFER_FILE_REFUSAL when a file cannot cross the boundary. Every file
+# must be small UTF-8-ish text that can be inspected for secret patterns.
+transfer_file_refusal() {
+  local src="$1" size
+  TRANSFER_FILE_REFUSAL=""
+  size="$(file_size "$src")"
+  if [ "$size" -gt "$TRANSFER_SECRET_SCAN_MAX_BYTES" ]; then
+    TRANSFER_FILE_REFUSAL="is larger than the ${TRANSFER_SECRET_SCAN_MAX_BYTES}-byte secret-scan limit"
+    return 0
+  fi
+  if LC_ALL=C od -An -v -t x1 -- "$src" 2>/dev/null | grep -qw '00'; then
+    TRANSFER_FILE_REFUSAL="is binary and cannot be secret-scanned safely"
+    return 0
+  fi
+  if grep -Iq -e 'sk-' -e 'access_token' -e 'refresh_token' -e 'id_token' -e 'Bearer ' -- "$src" 2>/dev/null; then
+    TRANSFER_FILE_REFUSAL="looks like it contains a secret (credential pattern match)"
+    return 0
+  fi
+  return 1
+}
+
 transfer_file_has_secret() {
-  local src="$1"
-  [ "$(file_size "$src")" -gt "$TRANSFER_SECRET_SCAN_MAX_BYTES" ] && return 1
-  # grep -I treats binary files as non-matching, so binaries are skipped.
-  grep -Iq -e 'sk-' -e 'access_token' -e 'refresh_token' -e 'id_token' -e 'Bearer ' -- "$src" 2>/dev/null
+  transfer_file_refusal "$1"
 }
 
 # Append every regular file under a resolved declared path to the plan,
@@ -177,8 +212,8 @@ transfer_collect_path() {
      ! transfer_path_within "$canonical_file" "$TRANSFER_ALLOWED_PROFILE"; then
     abort "Cannot $action: '$rel' resolves outside the profile's shared state. Remove the link and retry."
   fi
-  if transfer_file_has_secret "$canonical_file"; then
-    abort "Cannot $action: '$rel' looks like it contains a secret (credential pattern match). Remove the secret from shared state and retry."
+  if transfer_file_refusal "$canonical_file"; then
+    abort "Cannot $action: '$rel' $TRANSFER_FILE_REFUSAL. Remove it from shared state or replace it with inspectable non-secret text, then retry."
   fi
   TRANSFER_PLAN_RELS+=("$rel")
   TRANSFER_PLAN_SRCS+=("$canonical_file")
@@ -204,7 +239,7 @@ transfer_collect_shared() {
     [ -z "$rel" ] && continue
     transfer_is_session_path "$manifest" "$rel" && continue
     transfer_is_credential_path "$manifest" "$rel" && continue
-    transfer_profile_source "$profile_dir" "$rel" "$shared_root" || continue
+    transfer_profile_source "$manifest" "$profile_dir" "$rel" "$shared_root" || continue
     transfer_resolve_top "$TRANSFER_SOURCE" "$rel" "$shared_root" "$profile_dir" "$action"
     transfer_collect_path "$TRANSFER_RESOLVED" "$rel" "$manifest" "$action" true
   done < <(runtime_json_arr '.normalState.sharedPaths' "$manifest")
@@ -220,6 +255,13 @@ transfer_materialize() {
     mkdir -p "$dest_root/$(dirname "$rel")"
     cp -p "${TRANSFER_PLAN_SRCS[$i]}" "$dest_root/$rel"
   done
+}
+
+# Isolated filesystem state lives under normalState.runtimeSubdir when declared.
+transfer_isolated_state_root() {
+  local manifest="$1" profile_dir="$2" state_subdir
+  state_subdir="$(runtime_json_str '.normalState.runtimeSubdir' "$manifest")"
+  printf '%s\n' "$profile_dir/${state_subdir:+$state_subdir/}"
 }
 
 # Write the transport manifest (adapter id, name, kind) that import and
@@ -288,14 +330,108 @@ transfer_template_adapter_id() {
   printf '%s\n' "$id"
 }
 
-# Abort unless the template was saved from the same adapter it is applied to.
+# True when a payload path is one of the adapter-declared shared paths or a
+# descendant. Transport/profile metadata are handled separately.
+transfer_is_shared_payload_path() {
+  local manifest="$1" rel="$2" declared
+  while IFS= read -r declared; do
+    [ -z "$declared" ] && continue
+    case "$rel" in
+      "$declared"|"$declared"/*) return 0 ;;
+    esac
+  done < <(runtime_json_arr '.normalState.sharedPaths' "$manifest")
+  return 1
+}
+
+# Collect a template payload only after enforcing the same boundary as import.
+# Unlike save, forbidden entries are rejected rather than silently omitted.
+transfer_collect_template_path() {
+  local src="$1" rel="$2" manifest="$3" entry name
+  [ "$rel" = "$TRANSFER_MANIFEST_NAME" ] && return 0
+  if [ -L "$src" ]; then
+    abort "Template '$(basename "$TRANSFER_TEMPLATE_ROOT")' contains link '$rel'; templates may contain only regular files and directories."
+  fi
+  if transfer_is_credential_path "$manifest" "$rel" || \
+     transfer_is_session_path "$manifest" "$rel" || \
+     [[ "$rel" == .runtime || "$rel" == .runtime/* ]]; then
+    abort "Template '$(basename "$TRANSFER_TEMPLATE_ROOT")' contains forbidden path '$rel'."
+  fi
+  transfer_is_shared_payload_path "$manifest" "$rel" || \
+    abort "Template '$(basename "$TRANSFER_TEMPLATE_ROOT")' contains undeclared path '$rel'."
+  if [ -d "$src" ]; then
+    while IFS= read -r -d '' entry; do
+      name="$(basename "$entry")"
+      transfer_collect_template_path "$entry" "$rel/$name" "$manifest"
+    done < <(find "$src" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+    return 0
+  fi
+  [ -f "$src" ] || abort "Template entry '$rel' is not a regular file or directory."
+  [ "$(file_nlink "$src")" -le 1 ] || abort "Template file '$rel' is a hardlink and cannot be transferred safely."
+  if transfer_file_refusal "$src"; then
+    abort "Template '$(basename "$TRANSFER_TEMPLATE_ROOT")' file '$rel' $TRANSFER_FILE_REFUSAL."
+  fi
+  TRANSFER_PLAN_RELS+=("$rel")
+  TRANSFER_PLAN_SRCS+=("$src")
+}
+
+# Validate adapter ownership and every payload entry, producing the copy plan.
 transfer_assert_template_compatible() {
-  local template_dir="$1" manifest="$2" tpl_id adapter_id
+  local template_dir="$1" manifest="$2" tpl_id adapter_id entry name
   tpl_id="$(transfer_template_adapter_id "$template_dir")" || exit 1
   adapter_id="$(runtime_json_str '.id' "$manifest")"
   if [ "$tpl_id" != "$adapter_id" ]; then
     abort "Template '$(basename "$template_dir")' was saved from adapter '$tpl_id' and cannot be applied to '$adapter_id'. Save a new template from a '$adapter_id' profile."
   fi
+  TRANSFER_PLAN_RELS=()
+  TRANSFER_PLAN_SRCS=()
+  TRANSFER_TEMPLATE_ROOT="$template_dir"
+  while IFS= read -r -d '' entry; do
+    name="$(basename "$entry")"
+    transfer_collect_template_path "$entry" "$name" "$manifest"
+  done < <(find "$template_dir" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+}
+
+# Apply a validated template where launch will read it: profile root for an
+# isolated profile, native shared root for an ordinary account overlay.
+transfer_apply_template() {
+  local template_dir="$1" manifest="$2" profile_dir="$3" isolated="$4" destination adapter_id
+  transfer_assert_template_compatible "$template_dir" "$manifest"
+  if [ "$isolated" = true ]; then
+    destination="$(transfer_isolated_state_root "$manifest" "$profile_dir")"
+  else
+    adapter_id="$(runtime_json_str '.id' "$manifest")"
+    destination="$(transfer_shared_root_for "$manifest" "$adapter_id")"
+  fi
+  mkdir -p "$destination"
+  transfer_materialize "$destination"
+}
+
+# Install adapter-declared payload from staging into the native shared root.
+transfer_install_shared_state() {
+  local manifest="$1" staging="$2" adapter_id shared_root rel src dst
+  adapter_id="$(runtime_json_str '.id' "$manifest")"
+  shared_root="$(transfer_shared_root_for "$manifest" "$adapter_id")"
+  mkdir -p "$shared_root"
+  while IFS= read -r rel; do
+    [ -z "$rel" ] && continue
+    src="$staging/$rel"
+    [ -e "$src" ] || continue
+    dst="$shared_root/$rel"
+    rm -rf "$dst"
+    mkdir -p "$(dirname "$dst")"
+    mv "$src" "$dst"
+  done < <(runtime_json_arr '.normalState.sharedPaths' "$manifest")
+}
+
+# Write isolated metadata with a fresh identity and marker.
+transfer_write_isolated_metadata() {
+  local manifest="$1" dest_dir="$2"
+  jq -n \
+    --arg adapter_id "$(runtime_json_str '.id' "$manifest")" \
+    --arg profile_id "$(runtime_new_profile_id)" \
+    '{schemaVersion:2,adapterId:$adapter_id,profileId:$profile_id,mode:"isolated"}' \
+    > "$dest_dir/.profile.json"
+  : > "$dest_dir/.isolated"
 }
 
 # Write a .tar.gz of the profile's shareable state plus transport metadata.
@@ -340,26 +476,46 @@ transfer_normalize_entry() {
   printf '%s\n' "$name"
 }
 
-# Reject one archive entry name that is absolute, drive-qualified, carries an
-# alternate data stream, escapes via '..', is a credential, or is runtime
-# state. Empty/root entries are allowed.
+# True when a payload path is declared shared state, a descendant, or a parent
+# directory needed to contain a declared path.
+transfer_is_payload_path() {
+  local manifest="$1" rel="$2" declared
+  while IFS= read -r declared; do
+    [ -z "$declared" ] && continue
+    case "$rel" in
+      "$declared"|"$declared"/*) return 0 ;;
+    esac
+    case "$declared" in
+      "$rel"/*) return 0 ;;
+    esac
+  done < <(runtime_json_arr '.normalState.sharedPaths' "$manifest")
+  return 1
+}
+
+# Reject one archive entry name that is unsafe or outside the adapter-declared
+# shared-state allowlist. Empty/root and transport metadata entries are allowed.
 transfer_assert_entry_safe() {
   local name="$1" manifest="$2"
   case "$name" in
     ""|.) return 0 ;;
-    /*) abort "Refusing to import: archive entry '$name' is an absolute path." ;;
-    [A-Za-z]:*) abort "Refusing to import: archive entry '$name' is a drive-qualified path." ;;
-    *:*) abort "Refusing to import: archive entry '$name' contains an alternate data stream." ;;
   esac
   case "/$name/" in
     */../*) abort "Refusing to import: archive entry '$name' escapes the profile directory." ;;
+  esac
+  case "$name" in
+    /*) abort "Refusing to import: archive entry '$name' is an absolute path." ;;
+    [A-Za-z]:*) abort "Refusing to import: archive entry '$name' is a drive-qualified path." ;;
+    *:*) abort "Refusing to import: archive entry '$name' contains an alternate data stream." ;;
   esac
   if transfer_is_credential_path "$manifest" "$name"; then
     abort "Refusing to import: archive entry '$name' is a credential path."
   fi
   case "$name" in
     .runtime|.runtime/*) abort "Refusing to import: archive entry '$name' is disposable runtime state." ;;
+    "$TRANSFER_MANIFEST_NAME"|.profile.json) return 0 ;;
   esac
+  transfer_is_payload_path "$manifest" "$name" || \
+    abort "Refusing to import: archive entry '$name' is not adapter-declared shared state."
 }
 
 # Inspect every archive entry before anything is extracted: names must be
@@ -409,8 +565,8 @@ transfer_verify_staging() {
     if [ ! -f "$entry" ] && [ ! -d "$entry" ]; then
       transfer_fail_import "$staging" "Refusing to import: extracted entry '$rel' is not a regular file or directory."
     fi
-    if [ -f "$entry" ] && transfer_file_has_secret "$entry"; then
-      transfer_fail_import "$staging" "Refusing to import: '$rel' looks like it contains a secret (credential pattern match)."
+    if [ -f "$entry" ] && transfer_file_refusal "$entry"; then
+      transfer_fail_import "$staging" "Refusing to import: '$rel' $TRANSFER_FILE_REFUSAL."
     fi
   done < <(find "$staging" -mindepth 1 -print0 2>/dev/null)
 }
@@ -451,15 +607,22 @@ transfer_import_profile() {
     transfer_fail_import "$staging" "Refusing to import: archive was exported from adapter '$archived_adapter' and cannot be imported as '$adapter_id'."
   fi
 
-  # The manifest is transport metadata, not profile content.
+  local archived_mode="accountOverlay"
+  if [ -f "$staging/.profile.json" ]; then
+    [ "$(runtime_json_str '.mode' "$staging/.profile.json" 2>/dev/null || true)" = isolated ] && archived_mode=isolated
+    rm -f "$staging/.profile.json"
+  fi
   rm -f "$staging/$TRANSFER_MANIFEST_NAME"
   mkdir -p "$dest_dir"
-  (
-    shopt -s dotglob nullglob
-    for item in "$staging"/*; do mv "$item" "$dest_dir"/; done
-  )
-  rmdir "$staging"
-  # Fresh stable identity and empty credential placeholders: the imported
-  # profile must authenticate again.
-  runtime_initialize_profile "$manifest" "$dest_dir"
+  if [ "$archived_mode" = isolated ]; then
+    (
+      shopt -s dotglob nullglob
+      for item in "$staging"/*; do mv "$item" "$dest_dir"/; done
+    )
+    transfer_write_isolated_metadata "$manifest" "$dest_dir"
+  else
+    transfer_install_shared_state "$manifest" "$staging"
+    runtime_initialize_profile "$manifest" "$dest_dir"
+  fi
+  rm -rf "$staging"
 }

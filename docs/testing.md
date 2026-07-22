@@ -48,8 +48,18 @@ This only proves binary identity/version. It emits allowlisted, secret-scanned e
 - evidence outside the repository;
 - no inherited credential environment variables.
 
-Product drivers must prove distinct account identity, overlapping processes, independent quota attribution, shared conversation visibility, shared configuration, and logout isolation before an adapter can be promoted to verified. Raw stdout/stderr, account IDs, emails, tokens, prompts, responses, credential databases, and absolute account paths must never enter evidence.
+Product drivers must prove distinct account identity, overlapping processes, independent quota attribution, shared conversation visibility, shared configuration, and logout isolation before a platform row can carry the `supported` level for that mode. Raw stdout/stderr, account IDs, emails, tokens, prompts, responses, credential databases, and absolute account paths must never enter evidence.
 
 ## Coverage
 
 Changed production lines and every touched runtime module require at least 95% coverage. Credential, validation, path-safety, overlay, migration, and process-spawn branches may not be excluded. A missing local coverage tool is a blocker to a verified completion claim, not a reason to lower the bar.
+
+```bash
+bash tests/coverage/run-bash-coverage.sh
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/coverage/Run-PowerShellCoverage.ps1
+```
+
+Both gates read `COVERAGE_BASELINE` when CI supplies it and otherwise compare with `HEAD^`. They write machine-readable changed-line reports under `tests/coverage/out/` and fail when a changed production file has no coverage data.

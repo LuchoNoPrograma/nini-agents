@@ -39,12 +39,12 @@ Shared root: `%USERPROFILE%\.gemini` (Windows), `~/.gemini` (macOS/Linux).
 
 ## Known limitations
 
-- `GEMINI_CLI_HOME` nesting and the OAuth overlay still require real authenticated concurrency verification per `adapter.json`; treat the boundary as a candidate until that gate passes.
+- The OAuth overlay is a file overlay over `GEMINI_CLI_HOME`; declared credential files stay profile-local while settings, skills, and history are shared.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| experimental | experimental | experimental |
+| supported (file overlay) | supported | supported |
 
-`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.
+`supported` means multi-cli provides account isolation on that OS (mode requirements noted); `unsupported` means no isolation mode works there.

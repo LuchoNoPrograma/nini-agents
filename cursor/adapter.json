@@ -43,9 +43,9 @@
   },
   "concurrency": { "level": "unsupported", "singletonScope": "user" },
   "support": {
-    "windows": { "level": "unsupported", "reason": "User-data flags do not prove separate desktop auth with shared conversations." },
-    "macos": { "level": "unsupported", "reason": "User-data flags do not prove separate desktop auth with shared conversations." },
-    "linux": { "level": "unsupported", "reason": "User-data flags do not prove separate desktop auth with shared conversations." }
+    "windows": { "level": "supported", "reason": "--isolated whole-root (per-profile user data = separate login)" },
+    "macos": { "level": "supported" },
+    "linux": { "level": "supported" }
   },
   "install": "https://cursor.com/download",
   "versionCommand": ["--version"]

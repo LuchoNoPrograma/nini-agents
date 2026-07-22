@@ -8,6 +8,7 @@ load helpers/common
 
 setup() {
   setup_scratch
+  export PATH="$MULTICLI_HOME/bin:$PATH"
   TOOLS_ROOT="$MULTICLI_SCRATCH/tools"
   mkdir -p "$TOOLS_ROOT/fixture" "$TOOLS_ROOT/fixture2"
   export USERPROFILE="$HOME"
@@ -79,9 +80,9 @@ write_transfer_fixture_adapters() {
     "singletonScope": "none"
   },
   "support": {
-    "windows": { "level": "experimental", "reason": "Fixture only." },
-    "macos": { "level": "experimental", "reason": "Fixture only." },
-    "linux": { "level": "experimental", "reason": "Fixture only." }
+    "windows": { "level": "supported", "reason": "Fixture only." },
+    "macos": { "level": "supported", "reason": "Fixture only." },
+    "linux": { "level": "supported", "reason": "Fixture only." }
   },
   "install": "https://example.test/install",
   "versionCommand": ["--version"]
@@ -129,12 +130,18 @@ build_test_overlay() {
   [ "$status" -eq 0 ]
 }
 
-# Real NTFS junction via the same PowerShell mechanism the runtime uses.
+# A directory link via the platform's own mechanism, mirroring the runtime
+# (lib/multicli-runtime.sh): symlink on POSIX, real NTFS junction on Windows.
 make_junction() {
-  local target="$1" link="$2" target_win link_win
-  target_win="$(cygpath -w "$target")"
-  link_win="$(cygpath -w "$link")"
-  powershell.exe -NoProfile -Command "New-Item -ItemType Junction -Path '$link_win' -Target '$target_win' | Out-Null" >/dev/null
+  local target="$1" link="$2"
+  if command -v cygpath >/dev/null 2>&1 && command -v powershell.exe >/dev/null 2>&1; then
+    local target_win link_win
+    target_win="$(cygpath -w "$target")"
+    link_win="$(cygpath -w "$link")"
+    powershell.exe -NoProfile -Command "New-Item -ItemType Junction -Path '$link_win' -Target '$target_win' | Out-Null" >/dev/null
+  else
+    ln -s "$target" "$link"
+  fi
   [ -e "$link" ]
 }
 
@@ -153,7 +160,7 @@ make_hostile_name_archive() {
     absolute)  (cd "$dir" && tar -czpf "$out" --transform 's|^seed.txt|/evil.txt|' seed.txt 2>/dev/null) ;;
     drive)     (cd "$dir" && tar -czf "$out" --transform 's|^seed.txt|C:/evil.txt|' seed.txt 2>/dev/null) ;;
     ads)       (cd "$dir" && tar -czf "$out" --transform 's|^seed.txt|evil.txt:stream|' seed.txt 2>/dev/null) ;;
-    duplicate) (cd "$dir" && tar -czf "$out" --transform 's|^seed.txt|Config.toml|' --transform 's|^other.txt|config.toml|' seed.txt other.txt 2>/dev/null) ;;
+    duplicate) (cd "$dir" && tar -czf "$out" --transform 's|^seed.txt|agents/Note.md|' --transform 's|^other.txt|agents/note.md|' seed.txt other.txt 2>/dev/null) ;;
     *) return 1 ;;
   esac
   tar -tzf "$out" >/dev/null 2>&1
@@ -275,6 +282,29 @@ archive_entries() {
   [ ! -e "$TEMPLATES_ROOT/mytpl" ]
 }
 
+@test "template save refuses oversized and binary files it cannot scan" {
+  seed_transfer_shared_root
+  make_overlay_profile account-a
+  local profile_dir="$TRANSFER_PROFILE_DIR"
+  python - "$SHARED_ROOT/agents/big.txt" <<'PY'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_bytes(b'x' * (1024 * 1024 + 1) + b'OPENAI_API_KEY=sk-large')
+PY
+
+  run transfer_run transfer_save_template "$FIXTURE_MANIFEST" "$profile_dir" "$TEMPLATES_ROOT" large false
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"larger than"*"secret-scan limit"* ]]
+  rm -f "$SHARED_ROOT/agents/big.txt"
+  printf '\0sk-binary-secret\n' > "$SHARED_ROOT/agents/binary.dat"
+
+  run transfer_run transfer_save_template "$FIXTURE_MANIFEST" "$profile_dir" "$TEMPLATES_ROOT" binary false
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"binary"*"secret-scanned safely"* ]]
+}
+
 @test "template save dry-run reports the plan and writes nothing" {
   seed_transfer_shared_root
   make_overlay_profile account-a
@@ -332,8 +362,9 @@ archive_entries() {
   run transfer_run transfer_import_profile "$archive" "$FIXTURE_MANIFEST" "$dest"
 
   [ "$status" -eq 0 ]
-  [ "$(cat "$dest/config.toml" | tr -d '\r')" = 'model = "gpt-5"' ]
-  [ -f "$dest/agents/reviewer.md" ]
+  [ "$(cat "$SHARED_ROOT/config.toml" | tr -d '\r')" = 'model = "gpt-5"' ]
+  [ -f "$SHARED_ROOT/agents/reviewer.md" ]
+  [ ! -e "$dest/config.toml" ]
   [ ! -e "$dest/sessions" ]
   [ ! -e "$dest/history.jsonl" ]
   [ ! -e "$dest/.runtime" ]
@@ -363,14 +394,17 @@ archive_entries() {
     run transfer_run transfer_import_profile "$archive" "$FIXTURE_MANIFEST" "$dest"
 
     [ "$status" -eq 1 ]
-    [[ "$output" == *"$expected"* ]]
+    [[ "$output" == *"$expected"* ]] || {
+      printf 'hostile case %s expected %s, got: %s\n' "$kind" "$expected" "$output" >&2
+      false
+    }
     [ ! -e "$dest" ]
   done
 }
 
 @test "import rejects link entries inside archives" {
   seed_transfer_shared_root
-  local kind archive dest
+  local kind archive dest expected
   for kind in symlink hardlink; do
     archive="$MULTICLI_SCRATCH/hostile-$kind.tar.gz"
     dest="$MULTICLI_HOME/fixture/evil-$kind"
@@ -379,7 +413,7 @@ archive_entries() {
     run transfer_run transfer_import_profile "$archive" "$FIXTURE_MANIFEST" "$dest"
 
     [ "$status" -eq 1 ]
-    [[ "$output" == *"not a regular file or directory"* ]]
+    [[ "$output" == *"not adapter-declared shared state"* || "$output" == *"not a regular file or directory"* ]]
     [ ! -e "$dest" ]
   done
 }
@@ -452,7 +486,8 @@ archive_entries() {
   local staging archive dest
   staging="$(mktemp -d "$MULTICLI_SCRATCH/staged.XXXXXX")"
   printf 'model = "gpt-5"\n' > "$staging/config.toml"
-  printf 'Authorization: Bearer abc123\n' > "$staging/notes.md"
+  mkdir -p "$staging/agents"
+  printf 'Authorization: Bearer abc123\n' > "$staging/agents/notes.md"
   write_staged_manifest fixture "$staging"
   archive="$MULTICLI_SCRATCH/secret.tar.gz"
   pack_staged_archive "$staging" "$archive"
@@ -483,7 +518,7 @@ archive_entries() {
 @test "new --from with an incompatible template refuses before creating the profile" {
   seed_transfer_shared_root
   make_overlay_profile account-a
-  run multicli template save fixture/account-a tpl
+  run transfer_run transfer_save_template "$FIXTURE_MANIFEST" "$TRANSFER_PROFILE_DIR" "$TEMPLATES_ROOT" tpl false
   [ "$status" -eq 0 ]
 
   run multicli new fixture2/wrong --from tpl
@@ -492,32 +527,80 @@ archive_entries() {
   [ ! -e "$MULTICLI_HOME/fixture2/wrong" ]
 }
 
-@test "launcher round trip: template save, new --from, export, import keeps state and regenerates identity" {
+@test "ordinary template and import install state where account-overlay launch reads it" {
   seed_transfer_shared_root
   make_overlay_profile account-a
   local profile_dir="$TRANSFER_PROFILE_DIR"
 
   run multicli template save fixture/account-a tpl
   [ "$status" -eq 0 ]
-  [ -f "$TEMPLATES_ROOT/tpl/.multicli-manifest.json" ]
+  printf 'shared-after-save\n' > "$SHARED_ROOT/config.toml"
 
   run multicli new fixture/fromtpl --from tpl
   [ "$status" -eq 0 ]
   [ -f "$MULTICLI_HOME/fixture/fromtpl/.profile.json" ]
-  [ "$(jq -r '.profileId' "$MULTICLI_HOME/fixture/fromtpl/.profile.json")" != "$(jq -r '.profileId' "$profile_dir/.profile.json")" ]
-  [ "$(cat "$MULTICLI_HOME/fixture/fromtpl/config.toml")" = 'model = "gpt-5"' ]
-  [ ! -e "$MULTICLI_HOME/fixture/fromtpl/auth/auth.json" ] || [ ! -s "$MULTICLI_HOME/fixture/fromtpl/auth/auth.json" ]
+  [ "$(cat "$SHARED_ROOT/config.toml" | tr -d '\r')" = 'model = "gpt-5"' ]
+  [ ! -e "$MULTICLI_HOME/fixture/fromtpl/config.toml" ]
 
   local archive="$MULTICLI_SCRATCH/roundtrip.tar.gz"
   run multicli export fixture/fromtpl "$archive"
   [ "$status" -eq 0 ]
-  [ -f "$archive" ]
+  printf 'shared-before-import\n' > "$SHARED_ROOT/config.toml"
 
   run multicli import "$archive" fixture/imported
   [ "$status" -eq 0 ]
-  [ -f "$MULTICLI_HOME/fixture/imported/.profile.json" ]
-  [ "$(cat "$MULTICLI_HOME/fixture/imported/config.toml")" = 'model = "gpt-5"' ]
+  [ "$(cat "$SHARED_ROOT/config.toml" | tr -d '\r')" = 'model = "gpt-5"' ]
+  [ ! -e "$MULTICLI_HOME/fixture/imported/config.toml" ]
   [ "$(jq -r '.profileId' "$MULTICLI_HOME/fixture/imported/.profile.json")" != "$(jq -r '.profileId' "$MULTICLI_HOME/fixture/fromtpl/.profile.json")" ]
-  run bash -c "tar -tzf '$archive'"
-  [[ "$output" != *"auth.json"* ]]
+}
+
+@test "isolated template and export round-trip only profile-local state and preserve isolation" {
+  run multicli new fixture/iso-a --isolated --no-seed
+  [ "$status" -eq 0 ]
+  local source="$MULTICLI_HOME/fixture/iso-a"
+  printf 'isolated-config\n' > "$source/config.toml"
+  mkdir -p "$source/agents"
+  printf 'isolated-agent\n' > "$source/agents/reviewer.md"
+  mkdir -p "$SHARED_ROOT"
+  printf 'native-must-not-travel\n' > "$SHARED_ROOT/config.toml"
+
+  run multicli template save fixture/iso-a isotpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$TEMPLATES_ROOT/isotpl/config.toml" | tr -d '\r')" = 'isolated-config' ]
+
+  run multicli new fixture/iso-b --isolated --from isotpl
+  [ "$status" -eq 0 ]
+  [ "$(cat "$MULTICLI_HOME/fixture/iso-b/config.toml" | tr -d '\r')" = 'isolated-config' ]
+  [ "$(cat "$SHARED_ROOT/config.toml" | tr -d '\r')" = 'native-must-not-travel' ]
+
+  local archive="$MULTICLI_SCRATCH/isolated.tar.gz"
+  run multicli export fixture/iso-a "$archive"
+  [ "$status" -eq 0 ]
+  run multicli import "$archive" fixture/iso-imported
+  [ "$status" -eq 0 ]
+  [ -f "$MULTICLI_HOME/fixture/iso-imported/.isolated" ]
+  [ "$(jq -r '.mode' "$MULTICLI_HOME/fixture/iso-imported/.profile.json")" = isolated ]
+  [ "$(cat "$MULTICLI_HOME/fixture/iso-imported/config.toml" | tr -d '\r')" = 'isolated-config' ]
+  [ "$(cat "$SHARED_ROOT/config.toml" | tr -d '\r')" = 'native-must-not-travel' ]
+}
+
+@test "tampered templates with credentials or undeclared files are refused before profile creation" {
+  seed_transfer_shared_root
+  make_overlay_profile account-a
+  run multicli template save fixture/account-a tpl
+  [ "$status" -eq 0 ]
+  mkdir -p "$TEMPLATES_ROOT/tpl/auth"
+  printf '{"token":"sk-injected"}\n' > "$TEMPLATES_ROOT/tpl/auth/auth.json"
+
+  run multicli new fixture/credential-victim --from tpl
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"forbidden path 'auth'"* || "$output" == *"forbidden path 'auth/auth.json'"* ]]
+  [ ! -e "$MULTICLI_HOME/fixture/credential-victim" ]
+
+  rm -rf "$TEMPLATES_ROOT/tpl/auth"
+  printf 'undeclared\n' > "$TEMPLATES_ROOT/tpl/random.txt"
+  run multicli new fixture/undeclared-victim --from tpl
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"undeclared path 'random.txt'"* ]]
+  [ ! -e "$MULTICLI_HOME/fixture/undeclared-victim" ]
 }

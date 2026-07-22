@@ -12,6 +12,13 @@ $repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Pa
 $adapterPath = Join-Path (Join-Path $repoRoot $Tool) 'adapter.json'
 if (-not (Test-Path -LiteralPath $adapterPath)) { throw "Unknown adapter '$Tool'." }
 $adapter = Get-Content -LiteralPath $adapterPath -Raw | ConvertFrom-Json
+$support = $adapter.support.windows
+if ($support.level -ne 'supported') {
+    throw "Adapter '$Tool' does not claim Windows support: $($support.reason)"
+}
+if (@($adapter.versionCommand).Count -eq 0 -or -not @($adapter.versionCommand)[0]) {
+    throw "Adapter '$Tool' has no non-interactive versionCommand for offline verification."
+}
 
 $candidates = @($adapter.binary.windows)
 $binary = $null

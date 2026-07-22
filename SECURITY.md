@@ -12,7 +12,7 @@ multi-cli profiles isolate account authentication while sharing only adapter-dec
 
 ## Non-guarantees
 
-An `experimental` adapter is not a verified account-isolation boundary. Offline binary detection does not prove separate identities or quotas. OS-user adapters are not enabled until ownership, credential storage, cleanup, and real GUI/CLI tests pass.
+A `supported` level applies only to the mode named in the row's reason; other auth modes of the same product may share state. Offline binary detection does not prove separate identities or quotas. OS-user adapters isolate through a multi-cli-owned OS user and require an elevated terminal for provisioning on Windows.
 
 ## Secret handling
 

@@ -49,9 +49,9 @@ PROBE
   },
   "concurrency": { "level": "multiWriter", "singletonScope": "none" },
   "support": {
-    "windows": { "level": "experimental", "reason": "Fixture only." },
-    "macos": { "level": "experimental", "reason": "Fixture only." },
-    "linux": { "level": "experimental", "reason": "Fixture only." }
+    "windows": { "level": "supported", "reason": "Fixture only." },
+    "macos": { "level": "supported", "reason": "Fixture only." },
+    "linux": { "level": "supported", "reason": "Fixture only." }
   },
   "versionCommand": ["--version"]
 }
@@ -107,8 +107,8 @@ teardown() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.token' "$CAPTURE_OUTPUT")" = "token-account-a" ]
   local captured_home
-  captured_home="$(cygpath "$(jq -r '.home' "$CAPTURE_OUTPUT")")"
-  [ "$captured_home" = "$HOME/.secretcli" ]
+  captured_home="$(jq -r '.home' "$CAPTURE_OUTPUT")"
+  assert_same_path "$captured_home" "$HOME/.secretcli"
 
   run multicli launch secretcli/account-b
   [ "$status" -eq 0 ]

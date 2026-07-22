@@ -1,36 +1,46 @@
-# codex-gui — Codex Windows App
+# codex-gui — Codex desktop app
 
-**Account boundary:** `inseparable` / unverified — the desktop executable, `CODEX_HOME` behavior, package state, keychain, and singleton boundary are all unverified. Launch is disabled on every platform.
+**Account boundary:** an owned OS user separates the app's `.codex` authentication, configuration, and session state.
 
-The Codex desktop app exists as a Windows Store/desktop executable, but multi-cli has not proven any account boundary for it. The binary candidate is the placeholder `codex-app-unverified`, so discovery fails by design and `multi-cli launch` refuses to start a profile.
+OpenAI ships the Codex app for Windows and macOS. The app and native Codex CLI share the user's `.codex` tree; running the app as a profile-owned user gives each profile a separate credential and data namespace.
 
 ## Install
 
-[developers.openai.com/codex/windows/windows-app](https://developers.openai.com/codex/windows/windows-app)
+Windows:
+
+```powershell
+winget install --id 9PLM9XGG6VKS -s msstore
+```
+
+macOS: download the Codex app from [OpenAI's Codex app page](https://openai.com/index/introducing-the-codex-app/).
 
 ## Quickstart
 
-None — this adapter is unsupported everywhere. Use the `codex` adapter (Codex CLI) instead; it has a declared file-overlay account boundary over the same `~/.codex` root.
+```powershell
+multi-cli new codex-gui/work
+multi-cli launch codex-gui/work
+```
+
+The first launch requires an elevated terminal on Windows so multi-cli can provision the owned user. The macOS app is available, but multi-cli does not claim account isolation there until an owned-user GUI/Keychain session is proven. If the app is absent, `multi-cli` reports the install source instead of starting a placeholder executable.
 
 ## Account boundary
 
-- Mechanism: `inseparable` — per `adapter.json`, "The desktop executable, CODEX_HOME behavior, package state, keychain, and singleton boundary are unverified."
-- Logout scope: application.
-- Concurrency: unsupported (`singletonScope: application`).
+- Mechanism: `osUserCredentialStore`.
+- Profile-local state: the owned user's `.codex` tree and credential namespace.
+- Logout scope: owned OS user.
+- Concurrency: one app instance per owned OS user.
 
 ## Shared normal state
 
-None claimed. The native root (`%USERPROFILE%\.codex` on Windows, `~/.codex` on macOS/Linux) is recorded for reference only; no shared, session, or file paths are declared.
+Nothing is shared because the app's authentication, configuration, and sessions use the same `.codex` tree. Use `multi-cli continue codex ...` for portable CLI sessions when needed.
 
 ## Known limitations
 
-- Windows: launch remains disabled until the real Store executable and dual-account GUI behavior are proven.
-- macOS: no verified Codex GUI account-overlay implementation. Linux: no supported native Codex GUI surface at all.
+- Linux has no native Codex desktop app.
+- Store package discovery is tested separately from the account-isolation runtime because Windows Server does not ship Microsoft Store.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| unsupported | unsupported | unsupported |
-
-`unsupported` means multi-cli refuses to claim the account-overlay contract.
+| supported (Store app + owned OS user; elevated terminal) | unsupported (owned-user GUI/Keychain session not proven) | unsupported (no Codex desktop app) |

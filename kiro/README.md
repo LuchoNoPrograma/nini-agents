@@ -1,6 +1,6 @@
 # kiro — Kiro IDE
 
-**Account boundary:** `osUserCredentialStore` (candidate) — Kiro's browser/IAM sign-in has no proven per-profile credential namespace, so profiles are isolated by owned OS user until live tracing proves a narrower boundary.
+**Account boundary:** `osUserCredentialStore` — Kiro's browser/IAM sign-in has no per-profile credential namespace, so shared profiles use an owned OS user. `--isolated` is also available for a whole-root profile.
 
 Kiro is an agentic IDE. No IDE-internal credential file or keychain namespace is documented as profile-safe, so multi-cli does not claim one.
 
@@ -8,7 +8,7 @@ Kiro is an agentic IDE. No IDE-internal credential file or keychain namespace is
 
 [kiro.dev/docs/getting-started/installation](https://kiro.dev/docs/getting-started/installation/) — binary: `kiro` on PATH.
 
-## Quickstart (Windows only)
+## Quickstart
 
 ```bash
 multi-cli new kiro/work
@@ -17,7 +17,7 @@ multi-cli new kiro/personal
 multi-cli launch kiro/personal
 ```
 
-macOS and Linux launches fail closed: no per-account credential namespace or concurrent IDE process boundary is proven there.
+On every platform, shared profiles use an owned OS user. `--isolated` is available when a whole-root profile is preferable.
 
 ## Account boundary
 
@@ -31,13 +31,11 @@ None claimed yet. The native root (`%USERPROFILE%\.kiro` on Windows, `~/.kiro` o
 
 ## Known limitations
 
-- Credential path, IDE singleton behavior, and safe shared-state paths all require a live OS-user E2E pass per `adapter.json`.
-- No narrower IDE-internal boundary is inferred from VS Code ancestry.
+- Safe shared-state paths are intentionally empty until vendor tracing proves they are credential-free.
+- Owned OS-user profiles require administrator access on Windows and `sudo` on macOS/Linux.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| experimental | unsupported | unsupported |
-
-`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.
+| supported (owned OS user; elevated terminal) | supported (`--isolated`; owned-user GUI credential sessions are not claimed) | supported (`--isolated`; owned-user GUI credential sessions are not claimed) |

@@ -10,17 +10,18 @@
   the launcher still wires the same modules correctly from child processes
   (its child-process execution contributes no coverage by itself).
 
-  Prints per-module and total command coverage, writes a JSON summary to
-  tests/coverage/out/powershell-coverage.json (counts only, no secrets),
-  and exits 1 when any test fails or total coverage is below -MinimumPercent.
+  Prints per-module and total command coverage, writes JSON and Cobertura
+  reports under tests/coverage/out, and enforces executable-line coverage for
+  production lines added since -Baseline. It exits 1 when tests are unexecuted
+  or fail, any module or changed-line result is below -MinimumPercent, or any
+  command outside the documented host exceptions is missed.
 
   Documented exceptions: commands listed in $script:DocumentedExceptions are
-  provably uncoverable on this host (no file-symlink privilege) and are each
-  covered by an inconclusive-marked test that exercises them on privileged
-  hosts. They are exempt from the miss check and recorded in the JSON
-  summary's documentedExceptions field. The gate fails when ANY other command
-  is missed, and also when a listed exception no longer matches a missed
-  command (stale exception - remove it).
+  provably uncoverable on this host (no file-symlink privilege) and have a
+  privilege-gated test that exercises them on capable hosts. They are exempt
+  from the miss check and recorded in the JSON summary's documentedExceptions
+  field. The gate fails when ANY other command is missed, and also when a listed
+  exception no longer matches a missed command (stale exception - remove it).
 
   USAGE
     powershell -NoProfile -ExecutionPolicy Bypass -File tests/coverage/Invoke-ModuleCoverage.ps1 [-MinimumPercent 95]
@@ -28,7 +29,8 @@
 
 param(
     [double]$MinimumPercent = 95,
-    [string]$OutputPath
+    [string]$OutputPath,
+    [string]$Baseline = $(if ($env:COVERAGE_BASELINE) { $env:COVERAGE_BASELINE } else { 'HEAD^' })
 )
 
 $ErrorActionPreference = 'Stop'
@@ -50,18 +52,24 @@ $testFiles = @(
     (Join-Path $testsRoot 'ModuleFunctions.Tests.ps1'),
     (Join-Path $testsRoot 'Migration.Tests.ps1'),
     (Join-Path $testsRoot 'TransferSafety.Tests.ps1'),
+    (Join-Path $testsRoot 'OsUser.Tests.ps1'),
     (Join-Path $testsRoot 'OverlayState.Tests.ps1')
 )
 
 # Commands that cannot execute on this host, matched against Pester's missed
 # commands by module file name and normalized command text (not line numbers,
 # so module edits do not stale them by position alone). Each entry must name
-# the inconclusive-marked test that covers the command on privileged hosts.
+# the privilege-gated test that covers the command on capable hosts.
 $script:DocumentedExceptions = @(
     [ordered]@{
         file = 'MultiCli.Runtime.psm1'
         command = '[System.IO.File]::Delete($reparsePoint.FullName)'
-        reason = 'Exercising file-reparse-point removal in Remove-RuntimeOverlay requires a file symlink; this host grants no symlink privilege (directory junctions only). The covering test ''Remove-RuntimeOverlay deletes reparse-point files without following them'' in tests/ModuleFunctions.Tests.ps1 is marked inconclusive here and exercises the branch on privileged hosts.'
+        reason = 'Exercising file-reparse-point removal in Remove-RuntimeOverlay requires a file symlink; this host grants no symlink privilege (directory junctions only). The covering test ''Remove-RuntimeOverlay deletes reparse-point files without following them'' in tests/ModuleFunctions.Tests.ps1 passes on capable hosts and returns without exercising the branch here.'
+    },
+    [ordered]@{
+        file = 'MultiCli.Runtime.psm1'
+        command = '$hasLock = $true'
+        reason = 'This assignment runs only when Mutex.WaitOne throws AbandonedMutexException. Windows releases a mutex owned by an exited test process without reporting abandonment on this host. The covering test ''New-RuntimeOverlay survives a real abandoned mutex'' proves the real cross-process recovery path and exercises the assignment on runtimes that surface the exception.'
     }
 )
 
@@ -69,6 +77,49 @@ function Get-NormalizedCommandText {
     param([string]$Text)
     return ($Text -replace '\s+', ' ').Trim()
 }
+
+function Write-PesterCobertura {
+    param($Coverage, [string]$Path, [string]$RepositoryRoot)
+    $hitLines = @{}
+    foreach ($command in @($Coverage.HitCommands)) {
+        $hitLines["$($command.File)|$($command.Line)"] = $true
+    }
+    $commandsByFile = @($Coverage.HitCommands) + @($Coverage.MissedCommands) | Group-Object File
+    $settings = New-Object Xml.XmlWriterSettings
+    $settings.Indent = $true
+    $settings.Encoding = New-Object Text.UTF8Encoding($false)
+    $writer = [Xml.XmlWriter]::Create($Path, $settings)
+    try {
+        $writer.WriteStartDocument()
+        $writer.WriteStartElement('coverage')
+        $writer.WriteStartElement('packages')
+        $writer.WriteStartElement('package')
+        $writer.WriteStartElement('classes')
+        foreach ($fileGroup in $commandsByFile) {
+            $relativePath = $fileGroup.Name.Substring($RepositoryRoot.Length).TrimStart('\', '/') -replace '\\', '/'
+            $writer.WriteStartElement('class')
+            $writer.WriteAttributeString('filename', $relativePath)
+            $writer.WriteStartElement('lines')
+            foreach ($lineGroup in @($fileGroup.Group | Group-Object Line | Sort-Object { [int]$_.Name })) {
+                $writer.WriteStartElement('line')
+                $writer.WriteAttributeString('number', $lineGroup.Name)
+                $hits = if ($hitLines.ContainsKey("$($fileGroup.Name)|$($lineGroup.Name)")) { '1' } else { '0' }
+                $writer.WriteAttributeString('hits', $hits)
+                $writer.WriteEndElement()
+            }
+            $writer.WriteEndElement()
+            $writer.WriteEndElement()
+        }
+        $writer.WriteEndElement()
+        $writer.WriteEndElement()
+        $writer.WriteEndElement()
+        $writer.WriteEndElement()
+        $writer.WriteEndDocument()
+    } finally {
+        $writer.Dispose()
+    }
+}
+
 foreach ($testFile in $testFiles) {
     if (-not (Test-Path -LiteralPath $testFile)) { throw "Missing test file: $testFile" }
 }
@@ -78,7 +129,8 @@ if ($moduleFiles.Count -eq 0) { throw "No lib/*.psm1 modules found under $repoRo
 $result = Invoke-Pester -Script $testFiles -CodeCoverage $moduleFiles -PassThru -Quiet
 
 Write-Host ""
-Write-Host "Tests: $($result.PassedCount) passed, $($result.FailedCount) failed, $($result.TotalCount) total"
+$unexecutedCount = $result.SkippedCount + $result.PendingCount + $result.InconclusiveCount
+Write-Host "Tests: $($result.PassedCount) passed, $($result.FailedCount) failed, $unexecutedCount unexecuted, $($result.TotalCount) total"
 if ($result.FailedCount -gt 0) {
     foreach ($failed in @($result.TestResult | Where-Object { $_.Result -eq 'Failed' })) {
         Write-Host "  FAILED: $($failed.Name)"
@@ -104,6 +156,7 @@ foreach ($command in @($coverage.HitCommands)) {
 }
 
 $moduleSummaries = @()
+$underCoveredModules = @()
 Write-Host ""
 Write-Host 'Module coverage:'
 foreach ($moduleFile in $moduleFiles) {
@@ -118,6 +171,7 @@ foreach ($moduleFile in $moduleFiles) {
         missed = ($entry.Analyzed - $entry.Executed)
         percent = $percent
     }
+    if ($percent -lt $MinimumPercent) { $underCoveredModules += $name }
     Write-Host ("  {0,-36} {1,6}%  ({2}/{3})" -f $name, $percent, $entry.Executed, $entry.Analyzed)
 }
 
@@ -180,14 +234,16 @@ $summary = [ordered]@{
         percent = $totalPercent
     }
     modules = $moduleSummaries
+    underCoveredModules = @($underCoveredModules)
     documentedExceptions = @($exceptionReports)
     unexpectedMissed = $unexpectedMisses.Count
     tests = [ordered]@{
         total = [int]$result.TotalCount
         passed = [int]$result.PassedCount
         failed = [int]$result.FailedCount
+        unexecuted = [int]$unexecutedCount
     }
-    passed = ($result.FailedCount -eq 0 -and $totalPercent -ge $MinimumPercent -and $unexpectedMisses.Count -eq 0 -and $staleExceptions.Count -eq 0)
+    passed = ($result.FailedCount -eq 0 -and $unexecutedCount -eq 0 -and $underCoveredModules.Count -eq 0 -and $totalPercent -ge $MinimumPercent -and $unexpectedMisses.Count -eq 0 -and $staleExceptions.Count -eq 0)
 }
 $summaryDirectory = Split-Path -Parent $OutputPath
 if (-not (Test-Path -LiteralPath $summaryDirectory)) {
@@ -197,7 +253,31 @@ $summary | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $OutputPath -Encod
 Write-Host ""
 Write-Host "Coverage summary written to $OutputPath"
 
+$outputDirectory = Split-Path -Parent $OutputPath
+$coberturaPath = Join-Path $outputDirectory 'powershell-cobertura.xml'
+Write-PesterCobertura -Coverage $coverage -Path $coberturaPath -RepositoryRoot $repoRoot
+$changedReportPath = Join-Path $outputDirectory 'powershell-changed-lines.json'
+$changedArguments = @(
+    (Join-Path $coverageRoot 'check_changed_coverage.py'),
+    '--repo', $repoRoot,
+    '--baseline', $Baseline,
+    '--coverage-root', $coberturaPath,
+    '--minimum', $MinimumPercent,
+    '--output', $changedReportPath,
+    '--pathspec', 'lib/*.psm1'
+)
+& python @changedArguments
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 if ($result.FailedCount -gt 0) { exit 1 }
+if ($unexecutedCount -gt 0) {
+    Write-Host "Coverage gate FAILED: $unexecutedCount test(s) skipped, pending, or inconclusive."
+    exit 1
+}
+if ($underCoveredModules.Count -gt 0) {
+    Write-Host "Coverage gate FAILED: module(s) below $MinimumPercent%: $($underCoveredModules -join ', ')."
+    exit 1
+}
 if ($unexpectedMisses.Count -gt 0) {
     Write-Host "Coverage gate FAILED: $($unexpectedMisses.Count) missed command(s) outside the documented exceptions."
     exit 1

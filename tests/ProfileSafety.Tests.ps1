@@ -3,34 +3,41 @@ $script:ProfileLauncher = Join-Path $script:ProfileRepoRoot 'multi-cli.ps1'
 Import-Module (Join-Path $script:ProfileRepoRoot 'lib\MultiCli.CredentialStore.psm1') -Force
 
 function Invoke-ProfileLauncher {
-    param([string]$Root, [string[]]$Arguments, [string]$StdinText)
+    param([string]$Root, [string[]]$Arguments, [string]$StdinText, [int]$TimeoutSeconds = 120)
     $userHome = Join-Path $Root 'home'
     $profiles = Join-Path $Root 'profiles'
     New-Item -ItemType Directory -Force -Path $userHome, $profiles | Out-Null
-    $argumentLine = ($Arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '""') + '"' } else { $_ } }) -join ' '
-    $process = New-Object System.Diagnostics.ProcessStartInfo
-    $process.FileName = (Get-Command powershell.exe).Source
-    $process.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$script:ProfileLauncher`" $argumentLine"
-    $process.UseShellExecute = $false
-    $process.RedirectStandardOutput = $true
-    $process.RedirectStandardError = $true
-    if ($null -ne $StdinText) { $process.RedirectStandardInput = $true }
-    $process.CreateNoWindow = $true
-    $process.EnvironmentVariables['USERPROFILE'] = $userHome
-    $process.EnvironmentVariables['HOME'] = $userHome
-    $process.EnvironmentVariables['APPDATA'] = Join-Path $userHome 'AppData\Roaming'
-    $process.EnvironmentVariables['LOCALAPPDATA'] = Join-Path $userHome 'AppData\Local'
-    $process.EnvironmentVariables['MULTICLI_HOME'] = $profiles
-    $process.EnvironmentVariables['MULTICLI_OVERRIDE_BINARY'] = (Get-Command powershell.exe).Source
-    $child = [System.Diagnostics.Process]::Start($process)
-    if ($null -ne $StdinText) {
-        $child.StandardInput.WriteLine($StdinText)
-        $child.StandardInput.Close()
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = (Get-Command powershell.exe).Source
+    $quotedArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script:ProfileLauncher) + $Arguments
+    $startInfo.Arguments = ($quotedArguments | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }) -join ' '
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+    foreach ($entry in @{
+        USERPROFILE = $userHome
+        HOME = $userHome
+        APPDATA = (Join-Path $userHome 'AppData\Roaming')
+        LOCALAPPDATA = (Join-Path $userHome 'AppData\Local')
+        MULTICLI_HOME = $profiles
+        MULTICLI_OVERRIDE_BINARY = (Get-Command powershell.exe).Source
+    }.GetEnumerator()) { $startInfo.EnvironmentVariables[$entry.Key] = $entry.Value }
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    if ($null -ne $StdinText) { $process.StandardInput.WriteLine($StdinText) }
+    $process.StandardInput.Close()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $timedOut = -not $process.WaitForExit($TimeoutSeconds * 1000)
+    if ($timedOut) { $process.Kill(); $process.WaitForExit() }
+    $output = $stdoutTask.Result + $stderrTask.Result
+    return [pscustomobject]@{
+        ExitCode = $(if ($timedOut) { -1 } else { $process.ExitCode })
+        Output = $output
+        Profiles = $profiles
+        TimedOut = $timedOut
     }
-    $stdout = $child.StandardOutput.ReadToEnd()
-    $stderr = $child.StandardError.ReadToEnd()
-    $child.WaitForExit()
-    return [pscustomobject]@{ ExitCode = $child.ExitCode; Output = "$stdout$stderr"; Profiles = $profiles }
 }
 
 Describe 'schema-v2 profile safety boundaries' {
@@ -45,26 +52,74 @@ Describe 'schema-v2 profile safety boundaries' {
         } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
-    It 'refuses OS-user adapters until an owned credential context is available' {
+    It 'routes OS-user adapters to the owned-user runtime and reports elevation precisely' {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            Write-Host 'Host is elevated; the non-admin elevation assertion is covered on standard Windows runners.'
+            return
+        }
         $root = Join-Path ([System.IO.Path]::GetTempPath()) ("mcli_profile_" + [guid]::NewGuid().ToString('N'))
         try {
             $new = Invoke-ProfileLauncher -Root $root -Arguments @('new', 'antigravity/account-a', '--no-seed')
             $new.ExitCode | Should Be 0
             $launch = Invoke-ProfileLauncher -Root $root -Arguments @('launch', 'antigravity/account-a')
             $launch.ExitCode | Should Be 1
-            $launch.Output | Should Match 'requires an owned OS-user credential context'
+            $launch.Output | Should Match 'requires an elevated terminal \(Run as Administrator\)'
         } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
-    It 'refuses inseparable adapters instead of claiming shared-state account isolation' {
+    It 'refuses inseparable adapters and directs users to --isolated' {
         $root = Join-Path ([System.IO.Path]::GetTempPath()) ("mcli_profile_" + [guid]::NewGuid().ToString('N'))
         try {
             $new = Invoke-ProfileLauncher -Root $root -Arguments @('new', 'opencode/account-a', '--no-seed')
             $new.ExitCode | Should Be 0
             $launch = Invoke-ProfileLauncher -Root $root -Arguments @('launch', 'opencode/account-a')
             $launch.ExitCode | Should Be 1
-            $launch.Output | Should Match 'Use a legacy-isolated profile'
+            $launch.Output | Should Match 'Create this profile with --isolated'
+            $launch.Output | Should Not Match 'legacy-isolated'
         } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'auth set consumes redirected stdin without hanging and stores the exact secret' {
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) ("mcli_profile_" + [guid]::NewGuid().ToString('N'))
+        $target = $null
+        try {
+            $new = Invoke-ProfileLauncher -Root $root -Arguments @('new', 'copilot-cli/account-a', '--no-seed')
+            $new.ExitCode | Should Be 0
+            $metadata = Get-Content -LiteralPath (Join-Path $root 'profiles\copilot-cli\account-a\.profile.json') -Raw | ConvertFrom-Json
+            $target = "multi-cli/copilot-cli/$($metadata.profileId)/COPILOT_GITHUB_TOKEN"
+
+            $set = Invoke-ProfileLauncher -Root $root -Arguments @('auth', 'set', 'copilot-cli/account-a') -StdinText 'redirected-secret-value'
+            if ($set.ExitCode -ne 0) { Write-Host $set.Output }
+            $set.TimedOut | Should Be $false
+            $set.ExitCode | Should Be 0
+            $set.Output | Should Match 'Stored credential for copilot-cli/account-a'
+            (Get-MultiCliCredential -Target $target) | Should Be 'redirected-secret-value'
+        } finally {
+            if ($target) { [void](Remove-MultiCliCredential -Target $target) }
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'rejects empty redirected auth input and stores nothing' {
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) ("mcli_profile_" + [guid]::NewGuid().ToString('N'))
+        $target = $null
+        try {
+            $new = Invoke-ProfileLauncher -Root $root -Arguments @('new', 'copilot-cli/account-a', '--no-seed')
+            $new.ExitCode | Should Be 0
+            $metadata = Get-Content -LiteralPath (Join-Path $root 'profiles\copilot-cli\account-a\.profile.json') -Raw | ConvertFrom-Json
+            $target = "multi-cli/copilot-cli/$($metadata.profileId)/COPILOT_GITHUB_TOKEN"
+
+            $set = Invoke-ProfileLauncher -Root $root -Arguments @('auth', 'set', 'copilot-cli/account-a') -StdinText ''
+            $set.TimedOut | Should Be $false
+            $set.ExitCode | Should Be 1
+            $set.Output | Should Match 'Credential input was empty'
+            (Test-MultiCliCredential -Target $target) | Should Be $false
+        } finally {
+            if ($target) { [void](Remove-MultiCliCredential -Target $target) }
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 
     It 'delete clears the profile credential from the OS credential store' {
@@ -79,9 +134,10 @@ Describe 'schema-v2 profile safety boundaries' {
             (Test-MultiCliCredential -Target $target) | Should Be $true
 
             $delete = Invoke-ProfileLauncher -Root $root -Arguments @('delete', 'copilot-cli/account-a') -StdinText 'y'
-
             if ($delete.ExitCode -ne 0) { Write-Host $delete.Output }
+            $delete.TimedOut | Should Be $false
             $delete.ExitCode | Should Be 0
+            $delete.Output | Should Match "Deleted profile 'copilot-cli/account-a'"
             (Test-Path -LiteralPath (Join-Path $root 'profiles\copilot-cli\account-a')) | Should Be $false
             (Test-MultiCliCredential -Target $target) | Should Be $false
             $target = $null
@@ -91,18 +147,30 @@ Describe 'schema-v2 profile safety boundaries' {
         }
     }
 
-    It 'clone refuses schema-v2 profiles instead of duplicating the profile identity' {
+    It 'clone gives schema-v2 profiles a fresh identity and no credential' {
         $root = Join-Path ([System.IO.Path]::GetTempPath()) ("mcli_profile_" + [guid]::NewGuid().ToString('N'))
+        $sourceTarget = $null
         try {
             $new = Invoke-ProfileLauncher -Root $root -Arguments @('new', 'copilot-cli/account-a', '--no-seed')
             $new.ExitCode | Should Be 0
+            $source = Join-Path $root 'profiles\copilot-cli\account-a'
+            $sourceMetadata = Get-Content -LiteralPath (Join-Path $source '.profile.json') -Raw | ConvertFrom-Json
+            $sourceTarget = "multi-cli/copilot-cli/$($sourceMetadata.profileId)/COPILOT_GITHUB_TOKEN"
+            Set-MultiCliCredential -Target $sourceTarget -Secret 'source-only-token'
 
             $clone = Invoke-ProfileLauncher -Root $root -Arguments @('clone', 'copilot-cli/account-a', 'copilot-cli/account-b')
 
-            $clone.ExitCode | Should Be 1
-            $clone.Output | Should Match 'Cloning schema-v2 profiles'
-            (Test-Path -LiteralPath (Join-Path $root 'profiles\copilot-cli\account-b')) | Should Be $false
-        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+            if ($clone.ExitCode -ne 0) { Write-Host $clone.Output }
+            $clone.ExitCode | Should Be 0
+            $destination = Join-Path $root 'profiles\copilot-cli\account-b'
+            $destinationMetadata = Get-Content -LiteralPath (Join-Path $destination '.profile.json') -Raw | ConvertFrom-Json
+            $destinationMetadata.profileId | Should Not Be $sourceMetadata.profileId
+            $destinationTarget = "multi-cli/copilot-cli/$($destinationMetadata.profileId)/COPILOT_GITHUB_TOKEN"
+            (Test-MultiCliCredential -Target $destinationTarget) | Should Be $false
+        } finally {
+            if ($sourceTarget) { [void](Remove-MultiCliCredential -Target $sourceTarget) }
+            Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -150,9 +218,9 @@ function Write-ProfileFixtureAdapter {
         }
         concurrency = [ordered]@{ level = 'multiWriter'; singletonScope = 'none' }
         support = [ordered]@{
-            windows = [ordered]@{ level = 'experimental'; reason = 'Fixture only.' }
-            macos = [ordered]@{ level = 'experimental'; reason = 'Fixture only.' }
-            linux = [ordered]@{ level = 'experimental'; reason = 'Fixture only.' }
+            windows = [ordered]@{ level = 'supported'; reason = 'Fixture only.' }
+            macos = [ordered]@{ level = 'supported'; reason = 'Fixture only.' }
+            linux = [ordered]@{ level = 'supported'; reason = 'Fixture only.' }
         }
     }
     $adapter | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $Scratch.Tools 'fixture\adapter.json') -Encoding UTF8
@@ -160,26 +228,28 @@ function Write-ProfileFixtureAdapter {
 
 function Invoke-ProfileFixtureLauncher {
     param($Scratch, [string[]]$Arguments, [string]$Probe)
-    $argumentLine = ($Arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '""') + '"' } else { $_ } }) -join ' '
-    $process = New-Object System.Diagnostics.ProcessStartInfo
-    $process.FileName = (Get-Command powershell.exe).Source
-    $process.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$script:ProfileLauncher`" $argumentLine"
-    $process.UseShellExecute = $false
-    $process.RedirectStandardOutput = $true
-    $process.RedirectStandardError = $true
-    $process.CreateNoWindow = $true
-    $process.EnvironmentVariables['USERPROFILE'] = $Scratch.UserHome
-    $process.EnvironmentVariables['HOME'] = $Scratch.UserHome
-    $process.EnvironmentVariables['APPDATA'] = Join-Path $Scratch.UserHome 'AppData\Roaming'
-    $process.EnvironmentVariables['LOCALAPPDATA'] = Join-Path $Scratch.UserHome 'AppData\Local'
-    $process.EnvironmentVariables['MULTICLI_HOME'] = $Scratch.Profiles
-    $process.EnvironmentVariables['MULTICLI_TOOLS_DIR'] = $Scratch.Tools
-    if ($Probe) { $process.EnvironmentVariables['MULTICLI_OVERRIDE_BINARY'] = $Probe }
-    $child = [System.Diagnostics.Process]::Start($process)
-    $stdout = $child.StandardOutput.ReadToEnd()
-    $stderr = $child.StandardError.ReadToEnd()
-    $child.WaitForExit()
-    return [pscustomobject]@{ ExitCode = $child.ExitCode; Output = "$stdout$stderr" }
+    $environment = @{
+        USERPROFILE = $Scratch.UserHome
+        HOME = $Scratch.UserHome
+        APPDATA = (Join-Path $Scratch.UserHome 'AppData\Roaming')
+        LOCALAPPDATA = (Join-Path $Scratch.UserHome 'AppData\Local')
+        MULTICLI_HOME = $Scratch.Profiles
+        MULTICLI_TOOLS_DIR = $Scratch.Tools
+        PATH = "$($Scratch.Profiles)\bin;$env:PATH"
+    }
+    if ($Probe) { $environment['MULTICLI_OVERRIDE_BINARY'] = $Probe }
+    $original = @{}
+    foreach ($entry in $environment.GetEnumerator()) {
+        $original[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, 'Process')
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
+    }
+    try {
+        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:ProfileLauncher @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        foreach ($name in $original.Keys) { [Environment]::SetEnvironmentVariable($name, $original[$name], 'Process') }
+    }
+    return [pscustomobject]@{ ExitCode = $exitCode; Output = ($output | Out-String) }
 }
 
 Describe 'restored launcher behaviors' {
@@ -199,6 +269,25 @@ Describe 'restored launcher behaviors' {
 
             if ($launch.ExitCode -ne 7) { Write-Host $launch.Output }
             $launch.ExitCode | Should Be 7
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'tools and doctor show supported-mode prerequisites' {
+        $scratch = New-ProfileFixtureScratch
+        try {
+            Write-ProfileFixtureAdapter -Scratch $scratch
+            $adapterPath = Join-Path $scratch.Tools 'fixture\adapter.json'
+            $adapter = Get-Content -LiteralPath $adapterPath -Raw | ConvertFrom-Json
+            $adapter.support.windows.reason = 'requires --isolated whole-root'
+            $adapter | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $adapterPath -Encoding UTF8
+
+            $tools = Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('tools')
+            $tools.ExitCode | Should Be 0
+            $tools.Output | Should Match 'requires --isolated whole-root'
+
+            $doctor = Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('doctor')
+            $doctor.ExitCode | Should Be 0
+            $doctor.Output | Should Match 'supported: requires --isolated whole-root'
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
@@ -223,14 +312,14 @@ Describe 'restored launcher behaviors' {
             Set-Content -LiteralPath (Join-Path $runtimeDir 'rogue.txt') -Value 'rogue' -Encoding ASCII
 
             $flagged = Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('doctor', '--deep')
-            $flagged.ExitCode | Should Be 0
+            $flagged.ExitCode | Should Be 1
             $flagged.Output | Should Match 'unexpected runtime file rogue\.txt'
             $flagged.Output | Should Match 'adapter classification defect'
 
             Remove-Item -LiteralPath (Join-Path $runtimeDir 'rogue.txt') -Force
             Remove-Item -LiteralPath (Join-Path $runtimeDir '.runtime-manifest') -Force
             $noManifest = Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('doctor', '--deep')
-            $noManifest.ExitCode | Should Be 0
+            $noManifest.ExitCode | Should Be 1
             $noManifest.Output | Should Match 'missing \.runtime-manifest'
             $noManifest.Output | Should Not Match 'unexpected runtime file'
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
@@ -259,10 +348,13 @@ Describe 'restored launcher behaviors' {
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
-    It 'continue on a schema-v2 adapter reports shared conversations and exits 0' {
+    It 'continue on existing shared schema-v2 profiles reports the shared-state no-op' {
         $scratch = New-ProfileFixtureScratch
         try {
             Write-ProfileFixtureAdapter -Scratch $scratch
+            (Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('new', 'fixture/a', '--no-seed')).ExitCode | Should Be 0
+            (Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('new', 'fixture/b', '--no-seed')).ExitCode | Should Be 0
+
             $result = Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('continue', 'fixture', 'a', 'b')
 
             if ($result.ExitCode -ne 0) { Write-Host $result.Output }
@@ -294,6 +386,30 @@ Describe 'restored launcher behaviors' {
             $apply.ExitCode | Should Be 1
             $apply.Output | Should Match "cannot be applied to 'fixture2'"
             (Test-Path -LiteralPath (Join-Path $scratch.Profiles 'fixture2\wrong')) | Should Be $false
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'creates Start Menu shortcuts that point to the real launcher file' {
+        $scratch = New-ProfileFixtureScratch
+        try {
+            Write-ProfileFixtureAdapter -Scratch $scratch
+            $adapterPath = Join-Path $scratch.Tools 'fixture\adapter.json'
+            $adapter = Get-Content -LiteralPath $adapterPath -Raw | ConvertFrom-Json
+            $adapter.kind = 'ide'
+            $adapter | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $adapterPath -Encoding UTF8
+            $startMenu = Join-Path $scratch.UserHome 'AppData\Roaming\Microsoft\Windows\Start Menu\Programs'
+            New-Item -ItemType Directory -Force -Path $startMenu | Out-Null
+
+            $result = Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('new', 'fixture/work', '--no-seed')
+
+            if ($result.ExitCode -ne 0) { Write-Host $result.Output }
+            $result.ExitCode | Should Be 0
+            $shortcutPath = Join-Path $startMenu 'multi-cli fixture work.lnk'
+            (Test-Path -LiteralPath $shortcutPath -PathType Leaf) | Should Be $true
+            $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+            $shortcut.TargetPath | Should Match 'powershell\.exe$'
+            $shortcut.Arguments | Should Match ([regex]::Escape("-File `"$script:ProfileLauncher`" launch fixture/work"))
+            $shortcut.Arguments | Should Not Match 'function New-StartMenuShortcut'
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }

@@ -11,9 +11,15 @@ setup() {
   export MULTICLI_BIN_LINK="$MULTICLI_SCRATCH/bin/multi-cli"
   export MULTICLI_HOME="$MULTICLI_SCRATCH/profiles-removed"
   mkdir -p "$(dirname "$MULTICLI_BIN_LINK")"
+  MULTICLI_TEST_TARGETS=()
 }
 
 teardown() {
+  local target
+  for target in ${MULTICLI_TEST_TARGETS[@]+"${MULTICLI_TEST_TARGETS[@]}"}; do
+    bash -c 'source "$1"; mc_cred_clear "$2" >/dev/null 2>&1 || true' _ \
+      "$MULTICLI_REPO_ROOT/lib/credential-store.sh" "$target"
+  done
   unset MULTICLI_INSTALL_DIR MULTICLI_BIN_LINK
   teardown_scratch
 }
@@ -53,4 +59,29 @@ run_uninstall() {
 
   [ "$status" -eq 0 ]
   [ -f "$MULTICLI_BIN_LINK" ]
+}
+
+@test "uninstall clears process-secret credentials before removing profiles" {
+  local tools="$MULTICLI_SCRATCH/tools"
+  mkdir -p "$tools/secretcli" "$MULTICLI_HOME/secretcli/account-a"
+  cat > "$tools/secretcli/adapter.json" <<'JSON'
+{"schemaVersion":2,"id":"secretcli","account":{"mechanism":"processSecret","secret":{"environmentVariable":"SECRETCLI_TOKEN"}}}
+JSON
+  local profile_id="11111111-2222-3333-4444-555555555555"
+  printf '{"schemaVersion":2,"adapterId":"secretcli","profileId":"%s","mode":"accountOverlay"}\n' "$profile_id" \
+    > "$MULTICLI_HOME/secretcli/account-a/.profile.json"
+  local target="multi-cli/secretcli/$profile_id/SECRETCLI_TOKEN"
+  run bash -c 'source "$1"; mc_cred_set "$2" token' _ "$MULTICLI_REPO_ROOT/lib/credential-store.sh" "$target"
+  [ "$status" -eq 0 ]
+  MULTICLI_TEST_TARGETS+=("$target")
+  mkdir -p "$MULTICLI_INSTALL_DIR"
+  cp -R "$tools/secretcli" "$MULTICLI_INSTALL_DIR/"
+
+  run bash -c "printf 'n\\ny\\n' | '$MULTICLI_REPO_ROOT/scripts/uninstall.sh'"
+
+  [ "$status" -eq 0 ]
+  [ ! -e "$MULTICLI_HOME" ]
+  run bash -c 'source "$1"; mc_cred_present "$2"' _ "$MULTICLI_REPO_ROOT/lib/credential-store.sh" "$target"
+  [ "$status" -ne 0 ]
+  MULTICLI_TEST_TARGETS=()
 }

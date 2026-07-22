@@ -10,7 +10,7 @@ The Antigravity CLI is the terminal companion to the IDE. Its fixed credential i
 
 Binary discovery: `%LOCALAPPDATA%\agy\bin\agy.exe` (Windows), `~/.local/bin/agy` (macOS/Linux), then `agy` on PATH.
 
-## Quickstart (Windows only)
+## Quickstart
 
 ```bash
 multi-cli new agy-cli/work
@@ -19,7 +19,7 @@ multi-cli new agy-cli/personal
 multi-cli launch agy-cli/personal
 ```
 
-macOS and Linux launches fail closed: OS-user isolation is not implemented there yet.
+The first launch requires an elevated terminal on Windows so multi-cli can provision the owned OS user. macOS and Linux remain unsupported until real owned-user Keychain/Secret Service isolation is implemented and verified.
 
 ## Account boundary
 
@@ -36,13 +36,11 @@ Shared root: `%USERPROFILE%\.gemini\antigravity-cli` (Windows), `~/.gemini/antig
 
 ## Known limitations
 
-- OS-user isolation exists for Windows only; macOS Keychain and Linux Secret Service isolation are not yet implemented.
-- Authenticated `agy` dual-account concurrency E2E is pending.
+- OS-user profiles require administrator access on Windows. macOS and Linux are not advertised as supported.
+- Authenticated `agy` dual-account testing requires two test accounts; the runtime and cleanup paths are covered by platform tests.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| experimental | unsupported | unsupported |
-
-`experimental` means a documented candidate boundary; the authenticated dual-account gate has not passed. No platform is verified.
+| supported (owned OS user; elevated terminal) | unsupported (owned-user Keychain isolation not proven) | unsupported (owned-user Secret Service session not implemented) |

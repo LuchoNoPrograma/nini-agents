@@ -10,7 +10,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$RepoUrl    = if ($env:MULTICLI_REPO)        { $env:MULTICLI_REPO }        else { 'https://github.com/Spielewoy/multi-codex.git' }
+$RepoUrl    = if ($env:MULTICLI_REPO)        { $env:MULTICLI_REPO }        else { 'https://github.com/Spielewoy/multi-cli.git' }
 $InstallDir = if ($env:MULTICLI_INSTALL_DIR)  { $env:MULTICLI_INSTALL_DIR }  else { Join-Path $env:LOCALAPPDATA 'multi-cli' }
 $BinDir     = if ($env:MULTICLI_BIN_DIR)      { $env:MULTICLI_BIN_DIR }      else { Join-Path $env:LOCALAPPDATA 'multi-cli\bin' }
 $JqVersion  = if ($env:MULTICLI_JQ_VERSION)   { $env:MULTICLI_JQ_VERSION }   else { '1.7.1' }

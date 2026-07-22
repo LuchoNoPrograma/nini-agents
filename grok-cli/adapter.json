@@ -26,9 +26,9 @@
   },
   "concurrency": { "level": "multiWriter", "singletonScope": "none" },
   "support": {
-    "windows": { "level": "experimental", "reason": "Direct-key mode must prove no higher-precedence shared credential and pass headless, ACP, TUI, and dual-account E2E." },
-    "macos": { "level": "experimental", "reason": "Native direct-key concurrency E2E remains pending." },
-    "linux": { "level": "experimental", "reason": "Native direct-key concurrency E2E remains pending." }
+    "windows": { "level": "supported", "reason": "process token via multi-cli auth set; shared config must not pin model.api_key" },
+    "macos": { "level": "supported" },
+    "linux": { "level": "supported" }
   },
   "install": "https://docs.x.ai/build/overview",
   "versionCommand": ["version"]

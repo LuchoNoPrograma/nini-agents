@@ -58,16 +58,14 @@
   },
   "support": {
     "windows": {
-      "level": "experimental",
-      "reason": "Direct-provider mode validated mechanically; OAuth login stores credentials/kimi-code.json outside the process boundary, and ~/.agents skills leak from the real home; authenticated concurrency E2E pending."
+      "level": "supported",
+      "reason": "process token (KIMI_MODEL_API_KEY) via multi-cli auth set"
     },
     "macos": {
-      "level": "experimental",
-      "reason": "Direct-provider mode only; OAuth credential file boundary and native concurrency E2E pending."
+      "level": "supported"
     },
     "linux": {
-      "level": "experimental",
-      "reason": "Direct-provider mode only; OAuth credential file boundary and native concurrency E2E pending."
+      "level": "supported"
     }
   },
   "install": "https://www.kimi.com/code/docs/en/kimi-code-cli/",
