@@ -8,8 +8,8 @@ MINIMUM_PERCENT="${BASH_COVERAGE_MINIMUM:-95}"
 BASELINE="${COVERAGE_BASELINE:-HEAD^}"
 CHANGED_REPORT="$REPO_ROOT/tests/coverage/out/bash-changed-lines.json"
 
-command -v kcov >/dev/null 2>&1 || {
-  echo "kcov is required for Bash coverage." >&2
+command -v bashcov >/dev/null 2>&1 || {
+  echo "bashcov is required for Bash coverage." >&2
   exit 2
 }
 command -v python3 >/dev/null 2>&1 || {
@@ -19,40 +19,51 @@ command -v python3 >/dev/null 2>&1 || {
 
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
-kcov \
-  --bash-method=DEBUG \
-  --include-path="$REPO_ROOT/multi-cli,$REPO_ROOT/lib,$REPO_ROOT/scripts" \
-  "$OUTPUT_DIR" \
-  "$REPO_ROOT/tests/run-bats.sh"
+(
+  cd "$REPO_ROOT"
+  bashcov --root "$REPO_ROOT" -- "$REPO_ROOT/tests/run-bats.sh"
+)
 
-SUMMARY="$(find "$OUTPUT_DIR" -name coverage.json -type f -print -quit)"
-[ -n "$SUMMARY" ] || {
-  echo "kcov did not write coverage.json under $OUTPUT_DIR." >&2
+SUMMARY="$OUTPUT_DIR/.resultset.json"
+[ -f "$SUMMARY" ] || {
+  echo "bashcov did not write $SUMMARY." >&2
   exit 1
 }
-python3 - "$SUMMARY" "$MINIMUM_PERCENT" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-summary_path = Path(sys.argv[1])
-minimum = float(sys.argv[2])
-summary = json.loads(summary_path.read_text(encoding="utf-8"))
-percent = float(summary["percent_covered"])
-if percent < minimum:
-    raise SystemExit(f"Bash coverage gate FAILED: {percent:.2f}% is below {minimum:.2f}%.")
-print(f"Bash coverage gate passed: {percent:.2f}% >= {minimum:.2f}%.")
-PY
+COBERTURA="$OUTPUT_DIR/cobertura.xml"
+python3 "$SCRIPT_DIR/simplecov_to_cobertura.py" \
+  --input "$SUMMARY" \
+  --repo "$REPO_ROOT" \
+  --output "$COBERTURA" \
+  --pathspec multi-cli \
+  --pathspec 'lib/*.sh' \
+  --pathspec 'scripts/*.sh'
 
 python3 "$SCRIPT_DIR/check_changed_coverage.py" \
   --repo "$REPO_ROOT" \
   --baseline "$BASELINE" \
-  --coverage-root "$OUTPUT_DIR" \
+  --coverage-root "$COBERTURA" \
   --minimum "$MINIMUM_PERCENT" \
   --output "$CHANGED_REPORT" \
   --pathspec multi-cli \
   --pathspec 'lib/*.sh' \
   --pathspec 'scripts/*.sh'
+
+python3 - "$COBERTURA" "$MINIMUM_PERCENT" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+minimum = float(sys.argv[2])
+lines = root.findall(".//line")
+executable = len(lines)
+covered = sum(int(float(line.get("hits", "0"))) > 0 for line in lines)
+if executable == 0:
+    raise SystemExit("Bash coverage gate FAILED: no production lines were analyzed.")
+percent = 100.0 * covered / executable
+if percent < minimum:
+    raise SystemExit(f"Bash coverage gate FAILED: {percent:.2f}% is below {minimum:.2f}%.")
+print(f"Bash coverage gate passed: {percent:.2f}% >= {minimum:.2f}%.")
+PY
 
 echo "Bash coverage report: $OUTPUT_DIR/index.html"
 echo "Changed-line report: $CHANGED_REPORT"

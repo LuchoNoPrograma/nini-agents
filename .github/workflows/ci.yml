@@ -185,6 +185,7 @@ jobs:
           fi
 
       - name: Run the real POSIX OS-user lifecycle
+        if: runner.os == 'Windows'
         timeout-minutes: 10
         run: bash tests/e2e/posix-osuser.sh
 
@@ -205,22 +206,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install coverage dependencies
         run: |
-          KCOV_VERSION=v43
-          KCOV_SHA256=4cbba86af11f72de0c7514e09d59c7927ed25df7cebdad087f6d3623213b95bf
-          KCOV_ARCHIVE="$RUNNER_TEMP/kcov-source.tar.gz"
-          KCOV_SOURCE="$RUNNER_TEMP/kcov-source"
+          BASHCOV_VERSION=3.3.0
+          BASHCOV_SHA256=9a761b6e36598f74897ead922cc04f85de3d1362f54a595c8eb6fcf5cb139c31
+          BASHCOV_GEM="$RUNNER_TEMP/bashcov.gem"
           sudo apt-get update -y
-          sudo apt-get install -y bats jq libsecret-tools gnome-keyring dbus-x11 acl \
-            binutils-dev build-essential cmake libcurl4-openssl-dev libdw-dev \
-            libelf-dev libiberty-dev libssl-dev ninja-build zlib1g-dev
-          curl -fsSL "https://github.com/SimonKagstrom/kcov/archive/refs/tags/$KCOV_VERSION.tar.gz" -o "$KCOV_ARCHIVE"
-          printf '%s  %s\n' "$KCOV_SHA256" "$KCOV_ARCHIVE" | sha256sum --check --strict
-          mkdir -p "$KCOV_SOURCE"
-          tar -xzf "$KCOV_ARCHIVE" -C "$KCOV_SOURCE" --strip-components=1
-          cmake -S "$KCOV_SOURCE" -B "$KCOV_SOURCE/build" -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build "$KCOV_SOURCE/build"
-          sudo cmake --install "$KCOV_SOURCE/build"
-          kcov --version
+          sudo apt-get install -y bats jq libsecret-tools gnome-keyring dbus-x11 acl ruby
+          curl -fsSL "https://rubygems.org/gems/bashcov-$BASHCOV_VERSION.gem" -o "$BASHCOV_GEM"
+          printf '%s  %s\n' "$BASHCOV_SHA256" "$BASHCOV_GEM" | sha256sum --check --strict
+          sudo gem install --local "$BASHCOV_GEM" --no-document
+          bashcov --version
       - name: Enforce Bash coverage
         env:
           COVERAGE_BASELINE: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
