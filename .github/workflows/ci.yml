@@ -241,6 +241,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Install Pester 3.4.0 (matches the 3.x-compatible suite)
         shell: powershell

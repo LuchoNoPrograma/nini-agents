@@ -58,13 +58,52 @@ $testFiles = @(
 
 # Commands that cannot execute on this host, matched against Pester's missed
 # commands by module file name and normalized command text (not line numbers,
-# so module edits do not stale them by position alone). Each entry must name
-# the privilege-gated test that covers the command on capable hosts.
+# so module edits do not stale them by position alone).
 $script:DocumentedExceptions = @(
     [ordered]@{
-        file = 'MultiCli.Runtime.psm1'
-        command = '[System.IO.File]::Delete($reparsePoint.FullName)'
-        reason = 'Exercising file-reparse-point removal in Remove-RuntimeOverlay requires a file symlink; this host grants no symlink privilege (directory junctions only). The covering test ''Remove-RuntimeOverlay deletes reparse-point files without following them'' in tests/ModuleFunctions.Tests.ps1 passes on capable hosts and returns without exercising the branch here.'
+        file = 'MultiCli.OsUser.psm1'
+        command = 'throw "OS-user isolation for $Tool/$ProfileName requires an elevated terminal (Run as Administrator)."'
+        reason = 'GitHub windows-latest is elevated, so the non-admin refusal cannot execute there. The end-to-end assertion in tests/OsUser.Tests.ps1 executes on non-elevated Windows hosts; elevated CI covers Test-OsUserElevated and all provisioning paths.'
+    },
+    [ordered]@{
+        file = 'MultiCli.OsUser.psm1'
+        command = '$ErrorActionPreference = ''Continue'''
+        reason = 'These native command helpers are exercised by the non-admin elevation test only when the runner is not elevated. Elevated CI covers every caller through deterministic shims; standard Windows hosts cover the real net.exe probe.'
+    },
+    [ordered]@{
+        file = 'MultiCli.OsUser.psm1'
+        command = 'return (& $FilePath @NativeArgs 2>&1 | Out-String).Trim()'
+        reason = 'These native command helpers are exercised by the non-admin elevation test only when the runner is not elevated. Elevated CI covers every caller through deterministic shims; standard Windows hosts cover the real net.exe probe.'
+    },
+    [ordered]@{
+        file = 'MultiCli.OsUser.psm1'
+        command = '& $FilePath @NativeArgs 2>&1'
+        reason = 'These native command helpers are exercised by the non-admin elevation test only when the runner is not elevated. Elevated CI covers every caller through deterministic shims; standard Windows hosts cover the real net.exe probe.'
+    },
+    [ordered]@{
+        file = 'MultiCli.OsUser.psm1'
+        command = 'Out-String'
+        reason = 'These native command helpers are exercised by the non-admin elevation test only when the runner is not elevated. Elevated CI covers every caller through deterministic shims; standard Windows hosts cover the real net.exe probe.'
+    },
+    [ordered]@{
+        file = 'MultiCli.OsUser.psm1'
+        command = '$null = Invoke-OsUserNative -FilePath net.exe -NativeArgs @(''user'', $Username)'
+        reason = 'These native command helpers are exercised by the non-admin elevation test only when the runner is not elevated. Elevated CI covers every caller through deterministic shims; standard Windows hosts cover the real net.exe probe.'
+    },
+    [ordered]@{
+        file = 'MultiCli.OsUser.psm1'
+        command = '''user'', $Username'
+        reason = 'These native command helpers are exercised by the non-admin elevation test only when the runner is not elevated. Elevated CI covers every caller through deterministic shims; standard Windows hosts cover the real net.exe probe.'
+    },
+    [ordered]@{
+        file = 'MultiCli.OsUser.psm1'
+        command = 'return ($LASTEXITCODE -eq 0)'
+        reason = 'These native command helpers are exercised by the non-admin elevation test only when the runner is not elevated. Elevated CI covers every caller through deterministic shims; standard Windows hosts cover the real net.exe probe.'
+    },
+    [ordered]@{
+        file = 'MultiCli.OsUser.psm1'
+        command = '$LASTEXITCODE -eq 0'
+        reason = 'These native command helpers are exercised by the non-admin elevation test only when the runner is not elevated. Elevated CI covers every caller through deterministic shims; standard Windows hosts cover the real net.exe probe.'
     },
     [ordered]@{
         file = 'MultiCli.Runtime.psm1'
