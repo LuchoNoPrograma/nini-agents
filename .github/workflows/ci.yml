@@ -209,10 +209,16 @@ jobs:
           BASHCOV_VERSION=3.3.0
           BASHCOV_SHA256=9a761b6e36598f74897ead922cc04f85de3d1362f54a595c8eb6fcf5cb139c31
           BASHCOV_GEM="$RUNNER_TEMP/bashcov.gem"
+          SIMPLECOV_VERSION=0.22.0
+          SIMPLECOV_SHA256=fe2622c7834ff23b98066bb0a854284b2729a569ac659f82621fc22ef36213a5
+          SIMPLECOV_GEM="$RUNNER_TEMP/simplecov.gem"
           sudo apt-get update -y
           sudo apt-get install -y bats jq libsecret-tools gnome-keyring dbus-x11 acl ruby
           curl -fsSL "https://rubygems.org/gems/bashcov-$BASHCOV_VERSION.gem" -o "$BASHCOV_GEM"
+          curl -fsSL "https://rubygems.org/gems/simplecov-$SIMPLECOV_VERSION.gem" -o "$SIMPLECOV_GEM"
           printf '%s  %s\n' "$BASHCOV_SHA256" "$BASHCOV_GEM" | sha256sum --check --strict
+          printf '%s  %s\n' "$SIMPLECOV_SHA256" "$SIMPLECOV_GEM" | sha256sum --check --strict
+          sudo gem install "$SIMPLECOV_GEM" --no-document
           sudo gem install --local "$BASHCOV_GEM" --no-document
           bashcov --version
       - name: Enforce Bash coverage
