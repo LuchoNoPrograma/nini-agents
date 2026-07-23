@@ -38,6 +38,39 @@ Describe 'adapter binary discovery' {
     }
 }
 
+Describe 'redirected input normalization' {
+    It 'strips a UTF-8 BOM and preserves UTF-8 content' {
+        $encoding = New-Object Text.UTF8Encoding($false)
+        $payload = $UTF8_BOM_BYTES + $encoding.GetBytes("sëcret`r`nignored")
+        $stream = New-Object IO.MemoryStream -ArgumentList @(, $payload)
+        try {
+            (Read-RedirectedLine -InputStream $stream) | Should Be 'sëcret'
+        } finally {
+            $stream.Dispose()
+        }
+    }
+
+    It 'preserves ordinary input and returns null at end of stream' {
+        $payload = [Text.Encoding]::UTF8.GetBytes("confirm`n")
+        $stream = New-Object IO.MemoryStream -ArgumentList @(, $payload)
+        try {
+            (Read-RedirectedLine -InputStream $stream) | Should Be 'confirm'
+            (Read-RedirectedLine -InputStream $stream) | Should Be $null
+        } finally {
+            $stream.Dispose()
+        }
+    }
+
+    It 'returns an empty string for an empty redirected line' {
+        $stream = New-Object IO.MemoryStream -ArgumentList @(, ([byte[]](10)))
+        try {
+            (Read-RedirectedLine -InputStream $stream) | Should Be ''
+        } finally {
+            $stream.Dispose()
+        }
+    }
+}
+
 Describe 'multi-cli staleness branches (codex, real fixtures)' {
 
     It '(a) truncated dest with equal mtime + different size is repaired (re-copied)' {

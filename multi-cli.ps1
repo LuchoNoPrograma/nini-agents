@@ -37,6 +37,7 @@ param (
 
 $ErrorActionPreference = 'Stop'
 $VERSION = '0.1.0'
+$UTF8_BOM_BYTES = [byte[]](0xEF, 0xBB, 0xBF)
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $MultiCliLauncherPath = $MyInvocation.MyCommand.Definition
@@ -356,6 +357,24 @@ function Copy-SessionFile {
     $Copied.Value++
 }
 
+# Read one redirected line as UTF-8 bytes so BOM handling never depends on the
+# host console code page.
+function Read-RedirectedLine {
+    param([IO.Stream]$InputStream = $([Console]::OpenStandardInput()))
+    $bytes = New-Object 'System.Collections.Generic.List[byte]'
+    while ($true) {
+        $value = $InputStream.ReadByte()
+        if ($value -lt 0 -or $value -eq 10) { break }
+        if ($value -ne 13) { $bytes.Add([byte]$value) }
+    }
+    if ($value -lt 0 -and $bytes.Count -eq 0) { return $null }
+    $offset = if ($bytes.Count -ge 3 -and
+        $bytes[0] -eq $UTF8_BOM_BYTES[0] -and
+        $bytes[1] -eq $UTF8_BOM_BYTES[1] -and
+        $bytes[2] -eq $UTF8_BOM_BYTES[2]) { 3 } else { 0 }
+    return (New-Object Text.UTF8Encoding($false, $true)).GetString($bytes.ToArray(), $offset, $bytes.Count - $offset)
+}
+
 # multi-cli auth set|status|clear: manage a process-secret profile's
 # credential in the OS store, keyed by the profile's stable profileId.
 function Invoke-Auth {
@@ -376,7 +395,7 @@ function Invoke-Auth {
         'set' {
             $plainSecret = $null
             if ([Console]::IsInputRedirected) {
-                $plainSecret = [Console]::In.ReadLine()
+                $plainSecret = Read-RedirectedLine
                 if ([string]::IsNullOrEmpty($plainSecret)) { throw 'Credential input was empty.' }
             } else {
                 $secureSecret = Read-Host "Enter $environmentVariable for $Spec" -AsSecureString
@@ -806,7 +825,7 @@ function Remove-Profile {
     # the redirected stream directly so piped confirmations are honored.
     if ([Console]::IsInputRedirected) {
         Write-Host "Delete profile '$Spec' and all its data? [y/N]"
-        $confirm = [Console]::In.ReadLine()
+        $confirm = Read-RedirectedLine
     } else {
         $confirm = Read-Host "Delete profile '$Spec' and all its data? [y/N]"
     }

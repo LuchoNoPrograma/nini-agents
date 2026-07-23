@@ -48,22 +48,5 @@ python3 "$SCRIPT_DIR/check_changed_coverage.py" \
   --pathspec 'lib/*.sh' \
   --pathspec 'scripts/*.sh'
 
-python3 - "$COBERTURA" "$MINIMUM_PERCENT" <<'PY'
-import sys
-import xml.etree.ElementTree as ET
-
-root = ET.parse(sys.argv[1]).getroot()
-minimum = float(sys.argv[2])
-lines = root.findall(".//line")
-executable = len(lines)
-covered = sum(int(float(line.get("hits", "0"))) > 0 for line in lines)
-if executable == 0:
-    raise SystemExit("Bash coverage gate FAILED: no production lines were analyzed.")
-percent = 100.0 * covered / executable
-if percent < minimum:
-    raise SystemExit(f"Bash coverage gate FAILED: {percent:.2f}% is below {minimum:.2f}%.")
-print(f"Bash coverage gate passed: {percent:.2f}% >= {minimum:.2f}%.")
-PY
-
 echo "Bash coverage report: $OUTPUT_DIR/index.html"
 echo "Changed-line report: $CHANGED_REPORT"

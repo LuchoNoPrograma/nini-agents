@@ -52,7 +52,7 @@ Product drivers must prove distinct account identity, overlapping processes, ind
 
 ## Coverage
 
-Changed production lines and every touched runtime module require at least 95% coverage. Credential, validation, path-safety, overlay, migration, and process-spawn branches may not be excluded. A missing local coverage tool is a blocker to a verified completion claim, not a reason to lower the bar.
+Changed production lines and every touched PowerShell runtime module require at least 95% coverage. Bash changed-line coverage is enforced at 95%; Bashcov's aggregate report remains diagnostic because Bats launches production Bash in isolated processes and several platform-specific branches cannot execute on one Linux host. Credential, validation, path-safety, overlay, migration, and process-spawn branches may not be excluded from changed-line coverage. A missing local coverage tool is a blocker to a verified completion claim, not a reason to lower the bar.
 
 ```bash
 bash tests/coverage/run-bash-coverage.sh
