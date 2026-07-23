@@ -366,7 +366,7 @@ PROBE
   [ "$status" -eq 0 ]
   local pdir="$MULTICLI_HOME/lockedcli/iso"
 
-  run multicli launch lockedcli/iso
+  run env MULTICLI_PLATFORM=windows "$MULTICLI_BIN" launch lockedcli/iso
   [ "$status" -eq 0 ]
   assert_same_path "$(jq -r '.home' "$CAPTURE_OUTPUT")" "$pdir/_home"
   [ ! -e "$HOME/.lockedcli" ]

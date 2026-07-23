@@ -19,25 +19,15 @@ setup() {
   source_engine
 }
 
-# Load the engine with the REAL launcher context. When multi-cli is sourced,
-# its own `source lib/...` lines resolve against $0 (the bats file) and miss;
-# the `|| true` context keeps that harmless, and the libs are then loaded
-# explicitly with correct paths. This yields the genuine launcher helpers
-# (abort, adapter_path, split_profile_spec, validate_name, profile_dir,
-# platform, ...) instead of test-local reimplementations.
+# Load the engine with the REAL launcher context. The launcher resolves its
+# imports through BASH_SOURCE, so sourcing works independently of Bats' $0.
+# This yields the genuine launcher helpers instead of test reimplementations.
 source_engine() {
   set -- help
   # shellcheck disable=SC1090
-  source "$MULTICLI_BIN" >/dev/null 2>&1 || true
-  SCRIPT_DIR="$MULTICLI_REPO_ROOT"
+  source "$MULTICLI_BIN" >/dev/null 2>&1
   TOOLS_DIR="$MULTICLI_TOOLS_DIR"
   BASE="$MULTICLI_HOME"
-  # shellcheck source=lib/adapter-validation.sh
-  source "$MULTICLI_REPO_ROOT/lib/adapter-validation.sh"
-  # shellcheck source=lib/multicli-runtime.sh
-  source "$MULTICLI_REPO_ROOT/lib/multicli-runtime.sh"
-  # shellcheck source=lib/migration.sh
-  source "$MULTICLI_REPO_ROOT/lib/migration.sh"
 }
 
 teardown() {
