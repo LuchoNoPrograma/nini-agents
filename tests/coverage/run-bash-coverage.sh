@@ -20,6 +20,7 @@ command -v python3 >/dev/null 2>&1 || {
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 kcov \
+  --bash-method=DEBUG \
   --include-path="$REPO_ROOT/multi-cli,$REPO_ROOT/lib,$REPO_ROOT/scripts" \
   "$OUTPUT_DIR" \
   "$REPO_ROOT/tests/run-bats.sh"

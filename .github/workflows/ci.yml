@@ -181,7 +181,7 @@ jobs:
               exec bash tests/run-bats.sh
             '
           else
-            env MULTICLI_MACOS_KEYCHAIN="$MULTICLI_CI_KEYCHAIN" bash tests/run-bats.sh
+            env MULTICLI_MACOS_KEYCHAIN="$HOME/Library/Keychains/$MULTICLI_CI_KEYCHAIN-db" bash tests/run-bats.sh
           fi
 
       - name: Run the real POSIX OS-user lifecycle
