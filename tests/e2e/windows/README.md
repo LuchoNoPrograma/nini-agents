@@ -16,7 +16,7 @@ or with parameters:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/e2e/windows/Invoke-RealWorldE2E.ps1 `
-    -Tool kimi-cli,claude-cli,codex,gemini-cli,commandcode,copilot-cli,grok-cli `
+    -Tool claude-cli,codex,gemini-cli,commandcode,cursor-cli,copilot-cli,kimi-cli,grok-cli `
     -EvidenceDir "$env:TEMP\multi-cli-realworld-evidence"
 ```
 
@@ -25,14 +25,16 @@ least one assertion failed. A sanitized evidence JSON is written to
 `<EvidenceDir>\realworld-evidence.json` (default
 `%TEMP%\multi-cli-realworld-evidence`).
 
-The Pester gate `tests/RealWorldE2E.Tests.ps1` (discovered by
-`tests/run-pester.ps1`) runs the harness for the always-installed tools
-(kimi-cli, claude-cli, codex, gemini-cli, commandcode) and asserts the
-evidence shows every named assertion passed, or an explicit recorded SKIP
-with a reason. copilot-cli and grok-cli are covered by the harness itself and
-record an explicit SKIP when their binary is absent. Expect ~10-15 minutes
-for the Pester run: it performs real binary launches. The suite removes its
-own evidence directory, harness log, and (via the harness) the sandbox.
+The opt-in Pester suite `tests/RealWorldE2E.Tests.ps1` runs the harness for
+kimi-cli, claude-cli, codex, gemini-cli, and commandcode, then asserts the
+evidence shows every named assertion passed or an explicit recorded SKIP
+with a reason. `tests/run-pester.ps1` excludes it from default discovery so a
+host with no vendor binaries cannot satisfy required CI through skips. Run it
+explicitly with `-Path RealWorldE2E.Tests.ps1`. Cursor CLI, Copilot CLI, and
+Grok CLI are covered by the harness itself and record an explicit SKIP when
+their binary is absent. Expect ~10-15 minutes for the Pester run: it performs
+real binary launches. The suite removes its own evidence directory, harness
+log, and (via the harness) the sandbox.
 
 ## What it does
 
@@ -61,7 +63,7 @@ Per schema-v2 `accountOverlay` adapter, dispatched by the adapter's **real**
    `.runtime\rogue-e2e.txt`, assert doctor flags it, remove it, assert doctor
    is clean again.
 
-### `processSecret` — kimi-cli, copilot-cli, grok-cli
+### `processSecret` — cursor-cli, copilot-cli, kimi-cli, grok-cli
 
 1. Store per-profile dummy tokens (`dummy-token-account-a`,
    `dummy-token-account-b`) through the same real OS credential-store module
@@ -71,11 +73,15 @@ Per schema-v2 `accountOverlay` adapter, dispatched by the adapter's **real**
 2. Assert real `auth status` reports the credential present.
 3. Launch through a generated `.cmd` shim (passed as
    `MULTICLI_OVERRIDE_BINARY`) that writes the secret env var
-   (`KIMI_MODEL_API_KEY` / `COPILOT_GITHUB_TOKEN` / `XAI_API_KEY`) to a
-   capture file and then `exec`s the real binary with the version command.
-   Assert the captured value equals the profile's dummy token and that the
-   two profiles receive **different** values.
-4. Real `auth clear` both profiles; assert a subsequent launch fails
+   (`CURSOR_API_KEY` / `COPILOT_GITHUB_TOKEN` / `KIMI_MODEL_API_KEY` /
+   `XAI_API_KEY`) to a capture file and then `exec`s the real binary with the
+   version command. Assert the captured value equals the profile's dummy
+   token and that the two profiles receive **different** values.
+4. Assert shared normal state survives both launches. Cursor's
+   `cli-config.json` is seeded with valid non-default settings and checked
+   semantically because Cursor normalizes the JSON; the other adapters retain
+   exact-content checks.
+5. Real `auth clear` both profiles; assert a subsequent launch fails
    non-zero with the "no stored credential / auth set" hint.
 
 ## Safety model

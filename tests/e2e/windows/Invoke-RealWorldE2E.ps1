@@ -27,7 +27,7 @@
         known vendor transients), flags a planted rogue file, and is clean
         again after its removal
 
-    processSecret (kimi-cli, copilot-cli, grok-cli)
+    processSecret (cursor-cli, copilot-cli, kimi-cli, grok-cli)
       - store per-profile dummy tokens (`dummy-token-account-a/-b`) through
         the same real credential-store module and target derivation as auth set
       - assert real `auth status` reports present
@@ -712,6 +712,40 @@ function Test-ProcessSecretPreconditions {
     return -not $hasStrongerCredential
 }
 
+function Set-ProcessSecretSharedSeed {
+    param($Adapter, [string]$SharedSeedPath, [string]$SeedTag)
+    if ($Adapter.id -ne 'cursor-cli') {
+        Set-Content -LiteralPath $SharedSeedPath -Value "$SeedTag-shared" -Encoding ASCII
+        return
+    }
+    $cursorSeed = [ordered]@{
+        version = 1
+        editor  = [ordered]@{ vimMode = $true }
+        hints   = $false
+    }
+    $cursorJson = $cursorSeed | ConvertTo-Json -Depth 3
+    [System.IO.File]::WriteAllText(
+        $SharedSeedPath,
+        $cursorJson,
+        (New-Object System.Text.UTF8Encoding($false))
+    )
+}
+
+function Test-ProcessSecretSharedSeed {
+    param($Adapter, [string]$SharedSeedPath, [string]$SeedTag)
+    if ($Adapter.id -ne 'cursor-cli') {
+        $seedAfter = (Get-Content -LiteralPath $SharedSeedPath -Raw -ErrorAction SilentlyContinue).Trim()
+        return $seedAfter -eq "$SeedTag-shared"
+    }
+    $cursorState = $null
+    try { $cursorState = Get-Content -LiteralPath $SharedSeedPath -Raw -ErrorAction Stop | ConvertFrom-Json }
+    catch { $cursorState = $null }
+    return $null -ne $cursorState -and
+        $cursorState.version -eq 1 -and
+        $cursorState.editor.vimMode -eq $true -and
+        $cursorState.hints -eq $false
+}
+
 function Test-ProcessSecretTool {
     param($Adapter, [System.Collections.IDictionary]$ToolEntry, [string]$Binary, $DirectVersion)
 
@@ -728,7 +762,7 @@ function Test-ProcessSecretTool {
     if ($sharedSeedRel) {
         $sharedSeedPath = Join-Path $sharedRoot ($sharedSeedRel -replace '/', '\')
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $sharedSeedPath) | Out-Null
-        Set-Content -LiteralPath $sharedSeedPath -Value "$seedTag-shared" -Encoding ASCII
+        Set-ProcessSecretSharedSeed -Adapter $Adapter -SharedSeedPath $sharedSeedPath -SeedTag $seedTag
     }
 
     if (-not (New-BothProfiles $Adapter $ToolEntry)) { return }
@@ -761,9 +795,14 @@ function Test-ProcessSecretTool {
         'account-a and account-b launched with different secret env values.'
 
     if ($sharedSeedRel) {
-        $seedAfter = (Get-Content -LiteralPath (Join-Path $sharedRoot ($sharedSeedRel -replace '/', '\')) -Raw -ErrorAction SilentlyContinue).Trim()
-        Add-Assertion $ToolEntry 'shared-state-seed-intact' ($seedAfter -eq "$seedTag-shared") `
+        $sharedSeedPath = Join-Path $sharedRoot ($sharedSeedRel -replace '/', '\')
+        $seedIntact = Test-ProcessSecretSharedSeed -Adapter $Adapter -SharedSeedPath $sharedSeedPath -SeedTag $seedTag
+        $detail = if ($Adapter.id -eq 'cursor-cli') {
+            "shared Cursor settings in '$sharedSeedRel' remained version=1, editor.vimMode=true, hints=false after both launches."
+        } else {
             "shared seed '$sharedSeedRel' intact after both launches."
+        }
+        Add-Assertion $ToolEntry 'shared-state-seed-intact' $seedIntact $detail
     }
 
     foreach ($name in @('account-a', 'account-b')) {
