@@ -181,7 +181,7 @@ jobs:
               exec bash tests/run-bats.sh
             '
           else
-            bash tests/run-bats.sh
+            env MULTICLI_MACOS_KEYCHAIN="$MULTICLI_CI_KEYCHAIN" bash tests/run-bats.sh
           fi
 
       - name: Run the real POSIX OS-user lifecycle
@@ -205,8 +205,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install coverage dependencies
         run: |
+          KCOV_VERSION=v40
+          KCOV_SHA256=5914803b8b84150b8c4a92f89d49edd870bf451d3d610040152d3cb31104b000
+          KCOV_ARCHIVE="$RUNNER_TEMP/kcov-amd64.tar.gz"
           sudo apt-get update -y
-          sudo apt-get install -y kcov bats jq libsecret-tools gnome-keyring dbus-x11 acl
+          sudo apt-get install -y bats jq libsecret-tools gnome-keyring dbus-x11 acl
+          curl -fsSL "https://github.com/SimonKagstrom/kcov/releases/download/$KCOV_VERSION/kcov-amd64.tar.gz" -o "$KCOV_ARCHIVE"
+          printf '%s  %s\n' "$KCOV_SHA256" "$KCOV_ARCHIVE" | sha256sum --check --strict
+          sudo tar -xzf "$KCOV_ARCHIVE" -C /
+          kcov --version
       - name: Enforce Bash coverage
         env:
           COVERAGE_BASELINE: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}

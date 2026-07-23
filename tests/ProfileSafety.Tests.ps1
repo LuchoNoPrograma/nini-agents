@@ -25,7 +25,10 @@ function Invoke-ProfileLauncher {
         MULTICLI_OVERRIDE_BINARY = (Get-Command powershell.exe).Source
     }.GetEnumerator()) { $startInfo.EnvironmentVariables[$entry.Key] = $entry.Value }
     $process = [System.Diagnostics.Process]::Start($startInfo)
-    if ($null -ne $StdinText) { $process.StandardInput.WriteLine($StdinText) }
+    if ($null -ne $StdinText) {
+        $inputBytes = [Text.Encoding]::UTF8.GetBytes($StdinText + "`n")
+        $process.StandardInput.BaseStream.Write($inputBytes, 0, $inputBytes.Length)
+    }
     $process.StandardInput.Close()
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()

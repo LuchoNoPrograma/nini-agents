@@ -209,11 +209,49 @@ write_security_stub_absent() {
   mkdir -p "$bin_dir"
   cat > "$bin_dir/security" <<'STUB'
 #!/usr/bin/env bash
+if [ -n "${SECURITY_ARGUMENT_CAPTURE:-}" ]; then
+  printf '%s\n' "$@" > "$SECURITY_ARGUMENT_CAPTURE"
+fi
 echo "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." >&2
 exit 44
 STUB
   chmod +x "$bin_dir/security"
   printf '%s\n' "$bin_dir"
+}
+
+@test "macos backend restricts every operation to the configured keychain" {
+  local bin_dir capture keychain
+  bin_dir="$(write_security_stub_absent)"
+  capture="$MULTICLI_SCRATCH/security-arguments"
+  keychain="$MULTICLI_SCRATCH/multicli-ci.keychain-db"
+
+  run env PATH="$bin_dir:$PATH" MULTICLI_PLATFORM=macos MULTICLI_MACOS_KEYCHAIN="$keychain" SECURITY_ARGUMENT_CAPTURE="$capture" bash -c '
+    source "$CRED_STORE_LIB"
+    "$1" "multi-cli/tests/absent/MCLI_BATS_TOKEN" "test-secret"
+  ' _ mc_cred_mac_present
+  [ "$status" -eq 1 ]
+  [ "$(tail -n 1 "$capture")" = "$keychain" ]
+
+  run env PATH="$bin_dir:$PATH" MULTICLI_PLATFORM=macos MULTICLI_MACOS_KEYCHAIN="$keychain" SECURITY_ARGUMENT_CAPTURE="$capture" bash -c '
+    source "$CRED_STORE_LIB"
+    "$1" "multi-cli/tests/absent/MCLI_BATS_TOKEN" "test-secret"
+  ' _ mc_cred_mac_set
+  [ "$status" -eq 44 ]
+  [ "$(tail -n 1 "$capture")" = "$keychain" ]
+
+  run env PATH="$bin_dir:$PATH" MULTICLI_PLATFORM=macos MULTICLI_MACOS_KEYCHAIN="$keychain" SECURITY_ARGUMENT_CAPTURE="$capture" bash -c '
+    source "$CRED_STORE_LIB"
+    "$1" "multi-cli/tests/absent/MCLI_BATS_TOKEN" "test-secret"
+  ' _ mc_cred_mac_get
+  [ "$status" -eq 1 ]
+  [ "$(tail -n 1 "$capture")" = "$keychain" ]
+
+  run env PATH="$bin_dir:$PATH" MULTICLI_PLATFORM=macos MULTICLI_MACOS_KEYCHAIN="$keychain" SECURITY_ARGUMENT_CAPTURE="$capture" bash -c '
+    source "$CRED_STORE_LIB"
+    "$1" "multi-cli/tests/absent/MCLI_BATS_TOKEN" "test-secret"
+  ' _ mc_cred_mac_clear
+  [ "$status" -eq 0 ]
+  [ "$(tail -n 1 "$capture")" = "$keychain" ]
 }
 
 @test "macos backend treats an absent item as not-present (not an error)" {

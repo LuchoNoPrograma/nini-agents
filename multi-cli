@@ -46,7 +46,7 @@ platform() {
   case "$raw" in
     darwin|macos|mac|osx) printf 'macos\n' ;;
     linux)                printf 'linux\n' ;;
-    mingw*|msys*|cygwin*) printf 'windows\n' ;;
+    mingw*|msys*|cygwin*|windows*) printf 'windows\n' ;;
     *)                    abort "unsupported platform '$raw'" ;;
   esac
 }

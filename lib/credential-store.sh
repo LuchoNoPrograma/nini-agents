@@ -160,10 +160,11 @@ mc_cred_mac_require_security() {
 }
 
 mc_cred_mac_present() {
-  local target="$1" rc=0 errors
+  local target="$1" rc=0 errors keychain_args=()
   mc_cred_mac_require_security
+  [ -n "${MULTICLI_MACOS_KEYCHAIN:-}" ] && keychain_args=("$MULTICLI_MACOS_KEYCHAIN")
   # stderr is captured for the not-found check; stdout holds no diagnostics.
-  errors="$(security find-generic-password -s "$target" -a multicli 2>&1 >/dev/null)" || rc=$?
+  errors="$(security find-generic-password -s "$target" -a multicli "${keychain_args[@]+"${keychain_args[@]}"}" 2>&1 >/dev/null)" || rc=$?
   case "$rc" in
     0) return 0 ;;
     *)
@@ -175,29 +176,35 @@ mc_cred_mac_present() {
 }
 
 mc_cred_mac_set() {
-  local target="$1" secret="$2"
+  local target="$1" secret="$2" keychain_args=()
   mc_cred_mac_require_security
+  [ -n "${MULTICLI_MACOS_KEYCHAIN:-}" ] && keychain_args=("$MULTICLI_MACOS_KEYCHAIN")
   # `security` has no stdin secret channel; -U updates an existing item.
-  security add-generic-password -s "$target" -a multicli -w "$secret" -U >/dev/null
+  security add-generic-password -s "$target" -a multicli -w "$secret" -U \
+    "${keychain_args[@]+"${keychain_args[@]}"}" >/dev/null
 }
 
 mc_cred_mac_get() {
-  local target="$1" rc=0
+  local target="$1" rc=0 keychain_args=()
   mc_cred_mac_require_security
+  [ -n "${MULTICLI_MACOS_KEYCHAIN:-}" ] && keychain_args=("$MULTICLI_MACOS_KEYCHAIN")
   mc_cred_mac_present "$target" || rc=$?
   case "$rc" in
-    0) security find-generic-password -s "$target" -a multicli -w ;;
+    0) security find-generic-password -s "$target" -a multicli -w \
+         "${keychain_args[@]+"${keychain_args[@]}"}" ;;
     1) return 1 ;;
     *) return "$rc" ;;
   esac
 }
 
 mc_cred_mac_clear() {
-  local target="$1" rc=0
+  local target="$1" rc=0 keychain_args=()
   mc_cred_mac_require_security
+  [ -n "${MULTICLI_MACOS_KEYCHAIN:-}" ] && keychain_args=("$MULTICLI_MACOS_KEYCHAIN")
   mc_cred_mac_present "$target" || rc=$?
   case "$rc" in
-    0) security delete-generic-password -s "$target" -a multicli >/dev/null ;;
+    0) security delete-generic-password -s "$target" -a multicli \
+         "${keychain_args[@]+"${keychain_args[@]}"}" >/dev/null ;;
     1) return 0 ;;
     *) return "$rc" ;;
   esac

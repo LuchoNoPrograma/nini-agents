@@ -241,9 +241,12 @@ JSON
   [[ "$output" == *"share.linkable path 'auth.json' overlaps share.neverLink path 'auth.json'"* ]]
 }
 
-@test "macOS platform normalization matches schema binary keys" {
+@test "platform normalization matches schema binary keys" {
   run bash -c "set -- help; source '$MULTICLI_BIN' >/dev/null 2>&1; MULTICLI_PLATFORM=darwin platform"
-
   [ "$status" -eq 0 ]
   [ "$output" = "macos" ]
+
+  run bash -c "set -- help; source '$MULTICLI_BIN' >/dev/null 2>&1; MULTICLI_PLATFORM=windows platform"
+  [ "$status" -eq 0 ]
+  [ "$output" = "windows" ]
 }
