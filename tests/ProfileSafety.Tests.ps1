@@ -26,13 +26,10 @@ function Invoke-ProfileLauncher {
     }.GetEnumerator()) { $startInfo.EnvironmentVariables[$entry.Key] = $entry.Value }
     $process = [System.Diagnostics.Process]::Start($startInfo)
     if ($null -ne $StdinText) {
-        $inputWriter = New-Object IO.StreamWriter($process.StandardInput.BaseStream, (New-Object Text.UTF8Encoding($false)))
-        $inputWriter.NewLine = "`n"
-        $inputWriter.WriteLine($StdinText)
-        $inputWriter.Close()
-    } else {
-        $process.StandardInput.Close()
+        $inputBytes = (New-Object Text.UTF8Encoding($false)).GetBytes($StdinText + "`n")
+        $process.StandardInput.BaseStream.Write($inputBytes, 0, $inputBytes.Length)
     }
+    $process.StandardInput.Close()
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
     $timedOut = -not $process.WaitForExit($TimeoutSeconds * 1000)
