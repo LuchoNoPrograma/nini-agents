@@ -288,9 +288,10 @@ JSON
   [ -f "$dest/history.jsonl" ]
   # The hardlink itself never materialized in the destination.
   [ ! -e "$dest/sessions/2026/06/11/innocent.jsonl" ]
-  # No file anywhere under dest carries the credential marker (exactly 0 matches).
-  local hits; hits="$(grep -rl "$marker" "$dest" 2>/dev/null | wc -l | tr -d ' ')"
-  [ "$hits" -eq 0 ]
+  # No file anywhere under dest carries the credential marker.
+  run grep -rl "$marker" "$dest"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
 }
 
 # --- awkward filenames --------------------------------------------------------
