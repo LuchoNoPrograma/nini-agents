@@ -230,12 +230,8 @@ function New-OsUserAccount {
     param([string]$Username, [string]$Password, [string]$Tool)
     $output = Invoke-OsUserNative -FilePath net.exe -NativeArgs @('user', $Username, $Password, '/add', '/expires:never', '/passwordchg:no')
     if ($LASTEXITCODE -ne 0) { throw "Failed to create OS user '$Username': $output" }
-    $output = Invoke-OsUserNative -FilePath net.exe -NativeArgs @('localgroup', 'Users', $Username, '/add')
-    # 1378 = already a member: net user /add already joins Users, which is the
-    # intended default membership. Anything else is fatal.
-    if ($LASTEXITCODE -ne 0 -and "$output" -notmatch '1378') {
-        throw "Failed to add OS user '$Username' to the default Users group: $output"
-    }
+    # net user /add assigns the default local Users membership. Avoid passing
+    # the localized group name to net localgroup on non-English Windows.
     $output = Invoke-OsUserNative -FilePath net.exe -NativeArgs @('user', $Username, "/comment:multi-cli owned sandbox user for $Tool")
     if ($LASTEXITCODE -ne 0) { throw "Failed to mark OS user '$Username' as multi-cli-owned: $output" }
 }
@@ -367,6 +363,154 @@ function Get-OsUserSandboxHome {
         # Unknown user or no ProfileList entry: both mean "no home yet".
     }
     return $null
+}
+
+function New-OsUserAppxError {
+    param([string]$Target, [string]$Username, [string]$Phase, [string]$Detail)
+    $message = "Code: unsupported_appx_secondary_user`nCodex GUI AppX launch failed.`nPackage: $Target`nUser: $Username`nPhase: $Phase`nError: $Detail`nNormal user state modified: false"
+    return New-Object InvalidOperationException($message)
+}
+
+# Register and activate the Store package inside the owned user's profile.
+# The parent accepts success only when the returned PID has the expected SID
+# and remains in the initiating interactive session.
+function Invoke-OsUserAppxLaunch {
+    param(
+        [string]$Username,
+        [string]$CredentialTarget,
+        [string]$ProfileDir,
+        [string]$Target,
+        [int]$TimeoutSeconds = 120
+    )
+    if ($Target -notmatch '^appx:([^!]+)!(.+)$') {
+        throw (New-OsUserAppxError -Target $Target -Username $Username -Phase 'resolve' -Detail 'The AppX target must contain a package family and application id.')
+    }
+    $packageFamilyName = $Matches[1]
+    $aumid = "$packageFamilyName!$($Matches[2])"
+    $expectedSessionId = (Get-Process -Id $PID -ErrorAction Stop).SessionId
+    if ($expectedSessionId -le 0) {
+        throw (New-OsUserAppxError -Target $aumid -Username $Username -Phase 'session-check' -Detail 'The launcher is not in an interactive Windows session.')
+    }
+
+    $scriptPath = Join-Path $ProfileDir '.osuser-appx.ps1'
+    $resultPath = Join-Path $ProfileDir '.osuser-appx.json'
+    Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+    $familyLiteral = $packageFamilyName.Replace("'", "''")
+    $aumidLiteral = $aumid.Replace("'", "''")
+    $resultLiteral = $resultPath.Replace("'", "''")
+    $script = @"
+`$ErrorActionPreference = 'Stop'
+`$phase = 'register'
+try {
+    `$package = Get-AppxPackage -PackageTypeFilter Main -ErrorAction SilentlyContinue |
+        Where-Object { `$_.PackageFamilyName -eq '$familyLiteral' } | Select-Object -First 1
+    if (-not `$package) {
+        Add-AppxPackage -RegisterByFamilyName -MainPackage '$familyLiteral' -ErrorAction Stop
+        `$package = Get-AppxPackage -PackageTypeFilter Main -ErrorAction Stop |
+            Where-Object { `$_.PackageFamilyName -eq '$familyLiteral' } | Select-Object -First 1
+    }
+    if (-not `$package -or "`$(`$package.Status)" -ne 'Ok') { throw 'AppX registration is not healthy.' }
+
+    `$phase = 'activate'
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+[ComImport, Guid("2E941141-7F97-4756-BA1D-9DECDE894A3D"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IApplicationActivationManager {
+    [PreserveSig]
+    int ActivateApplication(
+        [MarshalAs(UnmanagedType.LPWStr)] string aumid,
+        [MarshalAs(UnmanagedType.LPWStr)] string arguments,
+        int options,
+        out uint processId);
+}
+
+public static class MultiCliAppxLauncher {
+    [DllImport("ole32.dll", PreserveSig = true)]
+    private static extern int CoCreateInstance(
+        ref Guid classId, IntPtr outer, uint context, ref Guid interfaceId,
+        [MarshalAs(UnmanagedType.Interface)] out IApplicationActivationManager manager);
+
+    public static uint Activate(string aumid) {
+        Guid classId = new Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C");
+        Guid interfaceId = new Guid("2E941141-7F97-4756-BA1D-9DECDE894A3D");
+        IApplicationActivationManager manager;
+        Marshal.ThrowExceptionForHR(CoCreateInstance(ref classId, IntPtr.Zero, 4, ref interfaceId, out manager));
+        uint processId;
+        Marshal.ThrowExceptionForHR(manager.ActivateApplication(aumid, null, 0, out processId));
+        return processId;
+    }
+}
+'@
+    [uint32]`$processId = [MultiCliAppxLauncher]::Activate('$aumidLiteral')
+    @{ processId = `$processId } | ConvertTo-Json | Set-Content -LiteralPath '$resultLiteral' -Encoding UTF8
+} catch {
+    @{ phase = `$phase; error = `$_.Exception.Message; hresult = `$_.Exception.HResult } |
+        ConvertTo-Json | Set-Content -LiteralPath '$resultLiteral' -Encoding UTF8
+    exit 1
+}
+"@
+    Set-Content -LiteralPath $scriptPath -Value $script -Encoding UTF8
+
+    try {
+        $helper = Start-OsUserWrapperProcess -Username $Username -CredentialTarget $CredentialTarget -WrapperPath $scriptPath
+    } catch {
+        throw (New-OsUserAppxError -Target $aumid -Username $Username -Phase 'register' -Detail $_.Exception.Message)
+    }
+    if (-not $helper) {
+        throw (New-OsUserAppxError -Target $aumid -Username $Username -Phase 'register' -Detail 'The owned-user helper did not start.')
+    }
+    $waitMilliseconds = [Math]::Min([Math]::Max($TimeoutSeconds, 1), 120) * 1000
+    if (-not $helper.WaitForExit($waitMilliseconds)) {
+        throw (New-OsUserAppxError -Target $aumid -Username $Username -Phase 'activate' -Detail 'The owned-user helper timed out.')
+    }
+    if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+        throw (New-OsUserAppxError -Target $aumid -Username $Username -Phase 'activate' -Detail 'The owned-user helper returned no result.')
+    }
+    try {
+        $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+    } catch {
+        throw (New-OsUserAppxError -Target $aumid -Username $Username -Phase 'activate' -Detail 'The owned-user helper returned an invalid result.')
+    }
+    $errorText = [string](Get-OsUserProperty -Object $result -Name 'error')
+    $processId = Get-OsUserProperty -Object $result -Name 'processId'
+    if ($errorText -or -not $processId) {
+        $phase = [string](Get-OsUserProperty -Object $result -Name 'phase')
+        if (-not $phase) { $phase = 'activate' }
+        if (-not $errorText) { $errorText = 'The owned-user helper returned no process ID.' }
+        throw (New-OsUserAppxError -Target $aumid -Username $Username -Phase $phase -Detail $errorText)
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Min([Math]::Max($TimeoutSeconds, 1), 15))
+    do {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" -ErrorAction SilentlyContinue
+        if ($process) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    $owner = if ($process) { Invoke-CimMethod -InputObject $process -MethodName GetOwnerSid -ErrorAction SilentlyContinue } else { $null }
+    $expectedSid = (New-Object Security.Principal.NTAccount($Username)).Translate([Security.Principal.SecurityIdentifier]).Value
+    if (-not $owner -or $owner.ReturnValue -ne 0 -or $owner.Sid -ne $expectedSid) {
+        throw (New-OsUserAppxError -Target $aumid -Username $Username -Phase 'owner-check' -Detail 'The activated process does not belong to the owned user.')
+    }
+    if ([int]$process.SessionId -ne $expectedSessionId) {
+        throw (New-OsUserAppxError -Target $aumid -Username $Username -Phase 'session-check' -Detail "The activated process used session $($process.SessionId), expected $expectedSessionId.")
+    }
+
+    do {
+        $guiProcess = Get-Process -Id $processId -ErrorAction SilentlyContinue
+        if ($guiProcess -and -not $guiProcess.HasExited -and $guiProcess.MainWindowHandle -ne 0) { break }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $guiProcess -or $guiProcess.HasExited -or $guiProcess.MainWindowHandle -eq 0) {
+        throw (New-OsUserAppxError -Target $aumid -Username $Username -Phase 'activate' -Detail 'The activated process did not produce a visible GUI window.')
+    }
+    Start-Sleep -Milliseconds 1000
+    $guiProcess = Get-Process -Id $processId -ErrorAction SilentlyContinue
+    if (-not $guiProcess -or $guiProcess.HasExited -or $guiProcess.MainWindowHandle -eq 0) {
+        throw (New-OsUserAppxError -Target $aumid -Username $Username -Phase 'activate' -Detail 'The activated GUI process exited before launch verification completed.')
+    }
+    return 0
 }
 
 # --- Launch --------------------------------------------------------------------
@@ -518,7 +662,7 @@ function Start-OsUserWrapperProcess {
     $credential = New-OsUserCredential -Username $Username -CredentialTarget $CredentialTarget
     $powershellPath = Join-Path $PSHOME 'powershell.exe'
     $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$WrapperPath`""
-    return Start-Process -FilePath $powershellPath -ArgumentList $arguments -Credential $credential -LoadUserProfile -PassThru
+    return Start-Process -FilePath $powershellPath -ArgumentList $arguments -Credential $credential -LoadUserProfile -PassThru -WindowStyle Hidden
 }
 
 # Materialize the user's Windows profile through a credential-bound no-op.
@@ -568,7 +712,9 @@ function Invoke-OsUserLaunch {
         [int]$TimeoutSeconds = 7200
     )
     $username = Initialize-OsUserIsolation -Adapter $Adapter -ProfileDir $ProfileDir
-    Assert-OsUserElevated -Tool $Adapter.id -ProfileName (Split-Path $ProfileDir -Leaf)
+    if ($Binary -like 'appx:*') {
+        return Invoke-OsUserAppxLaunch -Username $username -CredentialTarget (Get-OsUserCredentialTarget -Username $username) -ProfileDir $ProfileDir -Target $Binary -TimeoutSeconds ([Math]::Min($TimeoutSeconds, 120))
+    }
     if (-not $SandboxHome) {
         $SandboxHome = Get-OsUserSandboxHome -Username $username
         if (-not $SandboxHome) {
@@ -587,6 +733,7 @@ function Invoke-OsUserLaunch {
     $normalState = Get-OsUserProperty -Object $Adapter -Name 'normalState'
     $declared = @(Get-OsUserProperty -Object $normalState -Name 'sharedPaths') + @(Get-OsUserProperty -Object $normalState -Name 'sessionPaths') | Where-Object { $_ }
     if (@($declared).Count -gt 0) {
+        Assert-OsUserElevated -Tool $Adapter.id -ProfileName (Split-Path $ProfileDir -Leaf)
         New-Item -ItemType Directory -Force -Path $plan.SharedRoot | Out-Null
         Add-OsUserStateLinks -Adapter $Adapter -SharedRoot $plan.SharedRoot -SandboxRoot $plan.SandboxRoot
         Grant-OsUserAccess -Path $plan.SharedRoot -Username $username

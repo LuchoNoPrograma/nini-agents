@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  multi-cli.ps1 -- Run multiple sandboxed profiles of any supported AI CLI or IDE.
+  multi-cli.ps1 -- Run multiple sandboxed profiles of supported CLIs, IDEs, and GUI apps.
 
 .DESCRIPTION
   Adapter-driven launcher: each supported tool ships an adapter.json describing
@@ -134,17 +134,20 @@ function Test-UriBinary {
 }
 
 function Get-AppxAdapterBinary {
-    param([string]$PackageFamilyName)
-    $package = Get-AppxPackage -PackageTypeFilter Main -ErrorAction SilentlyContinue |
-        Where-Object { $_.PackageFamilyName -eq $PackageFamilyName } |
+    param([string]$PackageTarget)
+    if ($PackageTarget -notmatch '^([^!]+)!(.+)$') { return $null }
+    $packageName = $Matches[1]
+    $applicationId = $Matches[2]
+    $package = Get-AppxPackage -Name $packageName -PackageTypeFilter Main -ErrorAction SilentlyContinue |
+        Where-Object { $_.SignatureKind -eq 'Store' } |
+        Sort-Object Version -Descending |
         Select-Object -First 1
     if ($null -eq $package) { return $null }
     $manifest = Get-AppxPackageManifest -Package $package
-    $application = @($manifest.Package.Applications.Application) | Select-Object -First 1
-    if ($null -eq $application -or [string]::IsNullOrWhiteSpace([string]$application.Executable)) { return $null }
-    $executable = Join-Path $package.InstallLocation ([string]$application.Executable)
-    if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { return $null }
-    return $executable
+    $application = @($manifest.Package.Applications.Application) |
+        Where-Object { $_.Id -eq $applicationId } | Select-Object -First 1
+    if ($null -eq $application) { return $null }
+    return "appx:$($package.PackageFamilyName)!$applicationId"
 }
 
 function Find-AdapterBinary {
@@ -154,7 +157,7 @@ function Find-AdapterBinary {
     if ($Adapter.binary.windows) { $candidates += $Adapter.binary.windows }
     foreach ($candidate in $candidates) {
         if ($candidate -like 'appx:*') {
-            $appxBinary = Get-AppxAdapterBinary -PackageFamilyName $candidate.Substring(5)
+            $appxBinary = Get-AppxAdapterBinary -PackageTarget $candidate.Substring(5)
             if ($appxBinary) { return $appxBinary }
             continue
         }
@@ -188,6 +191,12 @@ function Get-ObjectPropertySafe {
     $property = $Object.PSObject.Properties[$Name]
     if ($property) { return $property.Value }
     return $null
+}
+
+function Test-AdapterNeedsOsUser {
+    param($Adapter)
+    $account = Get-ObjectPropertySafe -Object $Adapter -Name 'account'
+    return (Get-ObjectPropertySafe -Object $account -Name 'mechanism') -eq 'osUserCredentialStore'
 }
 
 function Get-AdapterSystemHome {
@@ -693,6 +702,9 @@ function New-Profile {
     $profileDir = Get-ProfileDir $p.Tool $p.Name
 
     if ($Shared -and $Isolated) { throw '--shared and --isolated are mutually exclusive: choose one profile mode.' }
+    if ($Isolated -and (Test-AdapterNeedsOsUser -Adapter $adapter)) {
+        throw "Adapter '$($adapter.id)' cannot use --isolated because folder redirection does not isolate Windows Credential Manager."
+    }
     if ($Isolated -and $adapter.isolation.strategy -ne 'accountOverlay') {
         throw "--isolated applies to schema-v2 (accountOverlay) adapters; '$($p.Tool)' uses '$($adapter.isolation.strategy)', which already isolates the whole root per profile."
     }
@@ -1030,6 +1042,9 @@ function Invoke-Launch {
     # Isolated profiles share nothing: the profile dir is the tool's whole
     # root, so the account-overlay runtime (shared links, overlay) is bypassed.
     if ($adapter.isolation.strategy -eq 'accountOverlay' -and (Test-Path -LiteralPath (Join-Path $profileDir '.isolated'))) {
+        if (Test-AdapterNeedsOsUser -Adapter $adapter) {
+            throw "Profile '$Spec' cannot use --isolated because folder redirection does not isolate Windows Credential Manager."
+        }
         Write-Host "Launching $($adapter.displayName) profile '$Spec' [$($adapter.isolation.strategy), isolated]"
         Invoke-LaunchIsolated -Adapter $adapter -ProfileDir $profileDir -Binary $binary -BinaryArgs $BinaryArgs
         return
@@ -1651,7 +1666,7 @@ function Invoke-Migrate {
 
 function Show-Help {
 @"
-multi-cli $VERSION -- sandboxed profiles for AI CLIs and agent IDEs
+multi-cli $VERSION -- sandboxed profiles for CLIs, IDEs, and GUI apps
 
 USAGE
   multi-cli <command> [args]

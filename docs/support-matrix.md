@@ -19,7 +19,7 @@
 | `copilot-cli` | GitHub Copilot CLI | per-process `COPILOT_GITHUB_TOKEN` | Copilot configuration and session state | supported (process token via `multi-cli auth set`; `GH_TOKEN`/`GITHUB_TOKEN` cleared) | supported | supported |
 | `copilot-vscode` | Copilot in VS Code | separate OS user (GitHub auth in the OS store) | none | supported (Windows OS-user isolation; elevated terminal) | unsupported — owned-user GUI/Keychain session is not proven | unsupported — owned-user GUI/Secret Service session is not implemented |
 | `kimi-cli` | Kimi Code CLI direct provider | per-process `KIMI_MODEL_API_KEY` | documented config files | supported (process token via `multi-cli auth set`) | supported | supported |
-| `codex-gui` | Codex desktop app | OS-user isolation | none | supported (Store app; Windows OS-user isolation; elevated terminal) | unsupported — owned-user GUI/Keychain session is not proven | unsupported — no desktop Codex app on Linux |
+| `codex-gui` | Codex desktop GUI | owned Windows user | none | supported (Store AppX activation; first launch elevated) | unsupported; owned-user GUI/Keychain session is not proven | unsupported; no desktop Codex app on Linux |
 | `grok-cli` | Grok Build CLI/TUI | per-process `XAI_API_KEY` with precedence preconditions | documented config/sandbox state | supported (process token via `multi-cli auth set`; the shared config must not pin `model.api_key`) | supported | supported |
 
 There is no separately supported first-party Grok Build desktop GUI in the sources reviewed. `grok-cli` covers the official CLI, fullscreen TUI/dashboard, headless mode, and ACP surface.

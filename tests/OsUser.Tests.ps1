@@ -628,7 +628,7 @@ Describe 'internal validation failures' {
 }
 
 Describe 'native account and ACL orchestration' {
-    It 'creates, groups, and marks the owned account with exact native arguments' {
+    It 'creates and marks the owned account with exact native arguments' {
         $calls = Invoke-OsUserShimmed {
             $script:NativeCalls = New-Object 'System.Collections.Generic.List[string]'
             function script:Invoke-OsUserNative {
@@ -640,33 +640,15 @@ Describe 'native account and ACL orchestration' {
             New-OsUserAccount -Username 'mcli_test000000' -Password 'Secret-123' -Tool 'fixture'
             return @($script:NativeCalls)
         }
-        @($calls).Count | Should Be 3
+        @($calls).Count | Should Be 2
         $calls[0] | Should Be 'net.exe|user|mcli_test000000|Secret-123|/add|/expires:never|/passwordchg:no'
-        $calls[1] | Should Be 'net.exe|localgroup|Users|mcli_test000000|/add'
-        $calls[2] | Should Be 'net.exe|user|mcli_test000000|/comment:multi-cli owned sandbox user for fixture'
+        $calls[1] | Should Be 'net.exe|user|mcli_test000000|/comment:multi-cli owned sandbox user for fixture'
     }
 
-    It 'accepts net.exe 1378 for default Users membership' {
-        $count = Invoke-OsUserShimmed {
-            $script:NativeIndex = 0
-            function script:Invoke-OsUserNative {
-                param([string]$FilePath, [string[]]$NativeArgs)
-                $script:NativeIndex++
-                if ($script:NativeIndex -eq 2) { $global:LASTEXITCODE = 2; return 'System error 1378 has occurred.' }
-                $global:LASTEXITCODE = 0
-                return ''
-            }
-            New-OsUserAccount -Username 'mcli_test000000' -Password 'Secret-123' -Tool 'fixture'
-            return $script:NativeIndex
-        }
-        $count | Should Be 3
-    }
-
-    It 'surfaces account creation, group, and ownership-marker failures' {
+    It 'surfaces account creation and ownership-marker failures' {
         foreach ($failure in @(
             [pscustomobject]@{ Index = 1; Fragment = "Failed to create OS user 'mcli_test000000': create denied" },
-            [pscustomobject]@{ Index = 2; Fragment = "Failed to add OS user 'mcli_test000000' to the default Users group: group denied" },
-            [pscustomobject]@{ Index = 3; Fragment = "Failed to mark OS user 'mcli_test000000' as multi-cli-owned: comment denied" }
+            [pscustomobject]@{ Index = 2; Fragment = "Failed to mark OS user 'mcli_test000000' as multi-cli-owned: comment denied" }
         )) {
             Assert-ThrownContains {
                 Invoke-OsUserShimmed {
@@ -677,7 +659,7 @@ Describe 'native account and ACL orchestration' {
                         $script:NativeIndex++
                         if ($script:NativeIndex -eq $failAt) {
                             $global:LASTEXITCODE = 1
-                            return @('create denied', 'group denied', 'comment denied')[$failAt - 1]
+                            return @('create denied', 'comment denied')[$failAt - 1]
                         }
                         $global:LASTEXITCODE = 0
                         return ''
@@ -984,6 +966,145 @@ Describe 'sandbox-home bootstrap orchestration' {
 }
 
 Describe 'launch execution orchestration' {
+    It 'routes AppX targets through the owned-user launcher' {
+        $scratch = New-OsUserScratch
+        try {
+            $capture = Invoke-OsUserShimmed {
+                param($adapter, $profileDir)
+                function script:Initialize-OsUserIsolation { return 'mcli_fcfb4582f558' }
+                function script:Invoke-OsUserAppxLaunch {
+                    param($Username, $CredentialTarget, $ProfileDir, $Target, $TimeoutSeconds)
+                    $script:AppxCall = "$Username|$CredentialTarget|$Target"
+                    return 0
+                }
+                function script:Get-OsUserLaunchPlan { throw 'generic launch plan must not run for AppX' }
+                $exitCode = Invoke-OsUserLaunch -Adapter $adapter -ProfileDir $profileDir -Binary 'appx:OpenAI.Codex_2p2nqsd0c76g0!App' -BinaryArgs @()
+                [pscustomobject]@{ ExitCode = $exitCode; Call = $script:AppxCall }
+            } @((Get-OsUserFixtureAdapter), $scratch.ProfileDir)
+
+            $capture.ExitCode | Should Be 0
+            $capture.Call | Should Be "$script:FixtureUsername|multi-cli/osuser/$script:FixtureUsername|appx:OpenAI.Codex_2p2nqsd0c76g0!App"
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'accepts only the owned SID and initiating session from AppX activation' {
+        $scratch = New-OsUserScratch
+        $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        try {
+            $messages = Invoke-OsUserShimmed {
+                param($username, $expectedSid, $profileDir)
+                $script:AppxCase = 'success'
+                function script:Get-Process {
+                    param($Id)
+                    if ($Id -eq $PID) { return [pscustomobject]@{ SessionId = 2 } }
+                    return [pscustomobject]@{ HasExited = $false; MainWindowHandle = 1 }
+                }
+                function script:Start-Sleep {}
+                function script:Start-OsUserWrapperProcess {
+                    @{ processId = 4321 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $profileDir '.osuser-appx.json') -Encoding UTF8
+                    $waiter = New-Object psobject
+                    $waiter | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($milliseconds) return $true }
+                    return $waiter
+                }
+                function script:Get-CimInstance {
+                    $script:CimCalls++
+                    if ($script:AppxCase -eq 'success' -and $script:CimCalls -eq 1) { return $null }
+                    $session = if ($script:AppxCase -eq 'session') { 9 } else { 2 }
+                    return [pscustomobject]@{ ProcessId = 4321; SessionId = $session }
+                }
+                function script:Invoke-CimMethod {
+                    $sid = if ($script:AppxCase -eq 'owner') { 'S-1-0-0' } else { $expectedSid }
+                    return [pscustomobject]@{ ReturnValue = 0; Sid = $sid }
+                }
+
+                $target = 'appx:OpenAI.Codex_2p2nqsd0c76g0!App'
+                $outcomes = New-Object 'System.Collections.Generic.List[string]'
+                foreach ($case in @('success', 'owner', 'session')) {
+                    $script:AppxCase = $case
+                    $script:CimCalls = 0
+                    try {
+                        $code = Invoke-OsUserAppxLaunch -Username $username -CredentialTarget 'fixture' -ProfileDir $profileDir -Target $target
+                        $outcomes.Add("$case|$code|$script:CimCalls")
+                    } catch {
+                        $outcomes.Add("$case|$($_.Exception.Message)")
+                    }
+                }
+                return @($outcomes)
+            } @($currentUser, $currentSid, $scratch.ProfileDir)
+
+            $messages[0] | Should Be 'success|0|2'
+            $messages[1] | Should Match '(?s)owner\|.*Phase: owner-check'
+            $messages[2] | Should Match '(?s)session\|.*Phase: session-check'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'fails closed when the owned-user AppX helper cannot be trusted' {
+        $scratch = New-OsUserScratch
+        $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        try {
+            $messages = Invoke-OsUserShimmed {
+                param($username, $expectedSid, $profileDir)
+                function script:Get-Process {
+                    param($Id)
+                    if ($Id -ne $PID) {
+                        $script:GuiCalls++
+                        if ($script:FailureCase -eq 'no-window') { return [pscustomobject]@{ HasExited = $false; MainWindowHandle = 0 } }
+                        return [pscustomobject]@{ HasExited = ($script:GuiCalls -gt 1); MainWindowHandle = 1 }
+                    }
+                    if ($script:FailureCase -eq 'session') { return [pscustomobject]@{ SessionId = 0 } }
+                    return [pscustomobject]@{ SessionId = 2 }
+                }
+                function script:Start-Sleep {}
+                function script:Start-OsUserWrapperProcess {
+                    if ($script:FailureCase -eq 'start-throws') { throw 'logon denied' }
+                    if ($script:FailureCase -eq 'start-null') { return $null }
+                    $resultPath = Join-Path $profileDir '.osuser-appx.json'
+                    if ($script:FailureCase -eq 'invalid-result') { Set-Content -LiteralPath $resultPath -Value '{bad' -Encoding UTF8 }
+                    if ($script:FailureCase -eq 'error-result') { @{ error = 'activation failed' } | ConvertTo-Json | Set-Content -LiteralPath $resultPath -Encoding UTF8 }
+                    if ($script:FailureCase -in @('no-process', 'no-window', 'short-lived')) { @{ processId = 4321 } | ConvertTo-Json | Set-Content -LiteralPath $resultPath -Encoding UTF8 }
+                    if ($script:FailureCase -eq 'no-pid') { @{ phase = 'activate' } | ConvertTo-Json | Set-Content -LiteralPath $resultPath -Encoding UTF8 }
+                    $waiter = [pscustomobject]@{ Completed = ($script:FailureCase -ne 'timeout') }
+                    $waiter | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($milliseconds) return $this.Completed }
+                    return $waiter
+                }
+                function script:Get-CimInstance {
+                    if ($script:FailureCase -eq 'no-process') { return $null }
+                    return [pscustomobject]@{ ProcessId = 4321; SessionId = 2 }
+                }
+                function script:Invoke-CimMethod { [pscustomobject]@{ ReturnValue = 0; Sid = $expectedSid } }
+
+                $outcomes = New-Object 'System.Collections.Generic.List[string]'
+                foreach ($case in @('target', 'session', 'start-throws', 'start-null', 'timeout', 'no-result', 'invalid-result', 'error-result', 'no-pid', 'no-process', 'no-window', 'short-lived')) {
+                    $script:FailureCase = $case
+                    $script:GuiCalls = 0
+                    $target = if ($case -eq 'target') { 'appx:invalid' } else { 'appx:OpenAI.Codex_2p2nqsd0c76g0!App' }
+                    try {
+                        Invoke-OsUserAppxLaunch -Username $username -CredentialTarget 'fixture' -ProfileDir $profileDir -Target $target -TimeoutSeconds 1 | Out-Null
+                    } catch {
+                        $outcomes.Add("$case|$($_.Exception.Message)")
+                    }
+                }
+                return @($outcomes)
+            } @($currentUser, $currentSid, $scratch.ProfileDir)
+
+            $joined = $messages -join "`n"
+            $joined | Should Match '(?s)target\|.*package family and application id'
+            $joined | Should Match '(?s)session\|.*not in an interactive Windows session'
+            $joined | Should Match '(?s)start-throws\|.*logon denied'
+            $joined | Should Match '(?s)start-null\|.*did not start'
+            $joined | Should Match '(?s)timeout\|.*timed out'
+            $joined | Should Match '(?s)no-result\|.*returned no result'
+            $joined | Should Match '(?s)invalid-result\|.*invalid result'
+            $joined | Should Match '(?s)error-result\|.*activation failed'
+            $joined | Should Match '(?s)no-pid\|.*returned no process ID'
+            $joined | Should Match '(?s)no-process\|.*does not belong to the owned user'
+            $joined | Should Match '(?s)no-window\|.*did not produce a visible GUI window'
+            $joined | Should Match '(?s)short-lived\|.*exited before launch verification completed'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
     It 'returns zero for a detached launch that starts under the owned user' {
         $scratch = New-OsUserScratch
         try {

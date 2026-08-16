@@ -1,6 +1,6 @@
-# codex-gui — Codex desktop app
+# codex-gui - Codex GUI
 
-**Account boundary:** an owned OS user separates the app's `.codex` authentication, configuration, and session state.
+Codex GUI is the desktop application, not an IDE. On Windows, an owned OS user separates Credential Manager, AppX data, and the user's `.codex` state.
 
 OpenAI ships the Codex app for Windows and macOS. The app and native Codex CLI share the user's `.codex` tree; running the app as a profile-owned user gives each profile a separate credential and data namespace.
 
@@ -21,7 +21,7 @@ multi-cli new codex-gui/work
 multi-cli launch codex-gui/work
 ```
 
-The first launch requires an elevated terminal on Windows so multi-cli can provision the owned user. The macOS app is available, but multi-cli does not claim account isolation there until an owned-user GUI/Keychain session is proven. If the app is absent, `multi-cli` reports the install source instead of starting a placeholder executable.
+The first launch requires an elevated terminal so multi-cli can provision the owned Windows user. Later launches use that stored identity. The launcher registers the Store package for that user and activates its AppX application instead of copying or directly running the protected package executable.
 
 ## Account boundary
 
@@ -34,10 +34,13 @@ The first launch requires an elevated terminal on Windows so multi-cli can provi
 
 Nothing is shared because the app's authentication, configuration, and sessions use the same `.codex` tree. Use `multi-cli continue codex ...` for portable CLI sessions when needed.
 
+This boundary is local. Profiles signed into the same OpenAI account can still show the same server-side conversations and projects. Use separate OpenAI accounts when cloud history must also be separate. multi-cli cannot reset or customize service-controlled system prompts.
+
 ## Known limitations
 
 - Linux has no native Codex desktop app.
-- Store package discovery is tested separately from the account-isolation runtime because Windows Server does not ship Microsoft Store.
+- `--isolated` is rejected because folder redirection does not isolate Windows Credential Manager.
+- Launch fails unless the activated GUI belongs to the owned user, remains visible, and uses the initiating Windows session.
 
 ## Support
 

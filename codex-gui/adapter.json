@@ -2,10 +2,10 @@
   "schemaVersion": 2,
   "id": "codex-gui",
   "displayName": "Codex Desktop App",
-  "kind": "ide",
+  "kind": "gui",
   "binary": {
     "windows": [
-      "appx:OpenAI.Codex_2p2nqsd0c76g0"
+      "appx:OpenAI.Codex!App"
     ],
     "macos": [
       "/Applications/Codex.app/Contents/MacOS/Codex",
