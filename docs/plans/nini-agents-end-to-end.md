@@ -545,7 +545,7 @@ Pendientes y siguiente gate:
 
 ### 2026-08-22 — fork publico y topologia Git
 
-- Estado: en curso bajo G1 y autorizacion explicita de publicacion.
+- Estado: terminado bajo G1 y autorizacion explicita de publicacion.
 - Objetivo: crear el fork publico `LuchoNoPrograma/nini-agents`, preservar la
   atribucion MIT y establecer `main`, `legacy-gui` y `multi-cli-base`.
 - Alcance aprobado: reorganizar referencias locales sin rebase ni reset, crear
@@ -558,5 +558,14 @@ Pendientes y siguiente gate:
 - Compatibilidad: no cambia el motor, sus comandos ni el almacenamiento local.
 - Exclusiones: renombre funcional, instalacion, migracion, consumidores, tags y
   releases.
-- Validacion pendiente: refs locales y remotas, parent del fork, visibilidad,
-  default branch, licencia, documentacion y estado final del checkout.
+- Resultado: fork formal creado en
+  `https://github.com/LuchoNoPrograma/nini-agents`; `main` contiene el commit
+  documental inicial `e893730`, `multi-cli-base` conserva `6efb0d2` y
+  `legacy-gui` conserva `7426e98`.
+- Validacion: GitHub reporta parent `Spielewoy/multi-cli`, visibilidad publica y
+  default branch `main`; la licencia conserva el blob upstream original, las
+  cinco skills pasan `quick_validate.py` y la documentacion pasa
+  `scripts/validate-docs.py`.
+- Plataformas no verificadas: Windows y macOS; no hubo cambio funcional.
+- Siguiente gate: delimitar la Etapa B y obtener G2 antes de renombrar producto,
+  ejecutables, instaladores o contratos publicos.
