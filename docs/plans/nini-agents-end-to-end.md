@@ -919,8 +919,9 @@ Pendientes y siguiente gate:
 
 ### 2026-08-22 — Etapa F: contrato JSON v1 para consultas
 
-- Estado: implementacion local en validacion; el comando publico de movimiento,
-  transporte y process probe de produccion permanecen pendientes.
+- Estado: tramo aprobado de consultas JSON v1 terminado y publicado en `main`;
+  la Etapa F permanece abierta para el comando publico de movimiento, transporte
+  y process probe de produccion.
 - Objetivo: sustituir el futuro parsing de texto humano por un envelope
   versionado y seguro, manteniendo el modo humano y el shim `multi-cli`.
 - Inventario consumidor: MultiCLI AI invoca el shim y conserva descubrimiento
@@ -944,7 +945,21 @@ Pendientes y siguiente gate:
 - Pruebas: `tests/json_cli.bats` y `tests/JsonCli.Tests.ps1` usan exclusivamente
   homes, adapters, perfiles y credenciales sinteticos bajo temporales. La
   caracterizacion Bash fallo 7/7 antes de implementar y paso 7/7 tras el primer
-  delta funcional.
-- Pendiente de cierre: suites completas, cobertura, validacion documental,
-  ejecucion PowerShell/Windows mediante CI, commit y push autorizados, y registro
-  de resultados definitivos.
+  delta funcional; la suite contractual final contiene 11 casos Bash y su
+  equivalente PowerShell.
+- Validacion local: JSON Bash 11/11, suite Bash completa 257/257, sintaxis Bash,
+  documentacion y `git diff --check` correctos. El host local no dispone de
+  PowerShell, PSScriptAnalyzer ni Bashcov, por lo que esas comprobaciones se
+  ejecutaron en CI.
+- Validacion remota: el workflow CI `32603326309` sobre `5b74f5c` termino verde
+  en sus 11 jobs. Bats paso 257/257 en Ubuntu y macOS; Pester paso 393/393 en
+  Windows. La cobertura Bash fue 76.85% global y 100% en lineas cambiadas; la
+  cobertura de modulos PowerShell fue 99.61% global, 100% para
+  `MultiCli.Json.psm1` y 100% en lineas cambiadas. Tambien pasaron ShellCheck,
+  PSScriptAnalyzer, actionlint, metadatos y smoke tests efimeros de instalacion
+  en Linux, macOS y Windows.
+- Publicacion: commits `852164c`, `120aeb1`, `13118c3` y `5b74f5c` enviados a
+  `origin/main`. No se creo tag ni release.
+- Pendiente de la Etapa F: integrar el serializador con un dispatch publico de
+  movimiento solo despues de completar process probe y transporte seguros. La
+  migracion de MultiCLI AI y Codexporter conserva su gate independiente.
