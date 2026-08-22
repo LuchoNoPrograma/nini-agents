@@ -573,8 +573,7 @@ Pendientes y siguiente gate:
 
 ### 2026-08-22 — identidad Nini Agents y compatibilidad temporal
 
-- Estado: implementacion y validacion local terminadas bajo G2; CI remoto
-  pendiente antes de cerrar la Etapa B.
+- Estado: Etapa B terminada bajo G2; validacion local y CI remoto completos.
 - Objetivo: convertir `nini-agents` y `nini-agents.ps1` en los entrypoints
   canonicos del motor sin mover perfiles ni romper consumidores existentes.
 - Antes: `multi-cli` y `multi-cli.ps1` contenian las implementaciones completas
@@ -600,14 +599,24 @@ Pendientes y siguiente gate:
   dependencias ausentes del host, cuatro por Secret Service/keyring y una por
   la ausencia del nombre `python`; esta ultima paso al proveer un alias temporal
   dentro de `/tmp`.
-- Plataformas no verificadas localmente: Windows PowerShell y macOS. Tampoco
-  estan disponibles localmente `shellcheck` ni `bashcov`; sus gates quedan a
-  cargo del CI del fork.
+- Validacion remota: el workflow CI manual sobre `2498629` termino con sus
+  11 jobs correctos, incluidos Bats en Ubuntu y macOS, Pester con 345 pruebas
+  en Windows, cobertura Bash y PowerShell, ShellCheck, PSScriptAnalyzer,
+  Actionlint, metadata de release y smoke tests de instalacion en los tres
+  sistemas. La primera ejecucion detecto dos expectativas de branding
+  incorrectas en las pruebas del uninstaller; se corrigieron sin cambiar el
+  comportamiento del motor y la segunda ejecucion quedo verde.
+- Plataformas no verificadas localmente: Windows PowerShell y macOS. Se
+  verificaron en runners efimeros de GitHub Actions, no con herramientas o
+  cuentas reales.
 - Exclusiones confirmadas: movimiento entre equipos, CLI JSON, port de mejoras
   propias, migracion de MultiCLI AI y Codexporter, instalacion activa, tag y
   release.
 - Recuperacion: antes de publicarse, todo el cambio es un diff no instalado
   sobre `main`; el snapshot Flutter permanece separado en `legacy-gui` y la
   base upstream pura permanece en `multi-cli-base`.
-- Siguiente gate: publicar el commit G2 autorizado, revisar todos los jobs de
-  CI y cerrar la Etapa B solo si finalizan correctamente.
+- Publicacion: `3c38eac` implementa el renombre y `2498629` alinea las dos
+  expectativas Pester. Ambos commits estan en `origin/main`; no se creo tag ni
+  release.
+- Siguiente gate: delimitar la Etapa C y obtener una aprobacion nueva antes de
+  portar `~/.local/bin/codex`, `rules/` o la integracion de titulos con Hyper.
