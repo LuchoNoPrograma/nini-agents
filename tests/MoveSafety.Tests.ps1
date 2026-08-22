@@ -581,19 +581,8 @@ Describe 'transactional profile movement' {
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
-    It 'rechecks integrity and process certainty while holding ownership lock' {
+    It 'rechecks process certainty while holding ownership lock' {
         $adapter = New-MoveAdapter
-        $scratch = New-MoveScratch
-        try {
-            New-V2MoveProfile -Scratch $scratch | Out-Null
-            $global:NiniMoveTreeComparisons = 0
-            Mock Test-MoveTreesEqual -ModuleName MultiCli.Transfer {
-                $global:NiniMoveTreeComparisons++
-                return $global:NiniMoveTreeComparisons -ne 2
-            }
-            (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter).Code | Should Be 'integrity_mismatch'
-        } finally { Remove-Variable NiniMoveTreeComparisons -Scope Global -ErrorAction SilentlyContinue; Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
-
         $scratch = New-MoveScratch
         try {
             New-V2MoveProfile -Scratch $scratch | Out-Null
@@ -687,5 +676,22 @@ Describe 'transactional profile movement' {
             $result.Code | Should Be 'lock_release_failed'
             $result.State | Should Be 'destination_active'
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects a source mutation detected only after acquiring the ownership lock' {
+        $scratch = New-MoveScratch
+        try {
+            $adapter = New-MoveAdapter
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            $global:NiniMoveTreeComparisons = 0
+            Mock Test-MoveTreesEqual -ModuleName MultiCli.Transfer {
+                $global:NiniMoveTreeComparisons++
+                return $global:NiniMoveTreeComparisons -ne 2
+            }
+            (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter).Code | Should Be 'integrity_mismatch'
+        } finally {
+            $global:NiniMoveTreeComparisons = 100
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }

@@ -663,7 +663,7 @@ function Test-MoveRelativeAllowed {
         $runtimeSubdir = Get-TransferProperty -Object $normalState -Name 'runtimeSubdir'
         $declaredPath = $RelativePath
         if ($runtimeSubdir) {
-            $prefix = ($runtimeSubdir -replace '\', '/').TrimEnd('/')
+            $prefix = $runtimeSubdir.Replace('\', '/').TrimEnd('/')
             if ($declaredPath -eq $prefix) { return $true }
             if (-not $declaredPath.StartsWith("$prefix/", [StringComparison]::OrdinalIgnoreCase)) { return $false }
             $declaredPath = $declaredPath.Substring($prefix.Length + 1)
