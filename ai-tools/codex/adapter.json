@@ -5,8 +5,8 @@
   "kind": "cli",
   "binary": {
     "windows": ["%APPDATA%\\npm\\codex.cmd", "%APPDATA%\\npm\\codex", "codex"],
-    "macos": ["/usr/local/bin/codex", "$HOME/.npm-global/bin/codex", "codex"],
-    "linux": ["$HOME/.npm-global/bin/codex", "/usr/local/bin/codex", "codex"]
+    "macos": ["/usr/local/bin/codex", "$HOME/.npm-global/bin/codex", "$HOME/.local/bin/codex", "codex"],
+    "linux": ["$HOME/.npm-global/bin/codex", "/usr/local/bin/codex", "$HOME/.local/bin/codex", "codex"]
   },
   "isolation": {
     "strategy": "accountOverlay",
@@ -27,7 +27,7 @@
       "linux": "$HOME/.codex"
     },
     "sharedPaths": [
-      "config.toml", "hooks.json", "skills", "agents", "prompts", "mcp-configs", "plugins"
+      "config.toml", "hooks.json", "skills", "agents", "prompts", "mcp-configs", "plugins", "rules"
     ],
     "sessionPaths": ["sessions", "history.jsonl", "archived_sessions", "session_index.jsonl"],
     "filePaths": ["config.toml", "hooks.json", "history.jsonl", "session_index.jsonl"],

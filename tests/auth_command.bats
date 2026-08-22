@@ -4,6 +4,7 @@ load helpers/common
 
 setup() {
   setup_scratch
+  install_fake_secret_tool
   # shellcheck source=../lib/credential-store.sh
   source "$MULTICLI_REPO_ROOT/lib/credential-store.sh"
   TOOLS_ROOT="$MULTICLI_SCRATCH/tools"
@@ -132,4 +133,19 @@ teardown() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"does not use a process-secret credential"* ]]
+}
+
+@test "delete preserves a process-secret profile when credential clearing fails" {
+  run multicli new secretcli/account-a --no-seed
+  [ "$status" -eq 0 ]
+  run bash -c "printf 'token-account-a\n' | '$MULTICLI_BIN' auth set secretcli/account-a"
+  [ "$status" -eq 0 ]
+  export MULTICLI_TEST_SECRET_TOOL_FAIL_CLEAR=1
+
+  run bash -c "printf 'y\n' | '$MULTICLI_BIN' delete secretcli/account-a"
+
+  unset MULTICLI_TEST_SECRET_TOOL_FAIL_CLEAR
+  [ "$status" -eq 1 ]
+  [ -d "$MULTICLI_HOME/secretcli/account-a" ]
+  [[ "$output" == *"profile was preserved"* ]]
 }

@@ -83,6 +83,25 @@ function Invoke-AdapterValidator {
 }
 
 Describe 'adapter schema validation' {
+    It 'declares Codex user-local POSIX discovery and shared rules state' {
+        $codex = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'ai-tools\codex\adapter.json') -Raw | ConvertFrom-Json
+
+        (@($codex.binary.macos) -contains '$HOME/.local/bin/codex') | Should Be $true
+        (@($codex.binary.linux) -contains '$HOME/.local/bin/codex') | Should Be $true
+        (@($codex.normalState.sharedPaths) -contains 'rules') | Should Be $true
+        (@($codex.account.credentialFiles) -contains 'rules') | Should Be $false
+        (@($codex.normalState.sessionPaths) -contains 'rules') | Should Be $false
+    }
+
+    It 'declares the documented Command Code user state directory as the shared root' {
+        $adapter = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'ai-tools\commandcode\adapter.json') -Raw | ConvertFrom-Json
+
+        $adapter.normalState.runtimeSubdir | Should Be '.commandcode'
+        $adapter.normalState.root.windows | Should Be '%USERPROFILE%\.commandcode'
+        $adapter.normalState.root.macos | Should Be '$HOME/.commandcode'
+        $adapter.normalState.root.linux | Should Be '$HOME/.commandcode'
+    }
+
     It 'accepts a complete schema-v2 account overlay' {
         $root = New-AdapterSchemaScratch
         try {
@@ -128,6 +147,33 @@ Describe 'adapter schema validation' {
 
             $result.ExitCode | Should Be 1
             $result.Output | Should Match "credential path 'sessions/auth.json' overlaps session path 'sessions'"
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects shared paths overlapping session paths' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter.normalState.sharedPaths = @('state')
+            $adapter.normalState.sessionPaths = @('state/sessions')
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 1
+            $result.Output | Should Match "shared path 'state' overlaps session path 'state/sessions'"
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects file paths not declared as shared or session state' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter.normalState | Add-Member -NotePropertyName filePaths -NotePropertyValue @('undeclared.json')
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 1
+            $result.Output | Should Match "file path 'undeclared.json' must also be declared in sharedPaths or sessionPaths"
         } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 

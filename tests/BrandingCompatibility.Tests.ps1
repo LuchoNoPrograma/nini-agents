@@ -28,4 +28,14 @@ Describe 'Nini Agents entrypoint compatibility' {
         $result.ExitCode | Should Be 0
         $result.Output | Should Match 'CommandName nini-agents,multi-cli'
     }
+
+    It 'exposes auth in help and PowerShell completion' {
+        $help = Invoke-BrandingLauncher -Path $script:CanonicalLauncher -Arguments @('help')
+        $completion = Invoke-BrandingLauncher -Path $script:CanonicalLauncher -Arguments @('completion', 'powershell')
+
+        $help.ExitCode | Should Be 0
+        $help.Output | Should Match 'auth set\|status\|clear'
+        $completion.ExitCode | Should Be 0
+        $completion.Output | Should Match "'auth'"
+    }
 }

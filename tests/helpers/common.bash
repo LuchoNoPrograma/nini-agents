@@ -1,8 +1,9 @@
 # Shared bats helpers for the nini-agents session-continuation suite.
 #
-# Every test runs the REAL nini-agents launcher against REAL fixture trees built
-# in mktemp scratch dirs. No mocks. HOME and MULTICLI_HOME are always redirected
-# into scratch so the operator's real ~/.codex / ~/.claude are never touched.
+# Every test runs the real nini-agents launcher against fixture trees built in
+# mktemp scratch dirs. Native services may use explicit test doubles under that
+# scratch root. HOME and MULTICLI_HOME are always redirected so the operator's
+# real ~/.codex / ~/.claude and credential stores are never touched.
 
 # Absolute path to the repo root (parent of tests/).
 MULTICLI_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -101,8 +102,58 @@ JSON
   CODEX_BASE="$HOME/.codex"
 }
 
+# Install a Secret Service-compatible test double under the scratch root.
+# High-level launcher tests use it instead of touching the operator's real
+# keyring. Dedicated credential-store tests continue to exercise native
+# backends separately when the platform and service are available.
+install_fake_secret_tool() {
+  local fake_bin="$MULTICLI_SCRATCH/fake-secret-bin"
+  export MULTICLI_TEST_SECRET_STORE="$MULTICLI_SCRATCH/fake-secret-store"
+  mkdir -p "$fake_bin" "$MULTICLI_TEST_SECRET_STORE"
+  cat > "$fake_bin/secret-tool" <<'FAKE_SECRET_TOOL'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+operation="${1:-}"
+shift || true
+target=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = target ] && [ "$#" -ge 2 ]; then
+    target="$2"
+    break
+  fi
+  shift
+done
+[ -n "$target" ] || exit 2
+key="${target//\//__}"
+path="${MULTICLI_TEST_SECRET_STORE:?}/$key"
+
+case "$operation" in
+  store)
+    secret="$(cat)"
+    [ -n "$secret" ] || exit 2
+    printf '%s' "$secret" > "$path"
+    ;;
+  lookup)
+    [ -f "$path" ] || exit 1
+    cat "$path"
+    ;;
+  clear)
+    [ "${MULTICLI_TEST_SECRET_TOOL_FAIL_CLEAR:-0}" != 1 ] || exit 9
+    [ -f "$path" ] || exit 1
+    rm -f "$path"
+    ;;
+  *) exit 2 ;;
+esac
+FAKE_SECRET_TOOL
+  chmod +x "$fake_bin/secret-tool"
+  PATH="$fake_bin:$PATH"
+  export PATH
+}
+
 teardown_scratch() {
-  unset MULTICLI_TOOLS_DIR
+  unset MULTICLI_TOOLS_DIR MULTICLI_TEST_SECRET_STORE MULTICLI_TEST_SECRET_TOOL_FAIL_CLEAR
   [ -n "${MULTICLI_SCRATCH:-}" ] && rm -rf "$MULTICLI_SCRATCH"
 }
 

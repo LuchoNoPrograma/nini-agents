@@ -10,7 +10,7 @@ Codex honors `CODEX_HOME`. The adapter points it at a per-profile runtime view w
 npm i -g @openai/codex
 ```
 
-Binary discovery: `%APPDATA%\npm\codex.cmd` (Windows), `/usr/local/bin/codex` (macOS), `$HOME/.npm-global/bin/codex` (Linux), then `codex` on PATH.
+Binary discovery: `%APPDATA%\npm\codex.cmd` (Windows); `/usr/local/bin/codex`, `$HOME/.npm-global/bin/codex`, or `$HOME/.local/bin/codex` (macOS); `$HOME/.npm-global/bin/codex`, `/usr/local/bin/codex`, or `$HOME/.local/bin/codex` (Linux); then `codex` on PATH.
 
 ## Quickstart
 
@@ -33,12 +33,13 @@ Conversations are shared normal state, so `nini-agents continue` is not needed b
 
 Shared root: `%USERPROFILE%\.codex` (Windows), `~/.codex` (macOS/Linux).
 
-- Config: `config.toml`, `hooks.json`, `skills/`, `agents/`, `prompts/`, `mcp-configs/`, `plugins/`.
+- Config: `config.toml`, `hooks.json`, `skills/`, `agents/`, `prompts/`, `mcp-configs/`, `plugins/`, `rules/`.
 - Sessions: `sessions/`, `history.jsonl`, `archived_sessions/`, `session_index.jsonl`.
 
 ## Known limitations
 
 - Requires file-based credential storage (`auth.json`); OS-keychain credential modes are outside this account boundary.
+- Codex rules remain subject to upstream changes. Nini Agents shares the user-level `rules/` directory as ordinary configuration; it never treats rules as credentials or session state.
 - Concurrent profiles write to the shared session store; keep simultaneous writers in mind.
 
 ## Support

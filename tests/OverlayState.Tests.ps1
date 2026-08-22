@@ -79,6 +79,31 @@ function Invoke-OverlayLauncher {
 }
 
 Describe 'schema-v2 account overlay on Windows' {
+    It 'links Codex user rules as shared normal state' {
+        $scratch = New-OverlayScratch
+        try {
+            $codexTools = Join-Path $scratch.Tools 'codex'
+            New-Item -ItemType Directory -Force -Path $codexTools | Out-Null
+            Copy-Item -LiteralPath (Join-Path $script:RepoRoot 'ai-tools\codex\adapter.json') -Destination (Join-Path $codexTools 'adapter.json')
+            $rules = Join-Path $scratch.UserHome '.codex\rules'
+            New-Item -ItemType Directory -Force -Path $rules | Out-Null
+            Set-Content -LiteralPath (Join-Path $rules 'default.rules') -Value 'prefix_rule(pattern=["git", "status"], decision="allow")' -Encoding ASCII
+            $probe = Join-Path $scratch.Root 'noop.cmd'
+            '@exit /b 0' | Set-Content -LiteralPath $probe -Encoding ASCII
+
+            (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('new', 'codex/account-a', '--no-seed')).ExitCode | Should Be 0
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'codex/account-a') -Probe $probe
+
+            if ($result.ExitCode -ne 0) { Write-Host $result.Output }
+            $result.ExitCode | Should Be 0
+            $runtimeRules = Join-Path $scratch.Profiles 'codex\account-a\.runtime\rules'
+            (Test-Path -LiteralPath $runtimeRules -PathType Container) | Should Be $true
+            (((Get-Item -LiteralPath $runtimeRules).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) | Should Be $true
+            (Get-Content -LiteralPath (Join-Path $runtimeRules 'default.rules') -Raw).Trim() | Should Be 'prefix_rule(pattern=["git", "status"], decision="allow")'
+            (Test-Path -LiteralPath (Join-Path $scratch.Profiles 'codex\account-a\auth\rules')) | Should Be $false
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
     It 'creates stable profile metadata without copying normal state' {
         $scratch = New-OverlayScratch
         try {
@@ -95,6 +120,47 @@ Describe 'schema-v2 account overlay on Windows' {
             $metadata.schemaVersion | Should Be 2
             $metadata.adapterId | Should Be 'fixture'
             ([guid]::Parse($metadata.profileId) -is [guid]) | Should Be $true
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'treats legacy --shared as the schema-v2 default without creating a marker' {
+        $scratch = New-OverlayScratch
+        try {
+            Write-OverlayAdapter -Scratch $scratch
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('new', 'fixture/account-a', '--shared', '--no-seed')
+            $profile = Join-Path $scratch.Profiles 'fixture\account-a'
+
+            if ($result.ExitCode -ne 0) { Write-Host $result.Output }
+            $result.ExitCode | Should Be 0
+            (Test-Path -LiteralPath (Join-Path $profile '.profile.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $profile '.shared')) | Should Be $false
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rebuilds an existing runtime when the adapter shared root changes' {
+        $scratch = New-OverlayScratch
+        try {
+            Write-OverlayAdapter -Scratch $scratch
+            $oldRoot = Join-Path $scratch.UserHome '.fixture'
+            New-Item -ItemType Directory -Force -Path $oldRoot | Out-Null
+            Set-Content -LiteralPath (Join-Path $oldRoot 'config.toml') -Value 'old-root' -Encoding ASCII
+            $probe = Join-Path $scratch.Root 'noop.cmd'
+            '@exit /b 0' | Set-Content -LiteralPath $probe -Encoding ASCII
+            (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('new', 'fixture/account-a', '--no-seed')).ExitCode | Should Be 0
+            (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'fixture/account-a') -Probe $probe).ExitCode | Should Be 0
+
+            $newRoot = Join-Path $scratch.UserHome '.fixture-new'
+            New-Item -ItemType Directory -Force -Path $newRoot | Out-Null
+            Set-Content -LiteralPath (Join-Path $newRoot 'config.toml') -Value 'new-root' -Encoding ASCII
+            $adapterPath = Join-Path $scratch.Tools 'fixture\adapter.json'
+            $adapter = Get-Content -LiteralPath $adapterPath -Raw | ConvertFrom-Json
+            $adapter.normalState.root.windows = '%USERPROFILE%\.fixture-new'
+            $adapter | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $adapterPath -Encoding UTF8
+
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'fixture/account-a') -Probe $probe
+            if ($result.ExitCode -ne 0) { Write-Host $result.Output }
+            $result.ExitCode | Should Be 0
+            (Get-Content -LiteralPath (Join-Path $scratch.Profiles 'fixture\account-a\.runtime\config.toml') -Raw).Trim() | Should Be 'new-root'
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 

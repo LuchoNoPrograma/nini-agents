@@ -286,7 +286,7 @@ archive_entries() {
   seed_transfer_shared_root
   make_overlay_profile account-a
   local profile_dir="$TRANSFER_PROFILE_DIR"
-  python - "$SHARED_ROOT/agents/big.txt" <<'PY'
+  python3 - "$SHARED_ROOT/agents/big.txt" <<'PY'
 from pathlib import Path
 import sys
 Path(sys.argv[1]).write_bytes(b'x' * (1024 * 1024 + 1) + b'OPENAI_API_KEY=sk-large')

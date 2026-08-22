@@ -25,9 +25,9 @@
   },
   "normalState": {
     "root": {
-      "windows": "%USERPROFILE%",
-      "macos": "$HOME",
-      "linux": "$HOME"
+      "windows": "%USERPROFILE%\\.commandcode",
+      "macos": "$HOME/.commandcode",
+      "linux": "$HOME/.commandcode"
     },
     "runtimeSubdir": ".commandcode",
     "sharedPaths": ["config.json", "settings.json", "skills", "plans", "taste"],

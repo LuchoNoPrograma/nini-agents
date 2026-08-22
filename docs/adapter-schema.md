@@ -15,7 +15,7 @@ Schema v2 separates account credentials from ordinary tool state. The machine-re
 - `concurrency.level`, `.singletonScope`
 - `support.windows`, `.macos`, `.linux`
 
-`normalState.filePaths` is optional. It marks shared entries that must be treated as files rather than directories. `normalState.runtimeSubdir` is optional and scopes the runtime view to a safe relative directory below the declared root.
+`normalState.filePaths` is optional. It marks entries already declared exactly in `sharedPaths` or `sessionPaths` that must be treated as files rather than directories; it cannot introduce another state path. `normalState.runtimeSubdir` is optional and scopes the runtime view to a safe relative directory below the declared root.
 
 ## Account mechanisms
 

@@ -80,6 +80,28 @@ function Test-AdapterPathSeparation {
     }
 }
 
+# filePaths classifies entries that already belong to sharedPaths or
+# sessionPaths; it must never introduce an otherwise undeclared state path.
+function Test-AdapterFilePathMembership {
+    param(
+        [System.Collections.Generic.List[string]]$Errors,
+        $FilePaths,
+        $SharedPaths,
+        $SessionPaths
+    )
+    $declared = @($SharedPaths) + @($SessionPaths) | Where-Object { $null -ne $_ -and $_ -ne '' } | ForEach-Object {
+        ([string]$_ -replace '\\', '/').ToLowerInvariant()
+    }
+    foreach ($filePath in @($FilePaths)) {
+        if ($null -eq $filePath -or $filePath -eq '') { continue }
+        if (-not (Test-SafeAdapterPath -Path ([string]$filePath))) { continue }
+        $normalized = ([string]$filePath -replace '\\', '/').ToLowerInvariant()
+        if ($declared -notcontains $normalized) {
+            Add-AdapterValidationError -Errors $Errors -Message "file path '$filePath' must also be declared in sharedPaths or sessionPaths"
+        }
+    }
+}
+
 # Reject any {placeholder} outside the known set; an unknown one would expand
 # to a literal brace directory at launch time.
 function Test-AdapterPlaceholders {
@@ -282,8 +304,10 @@ function Test-AdapterV2 {
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $credentials -LeftLabel 'credential path' -RightValues $sharedPaths -RightLabel 'shared path'
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $credentials -LeftLabel 'credential path' -RightValues $sessionPaths -RightLabel 'session path'
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $credentials -LeftLabel 'credential path' -RightValues $unsafePaths -RightLabel 'unsafe path'
+    Test-AdapterPathSeparation -Errors $Errors -LeftValues $sharedPaths -LeftLabel 'shared path' -RightValues $sessionPaths -RightLabel 'session path'
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $sharedPaths -LeftLabel 'shared path' -RightValues $unsafePaths -RightLabel 'unsafe path'
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $sessionPaths -LeftLabel 'session path' -RightValues $unsafePaths -RightLabel 'unsafe path'
+    Test-AdapterFilePathMembership -Errors $Errors -FilePaths $filePaths -SharedPaths $sharedPaths -SessionPaths $sessionPaths
 
     $concurrency = Get-ObjectProperty -Object $Adapter -Name 'concurrency'
     if (@('multiWriter', 'singleWriter', 'unsupported') -notcontains (Get-ObjectProperty -Object $concurrency -Name 'level')) {

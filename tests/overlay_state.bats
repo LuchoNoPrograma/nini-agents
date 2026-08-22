@@ -155,6 +155,22 @@ JSON
   [ "$runtime_a" != "$runtime_b" ]
 }
 
+@test "Codex adapter links user rules as shared normal state" {
+  mkdir -p "$TOOLS_ROOT/codex" "$HOME/.codex/rules"
+  cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
+  printf 'prefix_rule(pattern=["git", "status"], decision="allow")\n' > "$HOME/.codex/rules/default.rules"
+
+  run multicli new codex/account-a --no-seed
+  [ "$status" -eq 0 ]
+  run multicli launch codex/account-a
+  [ "$status" -eq 0 ]
+
+  local runtime_rules="$MULTICLI_HOME/codex/account-a/.runtime/rules"
+  [ -L "$runtime_rules" ]
+  [ "$(cat "$runtime_rules/default.rules" | tr -d '\r')" = 'prefix_rule(pattern=["git", "status"], decision="allow")' ]
+  [ ! -e "$MULTICLI_HOME/codex/account-a/auth/rules" ]
+}
+
 @test "launch clears inherited account variables without mutating the parent shell" {
   run multicli new fixture/account-a --no-seed
   [ "$status" -eq 0 ]
@@ -188,6 +204,55 @@ JSON
   run multicli doctor --deep
   [ "$status" -eq 0 ]
   [[ "$output" != *"unexpected runtime file"* ]]
+}
+
+@test "launch rebuilds an existing runtime when the adapter shared root changes" {
+  mkdir -p "$HOME/.fixture"
+  printf 'old-root\n' > "$HOME/.fixture/config.toml"
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  run multicli launch fixture/account-a
+  [ "$status" -eq 0 ]
+  [ "$(tr -d '\r' < "$MULTICLI_HOME/fixture/account-a/.runtime/config.toml")" = "old-root" ]
+
+  mkdir -p "$HOME/.fixture-new"
+  printf 'new-root\n' > "$HOME/.fixture-new/config.toml"
+  jq '.normalState.root.windows="%USERPROFILE%\\.fixture-new" | .normalState.root.macos="$HOME/.fixture-new" | .normalState.root.linux="$HOME/.fixture-new"' \
+    "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+
+  run multicli launch fixture/account-a
+  [ "$status" -eq 0 ]
+  [ "$(tr -d '\r' < "$MULTICLI_HOME/fixture/account-a/.runtime/config.toml")" = "new-root" ]
+  [ "$MULTICLI_HOME/fixture/account-a/.runtime/config.toml" -ef "$HOME/.fixture-new/config.toml" ]
+}
+
+@test "doctor --deep understands runtimeSubdir and detects missing or misdirected links" {
+  jq '.normalState.runtimeSubdir="state"' "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  run multicli launch fixture/account-a
+  [ "$status" -eq 0 ]
+
+  local runtime="$MULTICLI_HOME/fixture/account-a/.runtime/state"
+  run multicli doctor --deep
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"wrong target"* ]]
+
+  rm "$runtime/agents"
+  run multicli doctor --deep
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"missing declared runtime path state/agents"* ]]
+
+  run multicli launch fixture/account-a
+  [ "$status" -eq 0 ]
+  mkdir -p "$HOME/.fixture/wrong-agents"
+  rm "$runtime/agents"
+  ln -s "$HOME/.fixture/wrong-agents" "$runtime/agents"
+  run multicli doctor --deep
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"runtime link state/agents has the wrong target"* ]]
 }
 
 @test "launch without schema-v2 metadata aborts with a clear message instead of dying silently" {

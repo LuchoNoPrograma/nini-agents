@@ -41,6 +41,22 @@ JSON
   [ "$output" = "$stub_bin/fallback-tool.exe" ]
 }
 
+@test "find_adapter_binary resolves the Codex user-local Linux candidate" {
+  local local_bin="$HOME/.local/bin/codex"
+  mkdir -p "$(dirname "$local_bin")" "$MULTICLI_TOOLS_DIR/codex"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$local_bin"
+  chmod +x "$local_bin"
+  jq '.binary.linux = [.binary.linux[] | select(. == "$HOME/.local/bin/codex")]' \
+    "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" > "$MULTICLI_TOOLS_DIR/codex/adapter.json"
+
+  run env HOME="$HOME" PATH="/usr/bin:/bin" MULTICLI_PLATFORM=linux \
+    MULTICLI_TOOLS_DIR="$MULTICLI_TOOLS_DIR" \
+    bash -c 'multicli_bin="$1"; set -- help; source "$multicli_bin" >/dev/null; find_adapter_binary codex' _ "$MULTICLI_BIN"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "$local_bin" ]
+}
+
 @test "launch_sandbox_user announces first launch before Linux provisioning" {
   run env MULTICLI_PLATFORM=linux MULTICLI_TOOLS_DIR="$MULTICLI_TOOLS_DIR" \
     bash -c '

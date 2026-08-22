@@ -864,7 +864,7 @@ function New-Profile {
         } else {
             Throw-LegacyTemplateApplyBlocked -Spec $Spec -TemplateName $FromTemplate
         }
-    } elseif ($Shared) {
+    } elseif ($Shared -and $adapter.isolation.strategy -ne 'accountOverlay') {
         New-SharedProfile -Adapter $adapter -ProfileDir $profileDir
     } else {
         New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
@@ -1540,6 +1540,24 @@ function Get-RuntimeFilesNoReparse {
     return $files
 }
 
+function Test-DoctorRuntimeTarget {
+    param([string]$Path, [string]$ExpectedSource)
+    if (-not (Test-Path -LiteralPath $Path) -or -not (Test-Path -LiteralPath $ExpectedSource)) { return $false }
+    $item = Get-Item -LiteralPath $Path -Force
+    $linkType = Get-ObjectPropertySafe -Object $item -Name 'LinkType'
+    if (@('Junction', 'SymbolicLink', 'HardLink') -notcontains $linkType) { return $false }
+    $expected = Get-StorageCanonical -Path $ExpectedSource
+    foreach ($target in @((Get-ObjectPropertySafe -Object $item -Name 'Target'))) {
+        if (-not $target) { continue }
+        $candidate = [string]$target
+        if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+            $candidate = Join-Path (Split-Path -Parent $Path) $candidate
+        }
+        if ((Get-StorageCanonical -Path $candidate) -eq $expected) { return $true }
+    }
+    return $false
+}
+
 function Show-List {
     param([string]$ToolFilter)
     if (-not (Test-Path $BASE)) { Write-Host "No profiles yet."; return }
@@ -1637,6 +1655,33 @@ function Show-Doctor {
                 if (-not $line) { continue }
                 $entry = ($line -replace '\\', '/').Trim()
                 if ($entry) { $manifestEntries[$entry] = $true }
+            }
+            $metadata = Get-Content -LiteralPath $metadataFile -Raw | ConvertFrom-Json
+            $adapter = Get-Adapter $metadata.adapterId
+            $normalState = Get-ObjectPropertySafe -Object $adapter -Name 'normalState'
+            $runtimeSubdir = Get-ObjectPropertySafe -Object $normalState -Name 'runtimeSubdir'
+            $runtimePrefix = if ($runtimeSubdir) { ($runtimeSubdir -replace '\\', '/').TrimEnd('/') + '/' } else { '' }
+            $sharedRoot = Resolve-PathToken $normalState.root.windows
+            foreach ($entry in @($manifestEntries.Keys)) {
+                $runtimePath = Join-Path $runtimeDir ($entry -replace '/', '\')
+                if (-not (Test-Path -LiteralPath $runtimePath)) {
+                    Write-Host "  [WARN] missing declared runtime path $entry in $profileDir -- relaunch the profile" -ForegroundColor Yellow
+                    $warnings++
+                    continue
+                }
+                $declaredPath = $entry
+                if ($runtimePrefix -and $declaredPath.StartsWith($runtimePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                    $declaredPath = $declaredPath.Substring($runtimePrefix.Length)
+                }
+                $expectedSource = if (@($adapter.account.credentialFiles) -contains $declaredPath) {
+                    Join-Path (Join-Path $profileDir 'auth') ($declaredPath -replace '/', '\')
+                } else {
+                    Join-Path $sharedRoot ($declaredPath -replace '/', '\')
+                }
+                if (-not (Test-DoctorRuntimeTarget -Path $runtimePath -ExpectedSource $expectedSource)) {
+                    Write-Host "  [WARN] runtime link $entry has the wrong target in $profileDir" -ForegroundColor Yellow
+                    $warnings++
+                }
             }
             foreach ($file in @(Get-RuntimeFilesNoReparse $runtimeDir)) {
                 $relative = ($file.Substring($runtimeDir.Length).TrimStart('\', '/') -replace '\\', '/')
@@ -1808,6 +1853,7 @@ COMMANDS
   status                                                Same as list
   rename <tool>/<old> <tool>/<new>                      Rename
   delete <tool>/<name>                                  Delete (confirms)
+  auth set|status|clear <tool>/<name>                   Manage a process-secret credential
   clone <tool>/<src> <tool>/<dest>                      Clone
   template save <tool>/<profile> <name>                 Save as template
   template list | delete <name>                         Manage templates
@@ -1848,7 +1894,7 @@ Register-ArgumentCompleter -Native -CommandName nini-agents,multi-cli -ScriptBlo
     param(`$wordToComplete, `$commandAst, `$cursorPosition)
     `$base = if (`$env:MULTICLI_HOME) { `$env:MULTICLI_HOME } else { Join-Path `$env:USERPROFILE 'MultiCliProfiles' }
     `$tools = (Get-ChildItem -Directory '$ToolsDir' -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path `$_.FullName 'adapter.json') }).Name
-    `$cmds = @('new','launch','continue','migrate','list','status','rename','delete','clone','template','export','import','tools','doctor','stats','completion','help','version')
+    `$cmds = @('new','launch','continue','migrate','list','status','rename','delete','clone','auth','template','export','import','tools','doctor','stats','completion','help','version')
     `$specs = @()
     foreach (`$t in `$tools) {
         `$dir = Join-Path `$base `$t

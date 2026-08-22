@@ -13,6 +13,7 @@ load helpers/common
 
 setup() {
   setup_scratch
+  install_fake_secret_tool
   TOOLS_ROOT="$MULTICLI_SCRATCH/tools"
   mkdir -p "$TOOLS_ROOT/fixture" "$TOOLS_ROOT/secretcli" "$TOOLS_ROOT/lockedcli"
   export USERPROFILE="$HOME"

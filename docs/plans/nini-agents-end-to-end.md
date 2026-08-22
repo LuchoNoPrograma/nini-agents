@@ -4,7 +4,7 @@
 - Fecha de inicio: 2026-08-22
 - Base upstream fijada: Multi-CLI
   `6efb0d204d4e690c2e0f5e9c2ee900a3cead6afa`
-- Branch de trabajo observada al iniciar: `nini-agents-cli`
+- Branch de trabajo del registro historico inicial: `nini-agents-cli`
 
 ## Proposito
 
@@ -35,9 +35,10 @@ Antes de actuar, todo agente debe:
 No registrar secretos, contenido de `auth.json`, identificadores privados,
 rutas privadas completas ni evidencia sin sanitizar.
 
-## Estado inicial comprobado
+## Estado inicial historico comprobado
 
-Al 2026-08-22:
+Este bloque conserva el punto de partida observado al crear el plan; no describe
+el checkout vigente. Al inicio del 2026-08-22:
 
 - `multi-cli-base` y `nini-agents-cli` apuntan al upstream puro `6efb0d2`.
 - `multi-cli-upstream/main` tambien apunta a `6efb0d2`.
@@ -51,6 +52,31 @@ Al 2026-08-22:
   JSON estable y las migraciones consumidoras aun no estan implementados.
 - Las cinco skills canonicas ya existen bajo `.agents/skills/` y se consumen
   desde el repositorio; no deben duplicarse como skills globales.
+
+## Estado actual comprobado
+
+Al corte documental del 2026-08-22:
+
+- El checkout activo es `main`, alineado con `origin/main` en `6704860`.
+- `main` contiene el motor Nini Agents renombrado y conserva los shims de
+  compatibilidad; las Etapas A y B estan cerradas con su evidencia en la
+  bitacora. Las Etapas C y D tienen cambios implementados y validados localmente
+  en Bash, con comprobacion PowerShell y gates de cobertura pendientes en un
+  entorno que disponga de sus dependencias.
+- `multi-cli-base` y `origin/multi-cli-base` conservan el upstream puro
+  `6efb0d2`.
+- `legacy-gui` y `origin/legacy-gui` conservan el snapshot Flutter `7426e98`.
+- `origin` apunta al fork publico `LuchoNoPrograma/nini-agents` y
+  `multi-cli-upstream` apunta a `Spielewoy/multi-cli`.
+- El movimiento seguro heredado de Codexporter, la CLI JSON estable y las
+  migraciones consumidoras siguen pendientes; no deben presentarse como
+  funcionalidades implementadas.
+- Las referencias locales y el trabajo registrado por este plan no contienen
+  un tag ni una release de Nini Agents; el estado remoto debe verificarse otra
+  vez antes de cualquier publicacion.
+
+Este bloque es una fotografia de referencias, no una autorizacion. Debe
+actualizarse cuando una etapa aprobada cambie el estado observable.
 
 ## Arquitectura objetivo
 
@@ -75,9 +101,9 @@ Multi-CLI upstream 6efb0d2
       `-- Codexporter
 ```
 
-Topologia Git objetivo:
+Topologia Git vigente y responsabilidades que debe conservar:
 
-| Referencia | Responsabilidad objetivo |
+| Referencia | Responsabilidad vigente |
 |---|---|
 | `main` | Desarrollo y entrega del motor Nini Agents |
 | `legacy-gui` | Snapshot estable de la aplicacion Flutter MultiCLI AI |
@@ -85,9 +111,9 @@ Topologia Git objetivo:
 | `multi-cli-upstream/main` | Seguimiento del upstream, sin mezclar cambios propios |
 | `legacy/main` | Fuente local de la historia Flutter mientras dure la migracion |
 
-La topologia objetivo no describe el estado actual. Crear o mover branches,
-reescribir referencias o publicar cambios requiere un alcance Git separado y
-aprobado.
+La topologia ya fue establecida durante la Etapa A. Crear o mover branches,
+reescribir referencias o publicar cambios adicionales requiere un alcance Git
+separado y aprobado.
 
 ## Invariantes no negociables
 
@@ -209,16 +235,36 @@ Criterios de salida:
 Skills principales: `nini-agents-upstream-integration` y
 `nini-agents-change-integral`.
 
-### Etapa C: portar personalizaciones aprobadas
+### Etapa C: auditar y portar personalizaciones propias del motor
 
-Objetivo: recuperar comportamientos propios necesarios sin mezclar la aplicacion
-Flutter ni portar commits a ciegas.
+Objetivo: recuperar comportamientos propios necesarios que pertenezcan al motor,
+sin mezclar la aplicacion Flutter ni portar commits a ciegas.
 
-Personalizaciones candidatas ya aprobadas como direccion:
+Personalizaciones candidatas cuya procedencia y owner deben verificarse antes
+de portarlas:
 
 - Descubrimiento de Codex en `~/.local/bin/codex`.
 - Manejo de `rules/` conforme al contrato actual de perfiles y runtime.
-- Integracion de titulos con Hyper.
+
+Hallazgos de procedencia ya comprobados, aun no implementados:
+
+- El upstream historico `abffcba` buscaba Codex en
+  `~/.local/bin/codex`, pero el adapter actual de `6efb0d2` ya no declara esa
+  ruta. Si se restaura, pertenece a los candidatos declarativos del adapter y
+  no a una excepcion hardcodeada en el launcher.
+- El adapter de Claude ya declara `rules/`. Para Codex, `~/.codex/rules/`
+  pertenece a su [configuracion de usuario actual](https://learn.chatgpt.com/docs/agent-configuration/rules),
+  pero las reglas siguen documentadas como experimentales. El flag
+  `--ignore-rules` de MultiCLI AI es un comportamiento de heartbeat distinto y
+  no demuestra por si solo que el directorio deba compartirse. Cualquier cambio
+  exige alinear schema, adapters, runtime, guia y pruebas en ambas
+  implementaciones.
+
+La integracion con Hyper no pertenece a esta etapa. Es comportamiento de
+MultiCLI AI: el commit `6eac14f` de `legacy-gui` detecta la terminal, abre Hyper,
+transmite el comando y argumentos, establece el titulo de la pestana y enfoca la
+ventana como best effort. El motor base `6efb0d2` y Nini Agents no contienen una
+integracion especifica con Hyper.
 
 Metodo:
 
@@ -231,13 +277,17 @@ Criterios de salida:
 
 - Cada personalizacion tiene origen trazable, owner claro y prueba que falla sin
   el cambio.
+- Solo se porta al motor aquello que forme parte de descubrimiento, perfiles,
+  adapters, runtime, aislamiento o lanzamiento independiente de una UI.
 - No se ha importado UI Flutter ni dependencia de Codexporter.
 - El runtime no debilita containment, overlays ni validacion de adapters.
 
-### Etapa D: consolidar el motor de perfiles, aislamiento y sesiones
+### Etapa D: auditar y cerrar brechas del nucleo existente
 
-Objetivo: congelar los contratos internos que usaran la transferencia y los
-consumidores futuros.
+Objetivo: caracterizar el nucleo heredado de `6efb0d2`, corregir solo las brechas
+demostradas y congelar los contratos internos que usaran la transferencia y los
+consumidores futuros. Esta etapa no reconstruye desde cero perfiles,
+aislamiento, sesiones, adapters ni schema v2 que ya existen.
 
 Fronteras:
 
@@ -251,6 +301,8 @@ Fronteras:
 
 Criterios de salida:
 
+- Cada capacidad se clasifica como existente y caracterizada, brecha corregida
+  o trabajo pendiente; no se presenta codigo heredado como implementacion nueva.
 - Crear, lanzar, clonar, renombrar, borrar, autenticar, continuar sesiones,
   exportar, importar y migrar conservan sus invariantes documentadas.
 - Las categorias credential files, shared paths y session paths no se solapan.
@@ -262,13 +314,15 @@ Skills principales: `nini-agents-change-integral`,
 
 ### Etapa E: incorporar el movimiento seguro de Codexporter
 
-Objetivo: mover un perfil entre equipos sin revocar, regenerar ni duplicar su
+Objetivo: construir un protocolo transaccional independiente del transporte
+para mover un perfil entre equipos sin revocar, regenerar ni duplicar su
 credencial activa.
 
 Codexporter se usa como contrato legacy a verificar, no como codigo ya
 integrado. Se preservan estas propiedades:
 
-- copia del home completo permitido por SSH;
+- copia integra del home permitido mediante una frontera de transporte; el
+  comportamiento legacy usa SSH, pero el protocolo central no depende de SSH;
 - validacion estructural del JSON de autenticacion;
 - staging previo;
 - comparacion de origen y staging;
@@ -292,6 +346,19 @@ Schema v2
 
 `<perfil>/.runtime/auth.json` es runtime reconstruible. Su tratamiento debe
 derivarse del adapter y nunca convertirlo en una segunda fuente de credenciales.
+
+La implementacion se divide en fronteras separadas:
+
+1. Protocolo local transaccional: estados, staging, integridad, ownership,
+   activacion atomica, backup y rollback sobre roots sinteticos.
+2. Transporte: interfaz que entrega una copia candidata sin decidir ownership
+   ni activacion. Primero se prueba con transporte sintetico.
+3. Integracion remota: SSH y equipos reales quedan para un alcance y una
+   autorizacion posteriores; no forman parte de las pruebas de construccion.
+
+Antes de congelar la maquina de estados se inventarian con la Etapa F los
+resultados, errores y transiciones que debera representar la salida JSON. La
+implementacion completa de la interfaz JSON permanece en la Etapa F.
 
 Secuencia contractual:
 
@@ -335,12 +402,14 @@ Criterios de salida:
 Skill principal: `nini-agents-profile-security`, coordinada por
 `nini-agents-change-integral`.
 
-### Etapa F: CLI JSON estable
+### Etapa F: implementar y congelar la CLI JSON estable
 
 Objetivo: ofrecer una interfaz consumible por MultiCLI AI, Codexporter y futuras
 automatizaciones sin depender de texto humano.
 
-Contrato minimo a definir antes de implementar:
+El inventario contractual comienza antes de congelar la transferencia de la
+Etapa E, para evitar adaptar despues una interfaz disenada solo para texto
+humano. Contrato minimo a definir antes de implementar:
 
 - activacion explicita y compatible, por ejemplo `--json`;
 - version de schema en cada respuesta;
@@ -422,6 +491,9 @@ Precondiciones:
 Trabajo previsto:
 
 - Migrar MultiCLI AI desde su logica legacy a la CLI JSON de Nini Agents.
+- Preservar en MultiCLI AI su integracion de terminales, incluida Hyper, sus
+  titulos `perfil · proyecto` y el enfoque best effort de ventanas; esta logica
+  permanece del lado consumidor y cambia solamente la invocacion del motor.
 - Migrar Codexporter desde motor independiente a consumidor del movimiento
   seguro integrado.
 - Coordinar el corte para evitar una ventana con implementaciones incompatibles.
@@ -434,25 +506,32 @@ Criterios de salida:
 
 - Ambos consumidores usan el mismo motor y schema soportado.
 - La UI no parsea salida humana ni accede directamente a secretos.
+- La UI conserva sus comportamientos propios de terminal sin introducir
+  dependencias de Hyper en Nini Agents.
 - Codexporter deja de ser owner del algoritmo de transferencia.
 - Rollback de cada consumidor restaura el ultimo contrato compatible sin tocar
   credenciales reales durante pruebas sinteticas.
 - La migracion no se presenta como completa hasta verificar ambos consumidores.
 
-### Etapa I: retiro de compatibilidad y entrega
+### Etapa I: retiros y entrega bajo autorizaciones independientes
 
 Objetivo: retirar deuda temporal solo despues de medir adopcion y confirmar que
-no quedan consumidores legacy.
+no quedan consumidores legacy. Esta etapa agrupa trabajo futuro por
+dependencias, pero no puede aprobarse ni ejecutarse como una sola operacion.
 
-Decisiones que requieren aprobacion futura:
+Subtramos que requieren alcance, evidencia y aprobacion propios:
 
-- retiro del shim `multi-cli`;
-- cambio de `MULTICLI_HOME` o `~/MultiCliProfiles`;
-- limpieza de formatos legacy;
-- instalacion sobre la copia activa;
-- migracion de perfiles reales;
-- conexion a equipos reales;
-- tags, release, publicacion o distribucion.
+- I1, deprecacion: medir consumidores y decidir el retiro del shim `multi-cli`.
+- I2, almacenamiento: decidir cualquier cambio de `MULTICLI_HOME`,
+  `~/MultiCliProfiles` o formatos legacy.
+- I3, instalacion: probar primero destinos temporales y autorizar por separado
+  cualquier cambio sobre una copia activa.
+- I4, datos reales: inspeccionar, migrar, limpiar o borrar perfiles reales solo
+  con objetivos y recuperacion explicitos.
+- I5, operacion remota: conectarse a equipos reales o ejecutar SSH real.
+- I6, publicacion: crear tags, releases, artefactos publicados o distribucion.
+
+La aprobacion de un subtramo no autoriza ninguno de los siguientes.
 
 Criterios de salida:
 
@@ -473,7 +552,12 @@ Criterios de salida:
 | G4 | Modificar MultiCLI AI o Codexporter | Congelar el motor o leer sus repositorios |
 | G5 | Usar perfiles o credenciales reales | Pasar pruebas sinteticas |
 | G6 | Conectarse a otros equipos o ejecutar SSH real | Implementar transporte sintetico |
-| G7 | Instalar, migrar, borrar, publicar o lanzar una release | Completar una auditoria |
+| G7 | Instalar o desinstalar contra un destino temporal acordado | Pasar `release/build.sh --check` |
+| G8 | Modificar una instalacion activa | Probar un destino temporal |
+| G9 | Migrar, limpiar o borrar datos y perfiles reales | Inspeccionarlos o pasar fixtures sinteticos |
+| G10 | Retirar shims, variables, rutas o formatos legacy | Completar la migracion de un consumidor |
+| G11 | Crear o empujar un tag | Construir artefactos o completar la auditoria |
+| G12 | Publicar una release, artefactos o distribucion | Crear un tag o aprobar un build local |
 
 ## Matriz de ownership y skills
 
@@ -619,4 +703,132 @@ Pendientes y siguiente gate:
   expectativas Pester. Ambos commits estan en `origin/main`; no se creo tag ni
   release.
 - Siguiente gate: delimitar la Etapa C y obtener una aprobacion nueva antes de
-  portar `~/.local/bin/codex`, `rules/` o la integracion de titulos con Hyper.
+  auditar la procedencia de `~/.local/bin/codex` y `rules/` y portar solo los
+  comportamientos que pertenezcan al motor.
+
+### 2026-08-22 — correccion de ownership de la integracion Hyper
+
+- Estado: terminado como correccion documental bajo G0.
+- Hallazgo: Hyper no es una capacidad del motor Multi-CLI `6efb0d2` ni del
+  motor Nini Agents. Su implementacion vive en el commit `6eac14f` del snapshot
+  Flutter `legacy-gui` y forma parte de la experiencia de terminal de MultiCLI
+  AI.
+- Correccion: se retiro Hyper de las candidatas de la Etapa C y se traslado su
+  preservacion a la migracion consumidora de MultiCLI AI en la Etapa H.
+- Efecto sobre codigo, perfiles o credenciales: ninguno.
+- Compatibilidad: no cambia comandos ni contratos; evita introducir una
+  dependencia de una terminal concreta dentro del motor.
+- Pendiente: auditar por procedencia y owner `~/.local/bin/codex` y `rules/`
+  antes de proponer el alcance funcional de la Etapa C.
+
+### 2026-08-22 — auditoria y precision del recorrido pendiente
+
+- Estado: terminado como cambio documental bajo G0.
+- Objetivo: evitar que futuros agentes reconstruyan capacidades heredadas,
+  acoplen la transferencia a SSH o interpreten una aprobacion amplia como
+  permiso para operar sobre instalaciones, equipos o datos reales.
+- Estado verificado: `main` y `origin/main` en `6704860`;
+  `multi-cli-base` y su branch remota en `6efb0d2`; `legacy-gui` y su branch
+  remota en `7426e98`.
+- Hallazgos de Etapa C: `~/.local/bin/codex` existia en el upstream historico
+  `abffcba` y hoy falta en el adapter; `rules/` ya tiene contrato para Claude,
+  mientras su posible uso en Codex requiere una decision separada de
+  `--ignore-rules` y validacion integral del adapter.
+- Cambios documentales: se separaron estado inicial y actual; la Etapa D paso a
+  ser auditoria y cierre de brechas; la Etapa E separa protocolo local,
+  transporte e integracion SSH; la Etapa F inventaria JSON antes de congelar la
+  transferencia; la Etapa I y los gates sensibles quedaron divididos por
+  autoridad.
+- Efecto sobre codigo, perfiles, credenciales e instalaciones: ninguno.
+- Compatibilidad: no cambia comandos, schema, adapters ni comportamiento de
+  runtime.
+- Plataformas verificadas: ninguna; no hubo cambio funcional.
+- Siguiente gate: presentar el alcance funcional focalizado de la Etapa C y
+  obtener G2 antes de modificar adapters, guias o pruebas.
+
+### 2026-08-22 — Etapa C: descubrimiento local y reglas de Codex
+
+- Estado: implementado y validado localmente bajo G2; cierre multiplataforma
+  pendiente de ejecutar Pester en Windows.
+- Objetivo: restaurar el descubrimiento de Codex instalado en
+  `~/.local/bin/codex` y compartir el directorio de reglas de usuario como
+  estado normal declarado por el adapter.
+- Alcance aprobado: adapter de Codex, guia, matriz, pruebas contractuales Bash y
+  PowerShell y esta bitacora. Quedaron excluidos launchers, modulos, schema,
+  Hyper, Codexporter, CLI JSON, SSH, instalacion, perfiles reales, commit, push
+  y release.
+- Antes: los candidatos macOS/Linux omitian `~/.local/bin/codex` y `rules/` no
+  formaba parte de `normalState.sharedPaths`.
+- Despues: macOS y Linux declaran el candidato local; `rules/` es estado normal
+  compartido, nunca credencial ni estado de sesion. Un runtime schema v2 previo
+  se reconstruye en el siguiente lanzamiento porque cambia su manifiesto
+  esperado, sin modificar `auth/`.
+- Prueba previa: las nuevas caracterizaciones Bash fallaron por ambos contratos
+  ausentes. Dos pruebas existentes de `overlay_state` fallaron de manera
+  transitoria en esa primera ejecucion y pasaron al repetir la suite completa.
+- Validacion posterior: 37 pruebas Bash focalizadas correctas en
+  `runtime_paths.bats`, `adapter_schema.bats` y `overlay_state.bats`; 17 adapters
+  validados; documentacion validada; `git diff --check` correcto.
+- Efecto sobre credenciales y datos: ninguno. Todas las operaciones mutables
+  usaron homes sinteticos temporales; no se leyeron perfiles reales ni se
+  ejecuto logout, revocacion, migracion o instalacion.
+- Plataformas no verificadas localmente: Windows PowerShell y macOS. Se agrego
+  cobertura Pester para el contrato y el enlace de runtime, pero este host no
+  dispone de PowerShell para ejecutarla. No se probo un binario Codex real.
+- Siguiente gate: ejecutar Pester/CI en Windows antes de cerrar completamente la
+  Etapa C; cualquier commit, push o ejecucion remota requiere instruccion
+  expresa.
+
+### 2026-08-22 — Etapa D: cierre focalizado de brechas del nucleo
+
+- Estado: implementado y validado localmente en Bash bajo G2; cierre de
+  cobertura y comprobacion PowerShell pendientes.
+- Objetivo: corregir brechas demostradas en el contrato declarativo, la
+  reconstruccion y auditoria del runtime y el ciclo de vida seguro de perfiles,
+  manteniendo paridad Bash/PowerShell.
+- Alcance aprobado: adapter de Command Code; validadores y runtime Bash y
+  PowerShell; `doctor --deep`; borrado process-secret; ayuda/completion y
+  compatibilidad `--shared`; documentacion y pruebas sinteticas. Se excluyeron
+  Hyper, Codexporter, movimiento/SSH, CLI JSON, instalacion, perfiles reales,
+  commit, push, CI y release.
+- Antes: Command Code tomaba el home completo como shared root aunque su estado
+  documentado vive bajo `.commandcode`; un runtime existente podia reutilizar
+  enlaces hacia una raiz antigua; shared/session podian solaparse; `filePaths`
+  podia declarar estado huerfano; el doctor PowerShell no comprobaba enlaces y
+  el doctor Bash no interpretaba `runtimeSubdir`; Bash podia borrar un perfil
+  aunque fallara la limpieza de su secreto; PowerShell omitía `auth` y trataba
+  `--shared` schema v2 como el marcador legacy.
+- Despues: Command Code declara `.commandcode` como shared root y mantiene
+  `.commandcode` como subdirectorio de runtime; la vigencia del overlay exige
+  que cada enlace apunte al origen actual; ambos validadores rechazan
+  shared/session solapados y `filePaths` no clasificados; ambos doctors revisan
+  faltantes y destinos incorrectos respetando `runtimeSubdir`; el borrado Bash
+  falla cerrado y conserva el perfil si el keyring no se limpia; PowerShell
+  incluye `auth` y conserva la semantica default de `--shared` para schema v2.
+- Hermeticidad: los flujos process-secret de alto nivel usan un `secret-tool`
+  sintetico dentro del scratch y la prueba de archivo grande invoca
+  `python3`. Ninguna prueba consulta el keyring, perfiles o homes reales.
+- Caracterizacion previa: fallaron como se esperaba la raiz de Command Code,
+  separacion shared/session, pertenencia de `filePaths`, invalidacion por cambio
+  de raiz, auditoria con `runtimeSubdir` y conservacion del perfil ante fallo de
+  limpieza. Las cuatro dependencias previas de Secret Service y el uso de
+  `python` quedaron eliminados del gate local mediante fixtures hermeticos.
+- Validacion posterior: 42/42 pruebas Bash focalizadas; suite Bash completa de
+  228 casos sin fallos (los casos exclusivos de otras plataformas quedaron
+  omitidos por el propio harness); sintaxis Bash correcta; 17 adapters y toda
+  la documentacion validados; `git diff --check` correcto.
+- Gates no ejecutados: Pester, validacion PowerShell y cobertura PowerShell no
+  se ejecutaron porque el host no tiene `powershell` ni `pwsh`. El gate de
+  cobertura Bash no se ejecuto porque falta `bashcov`; no se instalo ninguna
+  dependencia por estar fuera del alcance aprobado.
+- Efecto sobre credenciales y datos: no se leyeron secretos ni perfiles reales;
+  no hubo logout, revocacion, migracion, instalacion, borrado real ni acceso a
+  equipos remotos. El cambio de `delete` aumenta recuperabilidad al preservar
+  el perfil cuando no puede demostrarse la limpieza de su secreto.
+- Compatibilidad: se conservan Bash 3.2, PowerShell 5.1, `MULTICLI_HOME`,
+  `~/MultiCliProfiles`, el shim `multi-cli` y los comandos legacy. No se declara
+  verificacion real en Windows, macOS, Command Code ni Codex.
+- Siguiente gate: ejecutar Pester y ambos gates de cobertura en un entorno
+  equipado; revisar el diff y autorizar por separado cualquier commit, push o
+  CI. La Etapa E requiere un nuevo alcance G2 antes de implementar movimiento
+  seguro.

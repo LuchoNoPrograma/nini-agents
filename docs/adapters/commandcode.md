@@ -29,10 +29,10 @@ nini-agents launch commandcode/work       # sign in on first run; auth.json stay
 
 ## Shared normal state
 
-Shared root: the user home (`%USERPROFILE%` on Windows, `$HOME` on macOS/Linux).
+Shared root: the Command Code state directory (`%USERPROFILE%\.commandcode` on Windows, `$HOME/.commandcode` on macOS/Linux).
 
-- Config: `.commandcode/config.json`, `.commandcode/settings.json`, `.commandcode/skills/`, `.commandcode/plans/`, `.commandcode/taste/`.
-- Sessions: `.commandcode/projects/`, `.commandcode/history.jsonl`, `.commandcode/file-history/`.
+- Config: `config.json`, `settings.json`, `skills/`, `plans/`, `taste/`.
+- Sessions: `projects/`, `history.jsonl`, `file-history/`.
 
 ## Known limitations
 

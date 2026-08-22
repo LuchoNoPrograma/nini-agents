@@ -788,6 +788,45 @@ Describe 'restored launcher behaviors' {
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
+    It 'doctor --deep understands runtimeSubdir and detects missing or misdirected links' {
+        $scratch = New-ProfileFixtureScratch
+        try {
+            Write-ProfileFixtureAdapter -Scratch $scratch
+            $adapterPath = Join-Path $scratch.Tools 'fixture\adapter.json'
+            $adapter = Get-Content -LiteralPath $adapterPath -Raw | ConvertFrom-Json
+            $adapter.normalState | Add-Member -NotePropertyName runtimeSubdir -NotePropertyValue 'state'
+            $adapter | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $adapterPath -Encoding UTF8
+            $probe = Join-Path $scratch.Root 'noop.cmd'
+            '@exit /b 0' | Set-Content -LiteralPath $probe -Encoding ASCII
+
+            (Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('new', 'fixture/account-a', '--no-seed')).ExitCode | Should Be 0
+            $launch = Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('launch', 'fixture/account-a') -Probe $probe
+            if ($launch.ExitCode -ne 0) { Write-Host $launch.Output }
+            $launch.ExitCode | Should Be 0
+            $runtime = Join-Path $scratch.Profiles 'fixture\account-a\.runtime\state'
+
+            $clean = Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('doctor', '--deep')
+            if ($clean.ExitCode -ne 0) { Write-Host $clean.Output }
+            $clean.ExitCode | Should Be 0
+            $clean.Output | Should Not Match 'wrong target'
+
+            Remove-Item -LiteralPath (Join-Path $runtime 'agents') -Force
+            $missing = Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('doctor', '--deep')
+            $missing.ExitCode | Should Be 1
+            $missing.Output | Should Match 'missing declared runtime path state[\\/]agents'
+
+            (Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('launch', 'fixture/account-a') -Probe $probe).ExitCode | Should Be 0
+            $wrongSource = Join-Path $scratch.UserHome '.fixture\wrong-config.toml'
+            Set-Content -LiteralPath $wrongSource -Value 'wrong' -Encoding ASCII
+            $runtimeConfig = Join-Path $runtime 'config.toml'
+            Remove-Item -LiteralPath $runtimeConfig -Force
+            New-Item -ItemType HardLink -Path $runtimeConfig -Target $wrongSource | Out-Null
+            $wrong = Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('doctor', '--deep')
+            $wrong.ExitCode | Should Be 1
+            $wrong.Output | Should Match 'runtime link state[\\/]config\.toml has the wrong target'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
     It 'migrate --dry-run prints the plan and writes nothing' {
         $scratch = New-ProfileFixtureScratch
         try {

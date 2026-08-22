@@ -7,6 +7,7 @@ load helpers/common
 
 setup() {
   setup_scratch
+  install_fake_secret_tool
   export NINI_AGENTS_INSTALL_DIR="$MULTICLI_SCRATCH/install"
   export NINI_AGENTS_BIN_LINK="$MULTICLI_SCRATCH/bin/nini-agents"
   export MULTICLI_BIN_LINK="$MULTICLI_SCRATCH/bin/multi-cli"

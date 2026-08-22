@@ -65,6 +65,27 @@ validate_adapter_path_separation() {
   done < <(jq -r "$left_path // [] | .[]?" "$manifest" 2>/dev/null | tr -d '\r')
 }
 
+# filePaths only classifies entries already owned by sharedPaths or
+# sessionPaths. An orphan file classification would create undeclared state.
+validate_adapter_file_path_membership() {
+  local manifest="$1" file_path declared normalized_file normalized_declared found
+  while IFS= read -r file_path; do
+    [ -z "$file_path" ] && continue
+    is_safe_adapter_path "$file_path" || continue
+    normalized_file="$(printf '%s' "${file_path//\\//}" | tr '[:upper:]' '[:lower:]')"
+    found=false
+    while IFS= read -r declared; do
+      [ -z "$declared" ] && continue
+      normalized_declared="$(printf '%s' "${declared//\\//}" | tr '[:upper:]' '[:lower:]')"
+      if [ "$normalized_file" = "$normalized_declared" ]; then
+        found=true
+        break
+      fi
+    done < <({ jq -r '.normalState.sharedPaths // [] | .[]?' "$manifest"; jq -r '.normalState.sessionPaths // [] | .[]?' "$manifest"; } 2>/dev/null | tr -d '\r')
+    [ "$found" = true ] || adapter_validation_error "file path '$file_path' must also be declared in sharedPaths or sessionPaths"
+  done < <(jq -r '.normalState.filePaths // [] | .[]?' "$manifest" 2>/dev/null | tr -d '\r')
+}
+
 # Reject any {placeholder} outside the known set; an unknown one would expand
 # to a literal brace directory at launch time.
 validate_adapter_placeholders() {
@@ -229,8 +250,10 @@ validate_adapter_v2() {
   validate_adapter_path_separation "$manifest" '.account.credentialFiles' 'credential path' '.normalState.sharedPaths' 'shared path'
   validate_adapter_path_separation "$manifest" '.account.credentialFiles' 'credential path' '.normalState.sessionPaths' 'session path'
   validate_adapter_path_separation "$manifest" '.account.credentialFiles' 'credential path' '.normalState.unsafePaths' 'unsafe path'
+  validate_adapter_path_separation "$manifest" '.normalState.sharedPaths' 'shared path' '.normalState.sessionPaths' 'session path'
   validate_adapter_path_separation "$manifest" '.normalState.sharedPaths' 'shared path' '.normalState.unsafePaths' 'unsafe path'
   validate_adapter_path_separation "$manifest" '.normalState.sessionPaths' 'session path' '.normalState.unsafePaths' 'unsafe path'
+  validate_adapter_file_path_membership "$manifest"
   validate_adapter_support "$manifest"
 }
 

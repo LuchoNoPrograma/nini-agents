@@ -138,6 +138,25 @@ function Get-RuntimeManifestLines {
         Where-Object { $_ } | ForEach-Object { if ($stateSubdir) { "$stateSubdir/$_" } else { $_ } }
 }
 
+function Test-RuntimePathTarget {
+    param([string]$Path, [string]$ExpectedSource)
+    if (-not (Test-Path -LiteralPath $Path) -or -not (Test-Path -LiteralPath $ExpectedSource)) { return $false }
+    $item = Get-Item -LiteralPath $Path -Force
+    $linkType = Get-RuntimeProperty -Object $item -Name 'LinkType'
+    if (-not $linkType) { return $false }
+    $targets = @(Get-RuntimeProperty -Object $item -Name 'Target')
+    $expected = [System.IO.Path]::GetFullPath($ExpectedSource).TrimEnd('\')
+    foreach ($target in $targets) {
+        if (-not $target) { continue }
+        $candidate = [string]$target
+        if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+            $candidate = Join-Path (Split-Path -Parent $Path) $candidate
+        }
+        if ([System.IO.Path]::GetFullPath($candidate).TrimEnd('\') -eq $expected) { return $true }
+    }
+    return $false
+}
+
 function Test-RuntimeOverlayCurrent {
     param($Adapter, [string]$RuntimeRoot)
     $manifestPath = Join-Path $RuntimeRoot '.runtime-manifest'
@@ -145,8 +164,27 @@ function Test-RuntimeOverlayCurrent {
     $expected = @(Get-RuntimeManifestLines -Adapter $Adapter)
     $actual = @(Get-Content -LiteralPath $manifestPath)
     if (($expected -join "`n") -ne ($actual -join "`n")) { return $false }
+    $profileDir = Split-Path -Parent $RuntimeRoot
+    $sharedRoot = Get-RuntimePlatformRoot -Adapter $Adapter
+    $normalState = Get-RuntimeProperty -Object $Adapter -Name 'normalState'
+    $account = Get-RuntimeProperty -Object $Adapter -Name 'account'
+    $stateSubdir = Get-RuntimeProperty -Object $normalState -Name 'runtimeSubdir'
     foreach ($relativePath in $expected) {
-        if (-not (Test-Path -LiteralPath (Join-Path $RuntimeRoot ($relativePath -replace '/', '\')))) { return $false }
+        $runtimePath = Join-Path $RuntimeRoot ($relativePath -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $runtimePath)) { return $false }
+        $declaredPath = $relativePath
+        if ($stateSubdir) {
+            $prefix = ($stateSubdir -replace '\\', '/').TrimEnd('/') + '/'
+            if ($declaredPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+                $declaredPath = $declaredPath.Substring($prefix.Length)
+            }
+        }
+        $expectedSource = if (@($account.credentialFiles) -contains $declaredPath) {
+            Join-Path (Join-Path $profileDir 'auth') ($declaredPath -replace '/', '\')
+        } else {
+            Join-Path $sharedRoot ($declaredPath -replace '/', '\')
+        }
+        if (-not (Test-RuntimePathTarget -Path $runtimePath -ExpectedSource $expectedSource)) { return $false }
     }
     return $true
 }

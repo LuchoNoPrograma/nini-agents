@@ -94,6 +94,29 @@ JSON
   [ "$status" -eq 0 ]
 }
 
+@test "Codex adapter declares user-local POSIX discovery and shared rules state" {
+  run jq -e '
+    (.binary.macos | index("$HOME/.local/bin/codex")) != null and
+    (.binary.linux | index("$HOME/.local/bin/codex")) != null and
+    (.normalState.sharedPaths | index("rules")) != null and
+    (.account.credentialFiles | index("rules")) == null and
+    (.normalState.sessionPaths | index("rules")) == null
+  ' "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json"
+
+  [ "$status" -eq 0 ]
+}
+
+@test "Command Code adapter uses its documented user state directory as the shared root" {
+  run jq -e '
+    .normalState.runtimeSubdir == ".commandcode" and
+    .normalState.root.windows == "%USERPROFILE%\\.commandcode" and
+    .normalState.root.macos == "$HOME/.commandcode" and
+    .normalState.root.linux == "$HOME/.commandcode"
+  ' "$MULTICLI_REPO_ROOT/ai-tools/commandcode/adapter.json"
+
+  [ "$status" -eq 0 ]
+}
+
 @test "Windows Bash resolves only AppX OS-user adapters" {
   local stub_bin="$MULTICLI_SCRATCH/bin"
   mkdir -p "$stub_bin" "$TOOLS_ROOT/codex-gui"
@@ -173,6 +196,28 @@ JSON
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"credential path 'sessions/auth.json' overlaps session path 'sessions'"* ]]
+}
+
+@test "validator rejects shared paths overlapping session paths" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.normalState.sharedPaths=["state"] | .normalState.sessionPaths=["state/sessions"]')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"shared path 'state' overlaps session path 'state/sessions'"* ]]
+}
+
+@test "validator rejects file paths that are not declared as shared or session state" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.normalState.filePaths=["undeclared.json"]')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"file path 'undeclared.json' must also be declared in sharedPaths or sessionPaths"* ]]
 }
 
 @test "validator rejects parent traversal in declared state paths" {

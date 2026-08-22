@@ -26,6 +26,16 @@ load helpers/common
   [[ "$output" == *"complete -F _multi_cli_completions nini-agents multi-cli"* ]]
 }
 
+@test "help and shell completion expose the auth command" {
+  run "$MULTICLI_REPO_ROOT/nini-agents" help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"auth set|status|clear"* ]]
+
+  run "$MULTICLI_REPO_ROOT/nini-agents" completion bash
+  [ "$status" -eq 0 ]
+  [[ "$output" == *" auth "* ]]
+}
+
 @test "credential target namespace remains backward compatible" {
   run bash -c 'source "$1"; mc_cred_target fixture 11111111-2222-3333-4444-555555555555 TOKEN' _ \
     "$MULTICLI_REPO_ROOT/lib/credential-store.sh"

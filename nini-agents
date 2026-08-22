@@ -880,8 +880,10 @@ cmd_delete() {
     if [ "$mechanism" = processSecret ]; then
       env_var="$(json_str '.account.secret.environmentVariable' "$apath")"
       profile_id="$(json_str '.profileId' "$pdir/.profile.json")"
-      [ -n "$env_var" ] && [ -n "$profile_id" ] && \
-        mc_cred_clear "$(mc_cred_target "$TOOL" "$profile_id" "$env_var")" 2>/dev/null || true
+      if [ -n "$env_var" ] && [ -n "$profile_id" ]; then
+        mc_cred_clear "$(mc_cred_target "$TOOL" "$profile_id" "$env_var")" || \
+          abort "Could not clear the process-secret credential for '$spec'; the profile was preserved. Resolve the credential-store error, then retry deletion."
+      fi
     fi
   fi
   if [ -f "$pdir/.osuser.json" ]; then
@@ -1616,8 +1618,9 @@ cmd_doctor() {
           warnings=$((warnings + 1))
           continue
         fi
-        local apath expected item target expected_target
+        local apath expected item expected_target state_subdir declared credential_path credential
         apath="$(adapter_path "$(basename "$(dirname "$pdir")")")"
+        state_subdir="$(runtime_json_str '.normalState.runtimeSubdir' "$apath")"
         while IFS= read -r rel; do
           [ -n "$rel" ] || continue
           item="$runtime/$rel"
@@ -1626,19 +1629,20 @@ cmd_doctor() {
             warnings=$((warnings + 1))
             continue
           fi
-          if [ -L "$item" ]; then
-            target="$(cd "$(dirname "$item")" && cd "$(dirname "$(readlink "$item")")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$(readlink "$item")")" || true)"
-            expected_target=""
-            if runtime_json_arr '.account.credentialFiles' "$apath" | grep -qxF "$rel"; then
-              expected_target="$pdir/auth/$rel"
-            else
-              expected_target="$(runtime_platform_root "$apath")/$rel"
-            fi
-            expected_target="$(cd "$(dirname "$expected_target")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$expected_target")" || true)"
-            if [ -z "$target" ] || [ "$target" != "$expected_target" ]; then
-              printf '  \033[33m[WARN] runtime path %s in %s points to the wrong target\033[0m\n' "$rel" "$pdir"
-              warnings=$((warnings + 1))
-            fi
+          declared="$rel"
+          [ -z "$state_subdir" ] || declared="${rel#${state_subdir}/}"
+          credential=false
+          while IFS= read -r credential_path; do
+            [ "$credential_path" = "$declared" ] && credential=true && break
+          done < <(runtime_json_arr '.account.credentialFiles' "$apath")
+          if [ "$credential" = true ]; then
+            expected_target="$pdir/auth/$declared"
+          else
+            expected_target="$(runtime_platform_root "$apath")/$declared"
+          fi
+          if [ ! -e "$expected_target" ] || [ ! "$item" -ef "$expected_target" ]; then
+            printf '  \033[33m[WARN] runtime link %s has the wrong target in %s\033[0m\n' "$rel" "$pdir"
+            warnings=$((warnings + 1))
           fi
         done < "$runtime/.runtime-manifest"
         while IFS= read -r f; do

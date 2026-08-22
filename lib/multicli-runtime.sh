@@ -182,14 +182,31 @@ runtime_expected_manifest() {
 }
 
 runtime_overlay_is_current() {
-  local manifest="$1" runtime_root="$2" expected actual relative
+  local manifest="$1" runtime_root="$2" expected actual relative declared expected_source
+  local profile_dir shared_root state_subdir credential credential_path
   [ -f "$runtime_root/.runtime-manifest" ] || return 1
   expected="$(runtime_expected_manifest "$manifest")"
   actual="$(tr -d '\r' < "$runtime_root/.runtime-manifest")"
   [ "$actual" = "$expected" ] || return 1
+  profile_dir="$(dirname "$runtime_root")"
+  shared_root="$(runtime_platform_root "$manifest")"
+  state_subdir="$(runtime_json_str '.normalState.runtimeSubdir' "$manifest")"
   while IFS= read -r relative; do
     [ -z "$relative" ] && continue
     [ -e "$runtime_root/$relative" ] || [ -L "$runtime_root/$relative" ] || return 1
+    declared="$relative"
+    [ -z "$state_subdir" ] || declared="${relative#${state_subdir}/}"
+    credential=false
+    while IFS= read -r credential_path; do
+      [ "$credential_path" = "$declared" ] && credential=true && break
+    done < <(runtime_json_arr '.account.credentialFiles' "$manifest")
+    if [ "$credential" = true ]; then
+      expected_source="$profile_dir/auth/$declared"
+    else
+      expected_source="$shared_root/$declared"
+    fi
+    [ -e "$expected_source" ] || [ -L "$expected_source" ] || return 1
+    [ "$runtime_root/$relative" -ef "$expected_source" ] || return 1
   done <<< "$expected"
 }
 
