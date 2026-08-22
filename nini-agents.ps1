@@ -31,6 +31,8 @@ param (
     [Alias('i')]
     [switch]$WholeRoot,
 
+    [switch]$Json,
+
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$ForwardArgs
 )
@@ -2123,7 +2125,7 @@ function Read-ContinueArgs {
     }
 }
 
-$jsonOutput = $false
+$jsonOutput = [bool]$Json
 $normalizedTokens = @()
 $afterDelimiter = $false
 $rawTokens = @()
