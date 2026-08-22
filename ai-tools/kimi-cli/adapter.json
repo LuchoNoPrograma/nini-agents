@@ -59,7 +59,7 @@
   "support": {
     "windows": {
       "level": "supported",
-      "reason": "process token (KIMI_MODEL_API_KEY) via multi-cli auth set"
+      "reason": "process token (KIMI_MODEL_API_KEY) via nini-agents auth set"
     },
     "macos": {
       "level": "supported"

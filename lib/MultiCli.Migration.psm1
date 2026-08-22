@@ -1,6 +1,6 @@
-# Legacy -> schema-v2 migration engine for multi-cli (Windows).
+# Legacy -> schema-v2 migration engine for nini-agents (Windows).
 #
-# Imported by multi-cli.ps1, which resolves the adapter and profile directory
+# Imported by nini-agents.ps1, which resolves the adapter and profile directory
 # and wires the `migrate` command to Invoke-MultiCliMigration. Mirrors
 # lib/migration.sh: same classification rules, plan lines, journal shape, and
 # refusal messages.
@@ -403,7 +403,7 @@ function Write-MigrationJournal {
         sharedRoot    = $Context.SharedRoot
         status        = $Status
         preferProfile = [bool]$Context.PreferProfile
-        action        = "Re-run 'multi-cli migrate $($Context.Tool)/$($Context.Name)' to roll forward; to roll back, move each 'done' entry from 'to' back to 'from'."
+        action        = "Re-run 'nini-agents migrate $($Context.Tool)/$($Context.Name)' to roll forward; to roll back, move each 'done' entry from 'to' back to 'from'."
         operations    = @($Ops)
     }
     $temporaryPath = "$JournalPath.tmp"
@@ -546,7 +546,7 @@ function Invoke-MigrationOps {
         if ($failed) {
             $op.Status = 'failed'
             Write-MigrationJournal -JournalPath $JournalPath -Status 'failed' -Context $Context -Ops $Ops
-            throw "Migration failed: $failed`nRoll-forward/rollback journal written to $JournalPath`nRe-run 'multi-cli migrate $($Context.Spec)' to roll forward."
+            throw "Migration failed: $failed`nRoll-forward/rollback journal written to $JournalPath`nRe-run 'nini-agents migrate $($Context.Spec)' to roll forward."
         }
         $line = Get-MigrationOpLine -Op $op
         $Lines.Add($line) | Out-Null
@@ -556,10 +556,10 @@ function Invoke-MigrationOps {
 }
 
 # =============================================================================
-# Entry point -- wired into the launcher as `multi-cli migrate`
+# Entry point -- wired into the launcher as `nini-agents migrate`
 # =============================================================================
 
-# Entry point wired to `multi-cli migrate`. Refuses unclassifiable profiles
+# Entry point wired to `nini-agents migrate`. Refuses unclassifiable profiles
 # before writing, plans, then either prints the plan (dry run) or executes it
 # under the journal. Returns a result object with Lines/Migrated/JournalPath.
 function Invoke-MultiCliMigration {
@@ -641,7 +641,7 @@ function Invoke-MultiCliMigration {
     [void]$lines.Add("Migrated $spec to schema-v2 (accountOverlay).")
     Write-Host "Migrated $spec to schema-v2 (accountOverlay)."
     if ($mechanism -eq 'processSecret') {
-        $note = "Note: adapter '$tool' uses process-secret credentials. Run: multi-cli auth set $spec before launching."
+        $note = "Note: adapter '$tool' uses process-secret credentials. Run: nini-agents auth set $spec before launching."
         [void]$lines.Add($note)
         Write-Host $note
     }

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [switch]$Check,
-    [string]$OutputDirectory = (Join-Path ([System.IO.Path]::GetTempPath()) 'multi-cli-release'),
+    [string]$OutputDirectory = (Join-Path ([System.IO.Path]::GetTempPath()) 'nini-agents-release'),
     [string]$ExpectedVersion
 )
 
@@ -16,20 +16,20 @@ if ($ExpectedVersion -and $version -ne $ExpectedVersion) {
     throw "Expected version $ExpectedVersion, found $version."
 }
 
-$bashSource = (Get-Content -LiteralPath (Join-Path $root 'multi-cli') -Raw) -replace "`r", ''
-$powershellSource = (Get-Content -LiteralPath (Join-Path $root 'multi-cli.ps1') -Raw) -replace "`r", ''
+$bashSource = (Get-Content -LiteralPath (Join-Path $root 'nini-agents') -Raw) -replace "`r", ''
+$powershellSource = (Get-Content -LiteralPath (Join-Path $root 'nini-agents.ps1') -Raw) -replace "`r", ''
 if ($bashSource -notmatch "(?m)^VERSION=`"$([regex]::Escape($version))`"$") {
-    throw "multi-cli does not embed version $version."
+    throw "nini-agents does not embed version $version."
 }
 if ($powershellSource -notmatch "(?m)^\`$VERSION = '$([regex]::Escape($version))'$") {
-    throw "multi-cli.ps1 does not embed version $version."
+    throw "nini-agents.ps1 does not embed version $version."
 }
 
 Write-Host "Version metadata is synchronized at $version."
 if ($Check) { return }
 
 $output = [System.IO.Path]::GetFullPath($OutputDirectory)
-$archiveRoot = "multi-cli-v$version"
+$archiveRoot = "nini-agents-v$version"
 $stage = Join-Path $output $archiveRoot
 $archive = Join-Path $output "$archiveRoot-windows.zip"
 $prefix = $output.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
@@ -51,8 +51,8 @@ Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
 $paths = @(
-    'LICENSE', 'README.md', 'assets/banner.svg', 'assets/i18n', 'docs', 'lib', 'schema', 'ai-tools',
-    'multi-cli.ps1', 'install/install.ps1', 'install/uninstall.ps1'
+    'LICENSE', 'NOTICE', 'README.md', 'assets/banner.svg', 'assets/i18n', 'docs', 'lib', 'schema', 'ai-tools',
+    'nini-agents.ps1', 'multi-cli.ps1', 'install/install.ps1', 'install/uninstall.ps1'
 )
 
 foreach ($relative in $paths) {

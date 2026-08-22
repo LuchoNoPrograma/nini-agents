@@ -11,7 +11,7 @@ Mantener trazabilidad entre la base upstream, los cambios propios y las migracio
 
 ## Alcance del proyecto
 
-- Remotes `multi-cli-upstream` y `legacy`, branch base `multi-cli-base`, branch de desarrollo `nini-agents-cli`, instaladores, release y compatibilidad de CLI.
+- Remotes `origin`, `multi-cli-upstream` y `legacy`, branch base `multi-cli-base`, branch de desarrollo `main`, branch `legacy-gui`, instaladores, release y compatibilidad de CLI.
 - Migracion futura de consumidores desde `/home/nini/StudioProjects/multi_cli_ai` o `../codexporter` solo cuando exista un alcance separado y aprobado.
 
 ## Fuentes
@@ -21,8 +21,8 @@ Mantener trazabilidad entre la base upstream, los cambios propios y las migracio
 
 ## Patrones del proyecto
 
-- `install/install.sh` y `install/install.ps1`: `MULTICLI_REPO` y `MULTICLI_INSTALL_DIR` separan el origen del fork y el destino de instalacion.
-- `release/build.sh` y `release/build.ps1`: la version canonica de `release/VERSION` debe coincidir con ambos entrypoints antes de empaquetar.
+- `install/install.sh` y `install/install.ps1`: `NINI_AGENTS_REPO` y `NINI_AGENTS_INSTALL_DIR` prefieren el fork mientras las variables `MULTICLI_*` permanecen como compatibilidad temporal.
+- `release/build.sh` y `release/build.ps1`: la version canonica de `release/VERSION` debe coincidir con `nini-agents` y `nini-agents.ps1`; los paquetes incluyen los shims legacy.
 - `tests/release_build.bats` y `tests/RepositoryLayout.Tests.ps1`: release y layout se verifican sin depender de la instalacion activa.
 
 ## Flujo

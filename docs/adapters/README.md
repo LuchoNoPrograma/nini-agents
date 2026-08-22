@@ -1,6 +1,6 @@
 # AI tool guides
 
-Multi-CLI supports 17 AI tools. Each guide covers installation, account isolation, shared state, limitations, and platform support. The manifest beside each tool directory is the runtime source of truth.
+Nini Agents supports 17 AI tools. Each guide covers installation, account isolation, shared state, limitations, and platform support. The manifest beside each tool directory is the runtime source of truth.
 
 | AI tool | Product | Type | Account boundary | Manifest |
 |---|---|---|---|---|

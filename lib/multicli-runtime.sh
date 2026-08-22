@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# multicli-runtime.sh -- schema-v2 accountOverlay runtime for multi-cli.
+# multicli-runtime.sh -- schema-v2 accountOverlay runtime for nini-agents.
 #
 # Builds the per-profile runtime view: declared credential files stay
 # profile-local under <profile>/auth, declared shared/session state is linked
 # from the adapter's native root, and the launch environment is expanded from
-# adapter placeholders. Sourced by multi-cli after lib/adapter-validation.sh;
+# adapter placeholders. Sourced by nini-agents after lib/adapter-validation.sh;
 # relies on the launcher's abort/platform/resolve_path_token and the jq
 # helpers below.
 
@@ -207,7 +207,7 @@ runtime_build_overlay() {
       continue
     fi
     attempts=$((attempts + 1))
-    [ "$attempts" -lt 600 ] || abort "Timed out waiting for profile runtime lock '$lock_dir'. Close a stuck multi-cli launch and retry."
+    [ "$attempts" -lt 600 ] || abort "Timed out waiting for profile runtime lock '$lock_dir'. Close a stuck nini-agents launch and retry."
     sleep 0.05
   done
   printf '%s\n' "${BASHPID:-$$}" > "$lock_dir/pid"
@@ -269,7 +269,7 @@ runtime_expand_value() {
 # Launch $binary with the adapter's isolation environment. fileOverlay builds
 # a per-profile runtime view; processSecret reads the profile's secret from
 # the OS credential store and injects it into the child environment only
-# (fail-closed until `multi-cli auth set`); osUserCredentialStore and
+# (fail-closed until `nini-agents auth set`); osUserCredentialStore and
 # inseparable refuse to launch by design. Extra binary args follow $@.
 runtime_launch_account_overlay() {
   local tool="$1" profile_dir="$2" binary="$3"; shift 3
@@ -289,7 +289,7 @@ runtime_launch_account_overlay() {
       local secret_target
       secret_target="$(mc_cred_target "$tool" "$profile_id" "$secret_env_var")"
       process_secret="$(mc_cred_get "$secret_target")" || \
-        abort "Profile '$tool/$(basename "$profile_dir")' has no stored credential. Run: multi-cli auth set $tool/$(basename "$profile_dir")"
+        abort "Profile '$tool/$(basename "$profile_dir")' has no stored credential. Run: nini-agents auth set $tool/$(basename "$profile_dir")"
       ;;
     osUserCredentialStore)
       mc_osuser_ensure "$tool" "$profile_dir" "$manifest"

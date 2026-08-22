@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible Multi-CLI problem
+description: Report a reproducible Nini Agents problem
 title: "[Bug]: "
 labels:
   - "type: bug"
@@ -7,13 +7,13 @@ labels:
 body:
   - type: markdown
     attributes:
-      value: Run `multi-cli doctor` when possible. Search existing issues and remove credentials, account identifiers, and private paths before posting.
+      value: Run `nini-agents doctor` when possible. Search existing issues and remove credentials, account identifiers, and private paths before posting.
   - type: input
     id: version
     attributes:
-      label: Multi-CLI version or commit
-      description: Paste the output of `multi-cli version`. For an installation failure, provide the release version or commit you tried.
-      placeholder: multi-cli 1.0.0 or commit 1a2b3c4
+      label: Nini Agents version or commit
+      description: Paste the output of `nini-agents version`. For an installation failure, provide the release version or commit you tried.
+      placeholder: nini-agents 1.0.0 or commit 1a2b3c4
     validations:
       required: true
   - type: input
@@ -63,7 +63,7 @@ body:
     id: diagnostics
     attributes:
       label: Sanitized diagnostics
-      description: Paste relevant `multi-cli doctor` output or logs after removing secrets and private data.
+      description: Paste relevant `nini-agents doctor` output or logs after removing secrets and private data.
       render: shell
   - type: checkboxes
     id: checks

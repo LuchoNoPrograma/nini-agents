@@ -1,5 +1,5 @@
 $script:RepoRoot = Split-Path -Parent $PSScriptRoot
-$script:LauncherPath = Join-Path $script:RepoRoot 'multi-cli.ps1'
+$script:LauncherPath = Join-Path $script:RepoRoot 'nini-agents.ps1'
 
 function New-OverlayScratch {
     $root = Join-Path ([System.IO.Path]::GetTempPath()) ("mcli_overlay_" + [guid]::NewGuid().ToString('N'))

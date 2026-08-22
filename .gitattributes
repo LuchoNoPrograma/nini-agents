@@ -8,6 +8,7 @@ release/VERSION text eol=lf
 *.sh text eol=lf
 *.bash text eol=lf
 *.bats text eol=lf
+nini-agents text eol=lf
 multi-cli text eol=lf
 
 # Windows-native scripts and modules.

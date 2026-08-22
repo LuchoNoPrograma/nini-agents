@@ -1,7 +1,7 @@
 <div dir="rtl">
 
 <p align="center">
-  <img src="../../assets/i18n/ar/banner.svg" alt="Multi-CLI. استخدم عدة حسابات في الوقت نفسه دون التبديل بينها." width="760"/>
+  <img src="../../assets/i18n/ar/banner.svg" alt="Nini Agents. استخدم عدة حسابات في الوقت نفسه دون التبديل بينها." width="760"/>
 </p>
 
 <p align="center">استخدم عدة حسابات في الوقت نفسه دون التبديل بينها.</p>
@@ -42,16 +42,16 @@
 تتطلب هذه الطريقة [Git](https://git-scm.com/downloads).
 
 ```bash
-git clone https://github.com/Spielewoy/multi-cli.git
-cd multi-cli
+git clone https://github.com/LuchoNoPrograma/nini-agents.git
+cd nini-agents
 ./install/install.sh --local
 ```
 
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/Spielewoy/multi-cli.git
-cd multi-cli
+git clone https://github.com/LuchoNoPrograma/nini-agents.git
+cd nini-agents
 .\install\install.ps1 -Local
 ```
 
@@ -60,9 +60,9 @@ cd multi-cli
 ## البدء السريع
 
 ```bash
-multi-cli doctor
-multi-cli new claude-cli/work
-multi-cli claude-cli/work
+nini-agents doctor
+nini-agents new claude-cli/work
+nini-agents claude-cli/work
 ```
 
 <a id="supported-ai-tools"></a>
@@ -89,7 +89,7 @@ multi-cli claude-cli/work
 | [Windsurf](../adapters/windsurf.md) | `windsurf` | Windows وmacOS وLinux | مستخدم نظام التشغيل |
 | [Zed](../adapters/zed.md) | `zed` | Windows | مستخدم نظام التشغيل |
 
-راجع قيود المنصات في [مصفوفة الدعم](../support-matrix.md). شغّل `multi-cli tools` للتحقق من جهازك.
+راجع قيود المنصات في [مصفوفة الدعم](../support-matrix.md). شغّل `nini-agents tools` للتحقق من جهازك.
 
 <a id="commands"></a>
 
@@ -99,40 +99,40 @@ multi-cli claude-cli/work
 
 | الأمر | الإجراء |
 |---|---|
-| `multi-cli new <tool>/<name>` | إنشاء ملف تعريف ببيانات اعتماد منفصلة وحالة عادية مشتركة |
-| `multi-cli new <tool>/<name> --isolated` | إنشاء ملف تعريف يعزل المجلد بالكامل عندما تدعم أداة الذكاء الاصطناعي ذلك؛ الأسماء البديلة: `--isolate` و`-i` |
-| `multi-cli new <tool>/<name> --from <template>` | إنشاء ملف تعريف بالمخطط v2 من قالب بالمخطط v2 |
-| `multi-cli <tool>/<name>` | تشغيل ملف تعريف |
-| `multi-cli launch <tool>/<name> [-- args...]` | تشغيل الأداة وتمرير الوسائط إليها |
-| `multi-cli list [<tool>]` | عرض ملفات التعريف |
-| `multi-cli clone <tool>/<src> <tool>/<dest>` | نسخ ملف تعريف بالمخطط v2 |
-| `multi-cli rename <tool>/<old> <tool>/<new>` | إعادة تسمية ملف تعريف |
-| `multi-cli delete <tool>/<name>` | حذف ملف تعريف بعد التأكيد |
+| `nini-agents new <tool>/<name>` | إنشاء ملف تعريف ببيانات اعتماد منفصلة وحالة عادية مشتركة |
+| `nini-agents new <tool>/<name> --isolated` | إنشاء ملف تعريف يعزل المجلد بالكامل عندما تدعم أداة الذكاء الاصطناعي ذلك؛ الأسماء البديلة: `--isolate` و`-i` |
+| `nini-agents new <tool>/<name> --from <template>` | إنشاء ملف تعريف بالمخطط v2 من قالب بالمخطط v2 |
+| `nini-agents <tool>/<name>` | تشغيل ملف تعريف |
+| `nini-agents launch <tool>/<name> [-- args...]` | تشغيل الأداة وتمرير الوسائط إليها |
+| `nini-agents list [<tool>]` | عرض ملفات التعريف |
+| `nini-agents clone <tool>/<src> <tool>/<dest>` | نسخ ملف تعريف بالمخطط v2 |
+| `nini-agents rename <tool>/<old> <tool>/<new>` | إعادة تسمية ملف تعريف |
+| `nini-agents delete <tool>/<name>` | حذف ملف تعريف بعد التأكيد |
 
 ### بيانات الاعتماد وقابلية النقل
 
 | الأمر | الإجراء |
 |---|---|
-| `multi-cli auth set <tool>/<profile>` | حفظ سر العملية في مخزن بيانات اعتماد نظام التشغيل |
-| `multi-cli auth status <tool>/<profile>` | التحقق من وجود السر |
-| `multi-cli auth clear <tool>/<profile>` | حذف السر |
-| `multi-cli continue <tool> <src> <dest> [--dry-run] [--no-merge]` | نسخ حالة الجلسة المدعومة دون نسخ بيانات الاعتماد |
-| `multi-cli template save <tool>/<profile> <name>` | حفظ قالب بالمخطط v2 خالٍ من بيانات الاعتماد |
-| `multi-cli template list \| delete <name>` | عرض القوالب أو حذفها |
-| `multi-cli export <tool>/<name> [path]` | تصدير ملف تعريف بالمخطط v2 |
-| `multi-cli import <archive> <tool>/<name>` | استيراد أرشيف بالمخطط v2 |
+| `nini-agents auth set <tool>/<profile>` | حفظ سر العملية في مخزن بيانات اعتماد نظام التشغيل |
+| `nini-agents auth status <tool>/<profile>` | التحقق من وجود السر |
+| `nini-agents auth clear <tool>/<profile>` | حذف السر |
+| `nini-agents continue <tool> <src> <dest> [--dry-run] [--no-merge]` | نسخ حالة الجلسة المدعومة دون نسخ بيانات الاعتماد |
+| `nini-agents template save <tool>/<profile> <name>` | حفظ قالب بالمخطط v2 خالٍ من بيانات الاعتماد |
+| `nini-agents template list \| delete <name>` | عرض القوالب أو حذفها |
+| `nini-agents export <tool>/<name> [path]` | تصدير ملف تعريف بالمخطط v2 |
+| `nini-agents import <archive> <tool>/<name>` | استيراد أرشيف بالمخطط v2 |
 
 ### الصيانة
 
 | الأمر | الإجراء |
 |---|---|
-| `multi-cli migrate <tool>/<name> [--dry-run] [--prefer-profile]` | ترحيل ملف تعريف قديم إلى schema v2 |
-| `multi-cli status` | عرض ملفات التعريف وأحجامها |
-| `multi-cli stats` | عرض مساحة التخزين التي تستخدمها ملفات التعريف |
-| `multi-cli doctor [--deep]` | تشخيص الإعداد وتدقيق بيئات التشغيل اختياريًا |
-| `multi-cli completion {bash\|zsh\|powershell}` | طباعة إعداد الإكمال التلقائي للصدفة |
-| `multi-cli help` | عرض جميع الأوامر |
-| `multi-cli version` | عرض الإصدار المثبّت |
+| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]` | ترحيل ملف تعريف قديم إلى schema v2 |
+| `nini-agents status` | عرض ملفات التعريف وأحجامها |
+| `nini-agents stats` | عرض مساحة التخزين التي تستخدمها ملفات التعريف |
+| `nini-agents doctor [--deep]` | تشخيص الإعداد وتدقيق بيئات التشغيل اختياريًا |
+| `nini-agents completion {bash\|zsh\|powershell}` | طباعة إعداد الإكمال التلقائي للصدفة |
+| `nini-agents help` | عرض جميع الأوامر |
+| `nini-agents version` | عرض الإصدار المثبّت |
 
 <a id="how-isolation-works"></a>
 
@@ -145,20 +145,20 @@ multi-cli claude-cli/work
 | مستخدم نظام التشغيل | هوية بيانات الاعتماد الثابتة للمنتج | لا شيء ما لم تسمح أداة الذكاء الاصطناعي بغير ذلك |
 | مجلد رئيسي معزول للأداة | المجلد الرئيسي للأداة بالكامل | لا شيء |
 
-تستخدم ملفات التعريف أضيق حد مدعوم. ينشئ `--isolated` مجلدًا رئيسيًا منفصلًا للأداة. تستخدم بيانات اعتماد نظام التشغيل الثابتة مستخدم نظام تشغيل تديره Multi-CLI، ويتطلب ذلك طرفية بصلاحيات مرتفعة على Windows.
+تستخدم ملفات التعريف أضيق حد مدعوم. ينشئ `--isolated` مجلدًا رئيسيًا منفصلًا للأداة. تستخدم بيانات اعتماد نظام التشغيل الثابتة مستخدم نظام تشغيل تديره Nini Agents، ويتطلب ذلك طرفية بصلاحيات مرتفعة على Windows.
 
 تحتاج أدوات الذكاء الاصطناعي التي تستخدم سر العملية إلى خطوة إضافية قبل التشغيل:
 
 ```bash
-multi-cli new cursor-cli/work
-multi-cli auth set cursor-cli/work
-multi-cli cursor-cli/work
+nini-agents new cursor-cli/work
+nini-agents auth set cursor-cli/work
+nini-agents cursor-cli/work
 ```
 
 تحتفظ ملفات التعريف القديمة بعزل المجلد الرئيسي الكامل الأصلي. عاين الترحيل باستخدام:
 
 ```bash
-multi-cli migrate codex/work --dry-run
+nini-agents migrate codex/work --dry-run
 ```
 
 لا يمكن نقل إلا ملفات التعريف والقوالب والأرشيفات التي تستخدم المخطط v2. رحّل ملفات التعريف القديمة أولًا.
@@ -170,9 +170,9 @@ multi-cli migrate codex/work --dry-run
 انسخ حالة المحادثة المدعومة عندما يصل أحد الحسابات إلى حده:
 
 ```bash
-multi-cli continue codex work personal --dry-run
-multi-cli continue codex work personal
-multi-cli codex/personal
+nini-agents continue codex work personal --dry-run
+nini-agents continue codex work personal
+nini-agents codex/personal
 codex resume
 ```
 
@@ -193,20 +193,23 @@ codex resume
 |---|---|---|
 | `MULTICLI_HOME` | `~/MultiCliProfiles` | مساحة تخزين ملفات التعريف |
 | `MULTICLI_OVERRIDE_BINARY` | غير محدد | تجاوز اكتشاف الملف التنفيذي لعملية تشغيل واحدة |
-| `MULTICLI_REPO` | مستودع GitHub | تجاوز مصدر التثبيت |
-| `MULTICLI_INSTALL_DIR` | القيمة الافتراضية للمنصة | تجاوز مجلد التثبيت |
+| `NINI_AGENTS_REPO` | مستودع GitHub | تجاوز مصدر التثبيت |
+| `NINI_AGENTS_INSTALL_DIR` | القيمة الافتراضية للمنصة | تجاوز مجلد التثبيت |
+
+يبقى `MULTICLI_REPO` و`MULTICLI_INSTALL_DIR` كاسمين مستعارين مؤقتين للتوافق.
+ويبقى الأمر `multi-cli` غلاف توافق لمحرك `nini-agents`.
 
 <a id="troubleshooting"></a>
 
 ## استكشاف الأخطاء وإصلاحها
 
 ```bash
-multi-cli doctor
-multi-cli doctor --deep
-multi-cli tools
+nini-agents doctor
+nini-agents doctor --deep
+nini-agents tools
 ```
 
-أعد تشغيل الطرفية إذا لم يُعثر على `multi-cli` أو الاسم المستعار لملف تعريف جديد بعد التثبيت. تغطي [مصفوفة الدعم](../support-matrix.md) المتطلبات الخاصة بكل منتج.
+أعد تشغيل الطرفية إذا لم يُعثر على `nini-agents` أو الاسم المستعار لملف تعريف جديد بعد التثبيت. تغطي [مصفوفة الدعم](../support-matrix.md) المتطلبات الخاصة بكل منتج.
 
 <a id="uninstall"></a>
 
@@ -215,13 +218,13 @@ multi-cli tools
 macOS وLinux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/install/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/LuchoNoPrograma/nini-agents/main/install/uninstall.sh | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/install/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/LuchoNoPrograma/nini-agents/main/install/uninstall.ps1 | iex
 ```
 
 تُحفظ بيانات ملفات التعريف ما لم تؤكد حذفها.

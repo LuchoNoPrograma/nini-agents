@@ -1,6 +1,6 @@
 <#
   Pester 3.4-compatible real-execution tests for the hardened safety branches in
-  multi-cli.ps1: staleness repair, dest-newer / equal-size skips, adapter-bug
+  nini-agents.ps1: staleness repair, dest-newer / equal-size skips, adapter-bug
   path validation (.. / absolute / drive), nested credential-named directories,
   the seeding size guard, reparse-point (symlink) skipping, and hardlink skipping
   (credential-leak regression).
@@ -34,7 +34,7 @@ Describe 'adapter binary discovery' {
     }
 
     It 'returns null for an Appx package family that is not installed' {
-        (Get-AppxAdapterBinary -PackageTarget 'multi-cli.missing_package!App') | Should Be $null
+        (Get-AppxAdapterBinary -PackageTarget 'nini-agents.missing_package!App') | Should Be $null
     }
 
     It 'returns an AppX activation target instead of a protected payload path' {
@@ -81,7 +81,7 @@ Describe 'redirected input normalization' {
     }
 }
 
-Describe 'multi-cli staleness branches (codex, real fixtures)' {
+Describe 'nini-agents staleness branches (codex, real fixtures)' {
 
     It '(a) truncated dest with equal mtime + different size is repaired (re-copied)' {
         $s = New-Scratch
@@ -138,7 +138,7 @@ Describe 'multi-cli staleness branches (codex, real fixtures)' {
     }
 }
 
-Describe 'multi-cli adapter-bug path validation (Assert-RelPathSafe)' {
+Describe 'nini-agents adapter-bug path validation (Assert-RelPathSafe)' {
 
     It '(c) a session path containing .. throws as an adapter bug' {
         $adapter = [pscustomobject]@{ id = 'dotdot'; session = [pscustomobject]@{
@@ -169,7 +169,7 @@ Describe 'multi-cli adapter-bug path validation (Assert-RelPathSafe)' {
     }
 }
 
-Describe 'multi-cli per-component credential blocklist (real fixtures)' {
+Describe 'nini-agents per-component credential blocklist (real fixtures)' {
 
     It '(d) a credential-named directory nested in the tree blocks its files; siblings copied' {
         $s = New-Scratch
@@ -195,7 +195,7 @@ Describe 'multi-cli per-component credential blocklist (real fixtures)' {
     }
 }
 
-Describe 'multi-cli seeding size guard (real fixtures)' {
+Describe 'nini-agents seeding size guard (real fixtures)' {
 
     It '(e) oversize base skips automatic seeding with an actionable message' {
         $s = New-Scratch
@@ -212,7 +212,7 @@ Describe 'multi-cli seeding size guard (real fixtures)' {
             $r.ExitCode | Should Be 0
             $r.StdOut | Should Match 'base session state is'
             $r.StdOut | Should Match 'skipped automatic copy'
-            $r.StdOut | Should Match 'multi-cli continue codex base heavy'
+            $r.StdOut | Should Match 'nini-agents continue codex base heavy'
 
             $files = Get-RelativeFileList -Root (& $script:CodexDest $s 'heavy')
             @($files | Where-Object { $_ -like 'sessions/*' }).Count | Should Be 0
@@ -230,7 +230,7 @@ Describe 'multi-cli seeding size guard (real fixtures)' {
     }
 }
 
-Describe 'multi-cli reparse-point (symlink) skipping' {
+Describe 'nini-agents reparse-point (symlink) skipping' {
 
     It '(f) Test-IsReparsePoint flags a real symlink and ignores a plain file' {
         $s = New-Scratch
@@ -278,7 +278,7 @@ Describe 'multi-cli reparse-point (symlink) skipping' {
     }
 }
 
-Describe 'multi-cli hardlink credential-leak regression (real fixtures)' {
+Describe 'nini-agents hardlink credential-leak regression (real fixtures)' {
 
     It '(h) a hardlink to the base credential inside the session tree is skipped, never copied' {
         $s = New-Scratch

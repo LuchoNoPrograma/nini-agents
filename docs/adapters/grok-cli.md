@@ -11,19 +11,19 @@ This adapter covers Grok Build's headless JSON mode, fullscreen TUI/dashboard, a
 ## Quickstart
 
 ```bash
-multi-cli new grok-cli/work
-multi-cli auth set grok-cli/work      # stores XAI_API_KEY in the OS credential store
-multi-cli launch grok-cli/work
-multi-cli new grok-cli/personal
-multi-cli auth set grok-cli/personal
-multi-cli launch grok-cli/personal
+nini-agents new grok-cli/work
+nini-agents auth set grok-cli/work      # stores XAI_API_KEY in the OS credential store
+nini-agents launch grok-cli/work
+nini-agents new grok-cli/personal
+nini-agents auth set grok-cli/personal
+nini-agents launch grok-cli/personal
 ```
 
-`multi-cli auth status grok-cli/work` reports presence only; `multi-cli auth clear grok-cli/work` removes the stored key.
+`nini-agents auth status grok-cli/work` reports presence only; `nini-agents auth clear grok-cli/work` removes the stored key.
 
 ## Account boundary
 
-- Profile-local credentials: none on disk: the key lives in the multi-cli credential store and is passed as `XAI_API_KEY` to the child process only.
+- Profile-local credentials: none on disk: the key lives in the nini-agents credential store and is passed as `XAI_API_KEY` to the child process only.
 - Credential precedence (highest first): `model.api_key` > `model.env_key` > active session > `XAI_API_KEY`.
 - Launch env: `GROK_HOME={sharedStateRoot}`.
 - Logout scope: process.
@@ -41,4 +41,4 @@ Shared root: `%USERPROFILE%\.grok` (Windows), `~/.grok` (macOS/Linux). Shared: `
 
 | Windows | macOS | Linux |
 |---|---|---|
-| supported (process token via `multi-cli auth set`; shared config must not pin `model.api_key`) | supported | supported |
+| supported (process token via `nini-agents auth set`; shared config must not pin `model.api_key`) | supported | supported |

@@ -11,19 +11,19 @@ The adapter points `KIMI_CODE_HOME` at the native shared root and injects the pr
 ## Quickstart
 
 ```bash
-multi-cli new kimi-cli/work
-multi-cli auth set kimi-cli/work      # stores KIMI_MODEL_API_KEY in the OS credential store
-multi-cli launch kimi-cli/work        # foreground process
-multi-cli new kimi-cli/personal
-multi-cli auth set kimi-cli/personal
-multi-cli launch kimi-cli/personal
+nini-agents new kimi-cli/work
+nini-agents auth set kimi-cli/work      # stores KIMI_MODEL_API_KEY in the OS credential store
+nini-agents launch kimi-cli/work        # foreground process
+nini-agents new kimi-cli/personal
+nini-agents auth set kimi-cli/personal
+nini-agents launch kimi-cli/personal
 ```
 
-`multi-cli auth status kimi-cli/work` reports presence only; `multi-cli auth clear kimi-cli/work` removes the stored key.
+`nini-agents auth status kimi-cli/work` reports presence only; `nini-agents auth clear kimi-cli/work` removes the stored key.
 
 ## Account boundary
 
-- Profile-local credentials: none on disk: the key lives in the multi-cli credential store and is passed as `KIMI_MODEL_API_KEY` to the child process only.
+- Profile-local credentials: none on disk: the key lives in the nini-agents credential store and is passed as `KIMI_MODEL_API_KEY` to the child process only.
 - Credential precedence: `KIMI_MODEL_API_KEY` with explicit model/provider selection (sole declared entry).
 - Launch env: `KIMI_CODE_HOME={sharedStateRoot}`.
 - Logout scope: process.
@@ -34,11 +34,11 @@ Shared root: `%USERPROFILE%\.kimi-code` (Windows), `~/.kimi-code` (macOS/Linux).
 
 ## Known limitations
 
-- Foreground-only: Kimi background services use fixed names/ports (`singletonScope: backgroundService`), so two profiles must not run background services at once. multi-cli launches profiles as foreground processes only.
+- Foreground-only: Kimi background services use fixed names/ports (`singletonScope: backgroundService`), so two profiles must not run background services at once. nini-agents launches profiles as foreground processes only.
 - Direct-provider mode requires explicit provider/model selection. This adapter does not provide isolated Kimi OAuth profiles; every launch requires a stored `KIMI_MODEL_API_KEY`.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| supported (process token via `multi-cli auth set`) | supported | supported |
+| supported (process token via `nini-agents auth set`) | supported | supported |

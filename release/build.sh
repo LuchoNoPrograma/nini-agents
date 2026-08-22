@@ -2,13 +2,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUTPUT_DIR="${TMPDIR:-/tmp}/multi-cli-release"
+OUTPUT_DIR="${TMPDIR:-/tmp}/nini-agents-release"
 EXPECTED_VERSION=""
 CHECK_ONLY=false
 
 usage() {
   cat <<'EOF'
-Build the portable Multi-CLI archive.
+Build the portable Nini Agents archive.
 
 Usage: release/build.sh [--check] [--output DIR] [--version X.Y.Z]
 
@@ -48,19 +48,19 @@ VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/release/VERSION")"
   exit 1
 }
 
-tr -d '\r' < "$ROOT_DIR/multi-cli" | grep -Fx "VERSION=\"$VERSION\"" > /dev/null || {
-  echo "multi-cli does not embed version $VERSION" >&2
+tr -d '\r' < "$ROOT_DIR/nini-agents" | grep -Fx "VERSION=\"$VERSION\"" > /dev/null || {
+  echo "nini-agents does not embed version $VERSION" >&2
   exit 1
 }
-tr -d '\r' < "$ROOT_DIR/multi-cli.ps1" | grep -Fx "\$VERSION = '$VERSION'" > /dev/null || {
-  echo "multi-cli.ps1 does not embed version $VERSION" >&2
+tr -d '\r' < "$ROOT_DIR/nini-agents.ps1" | grep -Fx "\$VERSION = '$VERSION'" > /dev/null || {
+  echo "nini-agents.ps1 does not embed version $VERSION" >&2
   exit 1
 }
 
 echo "Version metadata is synchronized at $VERSION."
 [ "$CHECK_ONLY" = false ] || exit 0
 
-ARCHIVE_ROOT="multi-cli-v$VERSION"
+ARCHIVE_ROOT="nini-agents-v$VERSION"
 
 case "$OUTPUT_DIR" in
   ""|/|"$HOME"|/[A-Za-z]|[A-Za-z]:|[A-Za-z]:/|[A-Za-z]:\\)
@@ -85,15 +85,15 @@ copy_path() {
 }
 
 paths=(
-  LICENSE README.md assets/banner.svg assets/i18n docs lib schema ai-tools
-  multi-cli install/install.sh install/uninstall.sh scripts/icon.icns
+  LICENSE NOTICE README.md assets/banner.svg assets/i18n docs lib schema ai-tools
+  nini-agents multi-cli install/install.sh install/uninstall.sh scripts/icon.icns
 )
 
 for path in "${paths[@]}"; do
   copy_path "$path"
 done
 
-chmod +x "$STAGE_DIR/multi-cli" "$STAGE_DIR/install/install.sh" "$STAGE_DIR/install/uninstall.sh"
+chmod +x "$STAGE_DIR/nini-agents" "$STAGE_DIR/multi-cli" "$STAGE_DIR/install/install.sh" "$STAGE_DIR/install/uninstall.sh"
 COPYFILE_DISABLE=1 tar -C "$OUTPUT_DIR" -czf "$ARCHIVE_PATH" "$ARCHIVE_ROOT"
 rm -rf "$STAGE_DIR"
 

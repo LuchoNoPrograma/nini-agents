@@ -2,7 +2,7 @@
 # Real-execution tests for the legacy -> schema-v2 migration engine in
 # lib/migration.sh. No mocks: every test builds a real legacy profile tree and
 # a real schema-v2 fixture adapter under a scratch HOME, then invokes the
-# engine functions directly (the `multi-cli migrate` dispatch is wired into the
+# engine functions directly (the `nini-agents migrate` dispatch is wired into the
 # launcher separately).
 
 load helpers/common
@@ -468,7 +468,7 @@ make_dir_writable() {
 }
 
 # 13. processSecret adapters migrate the filesystem parts and must demand
-#     `multi-cli auth set` afterwards.
+#     `nini-agents auth set` afterwards.
 @test "processSecret adapters migrate filesystem state and demand auth set afterwards" {
   mutate_adapter '.account.mechanism = "processSecret"
     | .account.credentialFiles = []
@@ -483,7 +483,7 @@ make_dir_writable() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Migrated fixture/work to schema-v2 (accountOverlay)."* ]]
-  [[ "$output" == *"Run: multi-cli auth set fixture/work before launching."* ]]
+  [[ "$output" == *"Run: nini-agents auth set fixture/work before launching."* ]]
   [ "$(cat "$SHARED_ROOT/config.toml" | tr -d '\r')" = "profile-config" ]
   [ "$(cat "$SHARED_ROOT/sessions/s.jsonl" | tr -d '\r')" = "session" ]
   [ "$(cat "$SHARED_ROOT/history.jsonl" | tr -d '\r')" = "history" ]

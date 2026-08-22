@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# install.sh -- Install multi-cli for macOS/Linux
+# install.sh -- Install Nini Agents for macOS/Linux
 set -euo pipefail
 
-REPO_URL="${MULTICLI_REPO:-https://github.com/Spielewoy/multi-cli.git}"
-INSTALL_DIR="${MULTICLI_INSTALL_DIR:-$HOME/.local/share/multi-cli}"
-BIN_LINK="${MULTICLI_BIN_LINK:-$HOME/.local/bin/multi-cli}"
+REPO_URL="${NINI_AGENTS_REPO:-${MULTICLI_REPO:-https://github.com/LuchoNoPrograma/nini-agents.git}}"
+INSTALL_DIR="${NINI_AGENTS_INSTALL_DIR:-${MULTICLI_INSTALL_DIR:-$HOME/.local/share/nini-agents}}"
+BIN_LINK="${NINI_AGENTS_BIN_LINK:-$HOME/.local/bin/nini-agents}"
+LEGACY_BIN_LINK="${MULTICLI_BIN_LINK:-$HOME/.local/bin/multi-cli}"
 
 usage() {
   cat <<EOF
-multi-cli installer
+Nini Agents installer
 
 USAGE
   ./install/install.sh [--local]
@@ -17,15 +18,18 @@ OPTIONS
   --local    Install from the current directory instead of cloning from git.
 
 ENVIRONMENT
-  MULTICLI_REPO          Git clone URL (default: $REPO_URL)
-  MULTICLI_INSTALL_DIR   Install directory (default: $INSTALL_DIR)
-  MULTICLI_BIN_LINK      Symlink location (default: $BIN_LINK)
+  NINI_AGENTS_REPO          Git clone URL (default: $REPO_URL)
+  NINI_AGENTS_INSTALL_DIR   Install directory (default: $INSTALL_DIR)
+  NINI_AGENTS_BIN_LINK      Primary launcher path (default: $BIN_LINK)
+  MULTICLI_REPO             Legacy alias for NINI_AGENTS_REPO
+  MULTICLI_INSTALL_DIR      Legacy alias for NINI_AGENTS_INSTALL_DIR
+  MULTICLI_BIN_LINK         Compatibility launcher path (default: $LEGACY_BIN_LINK)
 
 EOF
   exit 0
 }
 
-JQ_VERSION="${MULTICLI_JQ_VERSION:-1.7.1}"
+JQ_VERSION="${NINI_AGENTS_JQ_VERSION:-${MULTICLI_JQ_VERSION:-1.7.1}}"
 
 # Canonical OS name for asset selection: macos, linux, windows, or unknown.
 os_kind() {
@@ -65,7 +69,7 @@ jq_asset_name() {
   esac
 }
 
-# Download the official static jq binary into the multi-cli bin dir as a
+# Download the official static jq binary into the Nini Agents bin dir as a
 # last-resort fallback when no package manager is available.
 install_jq_from_release() {
   local bin_dir="$1" os asset url dest
@@ -141,7 +145,7 @@ ensure_jq() {
 
   echo "" >&2
   echo "Error: jq is required but could not be installed automatically." >&2
-  echo "multi-cli is entirely jq-driven and will not run without it." >&2
+  echo "Nini Agents is entirely jq-driven and will not run without it." >&2
   echo "Install jq manually, then re-run this installer:" >&2
   jq_manual_instructions
   exit 1
@@ -156,7 +160,7 @@ for arg in "$@"; do
   esac
 done
 
-echo "multi-cli installer"
+echo "Nini Agents installer"
 echo ""
 
 if [ "$local_install" = true ]; then
@@ -165,19 +169,19 @@ if [ "$local_install" = true ]; then
   echo "Installing from local directory: $INSTALL_DIR"
 else
   if [[ "$REPO_URL" == *"<owner>"* ]] || [[ "$REPO_URL" == *"<repo>"* ]]; then
-    echo "Error: MULTICLI_REPO contains a placeholder. Set it to the actual git clone URL." >&2
-    echo "  export MULTICLI_REPO=https://github.com/Spielewoy/multi-cli.git" >&2
+    echo "Error: NINI_AGENTS_REPO/MULTICLI_REPO contains a placeholder. Set it to the actual git clone URL." >&2
+    echo "  export NINI_AGENTS_REPO=https://github.com/LuchoNoPrograma/nini-agents.git" >&2
     exit 1
   fi
   command -v git >/dev/null 2>&1 || {
-    echo "Error: git is required to install multi-cli from GitHub." >&2
+    echo "Error: git is required to install Nini Agents from GitHub." >&2
     exit 1
   }
   echo "Cloning from $REPO_URL ..."
   if [ -d "$INSTALL_DIR" ]; then
     [ -e "$INSTALL_DIR/.git" ] || {
       echo "Error: $INSTALL_DIR exists but is not a Git checkout." >&2
-      echo "Move it, choose MULTICLI_INSTALL_DIR, or use --local from a multi-cli checkout." >&2
+      echo "Move it, choose NINI_AGENTS_INSTALL_DIR, or use --local from a Nini Agents checkout." >&2
       exit 1
     }
     echo "Updating existing installation at $INSTALL_DIR"
@@ -188,27 +192,36 @@ else
   fi
 fi
 
-[ -f "$INSTALL_DIR/multi-cli" ] || {
-  echo "Error: $INSTALL_DIR does not contain the multi-cli entrypoint." >&2
+[ -f "$INSTALL_DIR/nini-agents" ] || {
+  echo "Error: $INSTALL_DIR does not contain the nini-agents entrypoint." >&2
   exit 1
 }
-chmod +x "$INSTALL_DIR/multi-cli"
+chmod +x "$INSTALL_DIR/nini-agents" "$INSTALL_DIR/multi-cli"
+
+[ "$BIN_LINK" != "$LEGACY_BIN_LINK" ] || {
+  echo "Error: primary and compatibility launcher paths must be different: $BIN_LINK" >&2
+  exit 1
+}
 
 ensure_jq "$(dirname "$BIN_LINK")"
 
 # A launcher that execs the real script in the repo. A bare symlink breaks
-# adapter discovery: multi-cli derives its tools dir from $0, and a symlink's
+# adapter discovery: Nini Agents derives its tools dir from $0, and a symlink's
 # dirname is the link location (and on MSYS `ln -sf` copies, losing the repo
 # entirely). Exec'ing the absolute path keeps $0 pointed at the repo.
 mkdir -p "$(dirname "$BIN_LINK")"
-printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$INSTALL_DIR/multi-cli" > "$BIN_LINK"
+mkdir -p "$(dirname "$LEGACY_BIN_LINK")"
+printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$INSTALL_DIR/nini-agents" > "$BIN_LINK"
+printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$INSTALL_DIR/multi-cli" > "$LEGACY_BIN_LINK"
 chmod +x "$BIN_LINK"
+chmod +x "$LEGACY_BIN_LINK"
 
 echo ""
-echo "Installed multi-cli to $INSTALL_DIR"
-echo "Launcher at $BIN_LINK"
+echo "Installed Nini Agents to $INSTALL_DIR"
+echo "Primary launcher at $BIN_LINK"
+echo "Compatibility launcher at $LEGACY_BIN_LINK"
 
-if ! command -v multi-cli >/dev/null 2>&1; then
+if ! command -v nini-agents >/dev/null 2>&1; then
   echo ""
   echo "NOTE: $(dirname "$BIN_LINK") is not in your PATH."
   echo "Add this to your shell profile (~/.bashrc, ~/.zshrc):"
@@ -217,4 +230,4 @@ if ! command -v multi-cli >/dev/null 2>&1; then
 fi
 
 echo ""
-echo "Run 'multi-cli doctor' to verify your setup."
+echo "Run 'nini-agents doctor' to verify your setup."

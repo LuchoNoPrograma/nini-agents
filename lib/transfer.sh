@@ -3,7 +3,7 @@
 # profiles. Only adapter-declared normalState.sharedPaths content is copied;
 # credentials, sessions, links, hardlinks, and unclassified files never travel.
 #
-# Sourced by multi-cli after lib/multicli-runtime.sh; relies on the launcher's
+# Sourced by nini-agents after lib/multicli-runtime.sh; relies on the launcher's
 # abort/platform/resolve_path_token. When sourced standalone (tests), it pulls
 # in the runtime helpers and defines the small utility fallbacks itself.
 
@@ -132,7 +132,7 @@ transfer_resolve_top() {
       *) target="$(dirname "$path")/$target" ;;
     esac
     canonical_target="$(transfer_canonical "$target")" || \
-      abort "Cannot $action: '$rel' is a link with no resolvable target. Rebuild the profile runtime with \`multi-cli launch\` and retry."
+      abort "Cannot $action: '$rel' is a link with no resolvable target. Rebuild the profile runtime with \`nini-agents launch\` and retry."
     canonical_shared="$(transfer_canonical "$shared_root" 2>/dev/null || true)"
     canonical_profile="$(transfer_canonical "$profile_dir")"
     if ! transfer_path_within "$canonical_target" "$canonical_shared" && ! transfer_path_within "$canonical_target" "$canonical_profile"; then
@@ -323,7 +323,7 @@ transfer_save_template() {
 transfer_template_adapter_id() {
   local template_dir="$1" id
   if [ ! -f "$template_dir/$TRANSFER_MANIFEST_NAME" ]; then
-    abort "Template '$(basename "$template_dir")' has no manifest; it was not saved by this version of multi-cli."
+    abort "Template '$(basename "$template_dir")' has no manifest; it was not saved by this version of nini-agents."
   fi
   id="$(runtime_json_str '.adapterId' "$template_dir/$TRANSFER_MANIFEST_NAME")"
   [ -n "$id" ] || abort "Template '$(basename "$template_dir")' manifest is invalid."
@@ -597,7 +597,7 @@ transfer_import_profile() {
   transfer_verify_staging "$staging"
 
   if [ ! -f "$staging/$TRANSFER_MANIFEST_NAME" ]; then
-    transfer_fail_import "$staging" "Refusing to import: archive has no multi-cli manifest; only archives written by multi-cli export are accepted."
+    transfer_fail_import "$staging" "Refusing to import: archive has no nini-agents manifest; only archives written by nini-agents export are accepted."
   fi
   archived_adapter="$(runtime_json_str '.adapterId' "$staging/$TRANSFER_MANIFEST_NAME")"
   if [ -z "$archived_adapter" ]; then

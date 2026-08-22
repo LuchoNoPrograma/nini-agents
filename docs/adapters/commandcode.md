@@ -17,8 +17,8 @@ Binary discovery: `%APPDATA%\npm\commandcode.cmd` (Windows), `$HOME/.npm-global/
 Account-overlay profiles are supported on all platforms:
 
 ```bash
-multi-cli new commandcode/work
-multi-cli launch commandcode/work       # sign in on first run; auth.json stays profile-local
+nini-agents new commandcode/work
+nini-agents launch commandcode/work       # sign in on first run; auth.json stays profile-local
 ```
 
 ## Account boundary

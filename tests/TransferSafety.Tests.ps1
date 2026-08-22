@@ -473,7 +473,7 @@ Describe 'schema-v2 transfer safety' {
             $message = Get-ThrownMessage { Import-MultiCliProfile -Adapter $adapter -ArchivePath $archiveBare -DestinationDir $destBare }
 
             $message | Should Not BeNullOrEmpty
-            ($message.Contains('no multi-cli manifest')) | Should Be $true
+            ($message.Contains('no nini-agents manifest')) | Should Be $true
             (Test-Path -LiteralPath $destBare) | Should Be $false
         } finally { Remove-TransferScratch $scratch }
     }

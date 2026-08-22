@@ -46,6 +46,7 @@ python3 "$SCRIPT_DIR/simplecov_to_cobertura.py" \
   --input "$SUMMARY" \
   --repo "$REPO_ROOT" \
   --output "$COBERTURA" \
+  --pathspec nini-agents \
   --pathspec multi-cli \
   --pathspec 'lib/*.sh' \
   --pathspec 'scripts/*.sh' \
@@ -58,6 +59,7 @@ python3 "$SCRIPT_DIR/check_changed_coverage.py" \
   --coverage-root "$COBERTURA" \
   --minimum "$MINIMUM_PERCENT" \
   --output "$CHANGED_REPORT" \
+  --pathspec nini-agents \
   --pathspec multi-cli \
   --pathspec 'lib/*.sh' \
   --pathspec 'scripts/*.sh' \

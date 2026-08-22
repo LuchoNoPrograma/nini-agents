@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Real-execution tests for `multi-cli continue` -- session continuation between
+# Real-execution tests for `nini-agents continue` -- session continuation between
 # a tool's base (~/.codex) and a profile, or between two profiles.
 #
 # No mocks. Each test builds a real ~/.codex fixture tree under a scratch HOME,
@@ -133,16 +133,16 @@ teardown() {
 @test "continue with too few arguments exits 1 with usage" {
   run multicli continue codex base
   [ "$status" -eq 1 ]
-  [[ "$output" == *"Usage: multi-cli continue"* ]]
+  [[ "$output" == *"Usage: nini-agents continue"* ]]
 }
 
-# 9. Missing destination profile -> exit 1, suggests `multi-cli new`.
-@test "continue to a missing destination exits 1 and suggests multi-cli new" {
+# 9. Missing destination profile -> exit 1, suggests `nini-agents new`.
+@test "continue to a missing destination exits 1 and suggests nini-agents new" {
   seed_codex_base
   run multicli continue codex base ghost
   [ "$status" -eq 1 ]
   [[ "$output" == *"Destination endpoint 'ghost' not found"* ]]
-  [[ "$output" == *"multi-cli new codex/ghost"* ]]
+  [[ "$output" == *"nini-agents new codex/ghost"* ]]
 }
 
 # 10. src == dest -> exit 1.

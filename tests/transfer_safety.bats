@@ -27,14 +27,14 @@ teardown() {
 
 # Invoke a transfer/runtime function in a child shell that has sourced the
 # real launcher (providing abort/platform/resolve_path_token and the runtime
-# libs) and lib/transfer.sh, mirroring how multi-cli itself will call them.
+# libs) and lib/transfer.sh, mirroring how nini-agents itself will call them.
 transfer_run() {
   bash -c '
     root="$1"; shift
     args=("$@")
     cd "$root" || exit 1
     set -- help
-    source ./multi-cli >/dev/null 2>&1
+    source ./nini-agents >/dev/null 2>&1
     source ./lib/transfer.sh
     "${args[@]+"${args[@]}"}"
   ' transfer-run "$MULTICLI_REPO_ROOT" "$@"
@@ -123,7 +123,7 @@ build_test_overlay() {
     root="$1"; manifest="$2"; pdir="$3"
     cd "$root" || exit 1
     set -- help
-    source ./multi-cli >/dev/null 2>&1
+    source ./nini-agents >/dev/null 2>&1
     runtime_build_overlay "$manifest" "$pdir" || true
     [ -e "$pdir/.runtime" ]
   ' _ "$MULTICLI_REPO_ROOT" "$FIXTURE_MANIFEST" "$profile_dir"
@@ -477,7 +477,7 @@ PY
   run transfer_run transfer_import_profile "$archive2" "$FIXTURE_MANIFEST" "$dest2"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no multi-cli manifest"* ]]
+  [[ "$output" == *"no nini-agents manifest"* ]]
   [ ! -e "$dest2" ]
 }
 

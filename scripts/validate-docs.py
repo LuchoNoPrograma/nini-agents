@@ -62,10 +62,10 @@ def validate_readme(path: Path, adapters: list[dict]) -> list[str]:
         errors.append(f"{path.name}: stale Spielewoy/multi-codex URL")
     if RETIRED_SUPPORT_TERMS.search(text):
         errors.append(f"{path.name}: contains retired experimental/unverified support wording")
-    for command in ("--isolated", "-i", "--isolate", "multi-cli continue"):
+    for command in ("--isolated", "-i", "--isolate", "nini-agents continue"):
         if command not in text:
             errors.append(f"{path.name}: missing command documentation for {command}")
-    default_row = f"| `multi-cli new <tool>/<name>` | {DEFAULT_PROFILE_DESCRIPTIONS[path.name]} |"
+    default_row = f"| `nini-agents new <tool>/<name>` | {DEFAULT_PROFILE_DESCRIPTIONS[path.name]} |"
     if default_row not in text:
         errors.append(f"{path.name}: default new command must describe shared account profiles")
     rows = table_rows(text)

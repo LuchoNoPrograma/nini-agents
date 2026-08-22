@@ -1,6 +1,6 @@
 # agy-cli: Antigravity CLI (agy)
 
-**Account boundary:** `osUserCredentialStore`: `agy` uses the same fixed `gemini`/`antigravity` OS credential as the Antigravity IDE, so each profile runs under a multi-cli-owned OS user.
+**Account boundary:** `osUserCredentialStore`: `agy` uses the same fixed `gemini`/`antigravity` OS credential as the Antigravity IDE, so each profile runs under a nini-agents-owned OS user.
 
 The Antigravity CLI is the terminal companion to the IDE. Its fixed credential identity means same-OS-user profiles would overwrite each other's login; the adapter isolates by OS user and links only declared safe paths.
 
@@ -13,13 +13,13 @@ Binary discovery: `%LOCALAPPDATA%\agy\bin\agy.exe` (Windows), `~/.local/bin/agy`
 ## Quickstart
 
 ```bash
-multi-cli new agy-cli/work
-multi-cli launch agy-cli/work           # first launch provisions a profile-owned OS user
-multi-cli new agy-cli/personal
-multi-cli launch agy-cli/personal
+nini-agents new agy-cli/work
+nini-agents launch agy-cli/work           # first launch provisions a profile-owned OS user
+nini-agents new agy-cli/personal
+nini-agents launch agy-cli/personal
 ```
 
-The first launch requires an elevated terminal on Windows so multi-cli can provision the owned OS user. macOS and Linux remain unsupported until real owned-user Keychain/Secret Service isolation is implemented and verified.
+The first launch requires an elevated terminal on Windows so nini-agents can provision the owned OS user. macOS and Linux remain unsupported until real owned-user Keychain/Secret Service isolation is implemented and verified.
 
 ## Account boundary
 

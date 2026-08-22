@@ -1,6 +1,6 @@
 # zed: Zed
 
-**Account boundary:** `osUserCredentialStore`: each profile runs under a multi-cli-owned OS user, separating Zed's credential store, process namespace, and data root.
+**Account boundary:** `osUserCredentialStore`: each profile runs under a nini-agents-owned OS user, separating Zed's credential store, process namespace, and data root.
 
 Zed is a singleton per release channel and OS user. An owned OS user gives each profile a separate process and credential namespace, including same-channel concurrent profiles.
 
@@ -13,13 +13,13 @@ Binary discovery: `zed` or `zeditor` (Linux), `zed.exe` (Windows), `/usr/local/b
 ## Quickstart
 
 ```bash
-multi-cli new zed/work
-multi-cli launch zed/work
-multi-cli new zed/personal
-multi-cli launch zed/personal
+nini-agents new zed/work
+nini-agents launch zed/work
+nini-agents new zed/personal
+nini-agents launch zed/personal
 ```
 
-The first launch requires an elevated terminal on Windows so multi-cli can provision the owned OS user. macOS and Linux remain unsupported until a real owned-user desktop credential session is implemented and verified.
+The first launch requires an elevated terminal on Windows so nini-agents can provision the owned OS user. macOS and Linux remain unsupported until a real owned-user desktop credential session is implemented and verified.
 
 ## Account boundary
 

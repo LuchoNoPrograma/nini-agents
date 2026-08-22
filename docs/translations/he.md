@@ -1,7 +1,7 @@
 <div dir="rtl">
 
 <p align="center">
-  <img src="../../assets/i18n/he/banner.svg" alt="Multi-CLI. השתמשו בכמה חשבונות בו-זמנית בלי לעבור ביניהם." width="760"/>
+  <img src="../../assets/i18n/he/banner.svg" alt="Nini Agents. השתמשו בכמה חשבונות בו-זמנית בלי לעבור ביניהם." width="760"/>
 </p>
 
 <p align="center">השתמשו בכמה חשבונות בו-זמנית בלי לעבור ביניהם.</p>
@@ -42,16 +42,16 @@
 שיטה זו דורשת את [Git](https://git-scm.com/downloads).
 
 ```bash
-git clone https://github.com/Spielewoy/multi-cli.git
-cd multi-cli
+git clone https://github.com/LuchoNoPrograma/nini-agents.git
+cd nini-agents
 ./install/install.sh --local
 ```
 
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/Spielewoy/multi-cli.git
-cd multi-cli
+git clone https://github.com/LuchoNoPrograma/nini-agents.git
+cd nini-agents
 .\install\install.ps1 -Local
 ```
 
@@ -60,9 +60,9 @@ cd multi-cli
 ## התחלה מהירה
 
 ```bash
-multi-cli doctor
-multi-cli new claude-cli/work
-multi-cli claude-cli/work
+nini-agents doctor
+nini-agents new claude-cli/work
+nini-agents claude-cli/work
 ```
 
 <a id="supported-ai-tools"></a>
@@ -89,7 +89,7 @@ multi-cli claude-cli/work
 | [Windsurf](../adapters/windsurf.md) | `windsurf` | Windows, macOS, Linux | משתמש מערכת ההפעלה |
 | [Zed](../adapters/zed.md) | `zed` | Windows | משתמש מערכת ההפעלה |
 
-מגבלות הפלטפורמות מפורטות ב[טבלת התמיכה](../support-matrix.md). הפעילו את `multi-cli tools` כדי לבדוק את המחשב שלכם.
+מגבלות הפלטפורמות מפורטות ב[טבלת התמיכה](../support-matrix.md). הפעילו את `nini-agents tools` כדי לבדוק את המחשב שלכם.
 
 <a id="commands"></a>
 
@@ -99,40 +99,40 @@ multi-cli claude-cli/work
 
 | פקודה | פעולה |
 |---|---|
-| `multi-cli new <tool>/<name>` | יצירת פרופיל עם פרטי אימות נפרדים ומצב רגיל משותף |
-| `multi-cli new <tool>/<name> --isolated` | יצירת פרופיל עם תיקייה מבודדת במלואה כאשר כלי ה-AI תומך בכך; כינויים: `--isolate`, `-i` |
-| `multi-cli new <tool>/<name> --from <template>` | יצירת פרופיל בסכמה v2 מתבנית בסכמה v2 |
-| `multi-cli <tool>/<name>` | הפעלת פרופיל |
-| `multi-cli launch <tool>/<name> [-- args...]` | הפעלה והעברת ארגומנטים לכלי |
-| `multi-cli list [<tool>]` | הצגת פרופילים |
-| `multi-cli clone <tool>/<src> <tool>/<dest>` | העתקת פרופיל בסכמה v2 |
-| `multi-cli rename <tool>/<old> <tool>/<new>` | שינוי שם של פרופיל |
-| `multi-cli delete <tool>/<name>` | מחיקת פרופיל לאחר אישור |
+| `nini-agents new <tool>/<name>` | יצירת פרופיל עם פרטי אימות נפרדים ומצב רגיל משותף |
+| `nini-agents new <tool>/<name> --isolated` | יצירת פרופיל עם תיקייה מבודדת במלואה כאשר כלי ה-AI תומך בכך; כינויים: `--isolate`, `-i` |
+| `nini-agents new <tool>/<name> --from <template>` | יצירת פרופיל בסכמה v2 מתבנית בסכמה v2 |
+| `nini-agents <tool>/<name>` | הפעלת פרופיל |
+| `nini-agents launch <tool>/<name> [-- args...]` | הפעלה והעברת ארגומנטים לכלי |
+| `nini-agents list [<tool>]` | הצגת פרופילים |
+| `nini-agents clone <tool>/<src> <tool>/<dest>` | העתקת פרופיל בסכמה v2 |
+| `nini-agents rename <tool>/<old> <tool>/<new>` | שינוי שם של פרופיל |
+| `nini-agents delete <tool>/<name>` | מחיקת פרופיל לאחר אישור |
 
 ### פרטי אימות וניידות
 
 | פקודה | פעולה |
 |---|---|
-| `multi-cli auth set <tool>/<profile>` | שמירת סוד תהליך במאגר פרטי האימות של מערכת ההפעלה |
-| `multi-cli auth status <tool>/<profile>` | בדיקה אם הסוד קיים |
-| `multi-cli auth clear <tool>/<profile>` | הסרת הסוד |
-| `multi-cli continue <tool> <src> <dest> [--dry-run] [--no-merge]` | העתקת מצב סשן נתמך, ללא פרטי אימות |
-| `multi-cli template save <tool>/<profile> <name>` | שמירת תבנית בסכמה v2 ללא פרטי אימות |
-| `multi-cli template list \| delete <name>` | הצגת תבניות או מחיקתן |
-| `multi-cli export <tool>/<name> [path]` | ייצוא פרופיל בסכמה v2 |
-| `multi-cli import <archive> <tool>/<name>` | ייבוא ארכיון בסכמה v2 |
+| `nini-agents auth set <tool>/<profile>` | שמירת סוד תהליך במאגר פרטי האימות של מערכת ההפעלה |
+| `nini-agents auth status <tool>/<profile>` | בדיקה אם הסוד קיים |
+| `nini-agents auth clear <tool>/<profile>` | הסרת הסוד |
+| `nini-agents continue <tool> <src> <dest> [--dry-run] [--no-merge]` | העתקת מצב סשן נתמך, ללא פרטי אימות |
+| `nini-agents template save <tool>/<profile> <name>` | שמירת תבנית בסכמה v2 ללא פרטי אימות |
+| `nini-agents template list \| delete <name>` | הצגת תבניות או מחיקתן |
+| `nini-agents export <tool>/<name> [path]` | ייצוא פרופיל בסכמה v2 |
+| `nini-agents import <archive> <tool>/<name>` | ייבוא ארכיון בסכמה v2 |
 
 ### תחזוקה
 
 | פקודה | פעולה |
 |---|---|
-| `multi-cli migrate <tool>/<name> [--dry-run] [--prefer-profile]` | העברת פרופיל ישן ל-schema v2 |
-| `multi-cli status` | הצגת פרופילים וגדלים |
-| `multi-cli stats` | הצגת נפח האחסון של הפרופילים |
-| `multi-cli doctor [--deep]` | אבחון ההגדרות ובדיקה אופציונלית של סביבות ההרצה |
-| `multi-cli completion {bash\|zsh\|powershell}` | הצגת הגדרות השלמה אוטומטית ל-shell |
-| `multi-cli help` | הצגת כל הפקודות |
-| `multi-cli version` | הצגת הגרסה המותקנת |
+| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]` | העברת פרופיל ישן ל-schema v2 |
+| `nini-agents status` | הצגת פרופילים וגדלים |
+| `nini-agents stats` | הצגת נפח האחסון של הפרופילים |
+| `nini-agents doctor [--deep]` | אבחון ההגדרות ובדיקה אופציונלית של סביבות ההרצה |
+| `nini-agents completion {bash\|zsh\|powershell}` | הצגת הגדרות השלמה אוטומטית ל-shell |
+| `nini-agents help` | הצגת כל הפקודות |
+| `nini-agents version` | הצגת הגרסה המותקנת |
 
 <a id="how-isolation-works"></a>
 
@@ -145,20 +145,20 @@ multi-cli claude-cli/work
 | משתמש מערכת ההפעלה | זהות פרטי האימות הקבועה של המוצר | שום דבר, אלא אם כלי ה-AI מאפשר זאת |
 | תיקיית בית מבודדת לכלי | כל תיקיית הבית של הכלי | שום דבר |
 
-פרופילים משתמשים בגבול הנתמך המצומצם ביותר. `--isolated` יוצר תיקיית בית נפרדת לכלי. פרטי אימות קבועים של מערכת ההפעלה משתמשים במשתמש מערכת שמנוהל על ידי Multi-CLI ודורשים טרמינל עם הרשאות מנהל ב-Windows.
+פרופילים משתמשים בגבול הנתמך המצומצם ביותר. `--isolated` יוצר תיקיית בית נפרדת לכלי. פרטי אימות קבועים של מערכת ההפעלה משתמשים במשתמש מערכת שמנוהל על ידי Nini Agents ודורשים טרמינל עם הרשאות מנהל ב-Windows.
 
 כלי AI שמשתמשים בסוד תהליך דורשים צעד נוסף לפני ההפעלה:
 
 ```bash
-multi-cli new cursor-cli/work
-multi-cli auth set cursor-cli/work
-multi-cli cursor-cli/work
+nini-agents new cursor-cli/work
+nini-agents auth set cursor-cli/work
+nini-agents cursor-cli/work
 ```
 
 פרופילים ישנים שומרים על בידוד תיקיית הבית המקורי. ניתן לראות תצוגה מקדימה של ההעברה באמצעות:
 
 ```bash
-multi-cli migrate codex/work --dry-run
+nini-agents migrate codex/work --dry-run
 ```
 
 רק פרופילים, תבניות וארכיונים בסכמה v2 ניתנים להעברה. יש להעביר תחילה פרופילים ישנים.
@@ -170,9 +170,9 @@ multi-cli migrate codex/work --dry-run
 העתיקו מצב שיחה נתמך כאשר חשבון מגיע למגבלה שלו:
 
 ```bash
-multi-cli continue codex work personal --dry-run
-multi-cli continue codex work personal
-multi-cli codex/personal
+nini-agents continue codex work personal --dry-run
+nini-agents continue codex work personal
+nini-agents codex/personal
 codex resume
 ```
 
@@ -193,20 +193,23 @@ codex resume
 |---|---|---|
 | `MULTICLI_HOME` | `~/MultiCliProfiles` | אחסון פרופילים |
 | `MULTICLI_OVERRIDE_BINARY` | לא מוגדר | עקיפת איתור קובץ ההפעלה להפעלה אחת |
-| `MULTICLI_REPO` | מאגר GitHub | עקיפת מקור ההתקנה |
-| `MULTICLI_INSTALL_DIR` | ברירת המחדל של הפלטפורמה | עקיפת תיקיית ההתקנה |
+| `NINI_AGENTS_REPO` | מאגר GitHub | עקיפת מקור ההתקנה |
+| `NINI_AGENTS_INSTALL_DIR` | ברירת המחדל של הפלטפורמה | עקיפת תיקיית ההתקנה |
+
+`MULTICLI_REPO` ו־`MULTICLI_INSTALL_DIR` נשארים זמנית כשמות תאימות.
+הפקודה `multi-cli` נשארת גם היא כמעטפת תאימות למנוע `nini-agents`.
 
 <a id="troubleshooting"></a>
 
 ## פתרון תקלות
 
 ```bash
-multi-cli doctor
-multi-cli doctor --deep
-multi-cli tools
+nini-agents doctor
+nini-agents doctor --deep
+nini-agents tools
 ```
 
-הפעילו מחדש את הטרמינל אם `multi-cli` או הכינוי של פרופיל חדש אינם נמצאים לאחר ההתקנה. [טבלת התמיכה](../support-matrix.md) כוללת דרישות ספציפיות לכל מוצר.
+הפעילו מחדש את הטרמינל אם `nini-agents` או הכינוי של פרופיל חדש אינם נמצאים לאחר ההתקנה. [טבלת התמיכה](../support-matrix.md) כוללת דרישות ספציפיות לכל מוצר.
 
 <a id="uninstall"></a>
 
@@ -215,13 +218,13 @@ multi-cli tools
 macOS ו-Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/install/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/LuchoNoPrograma/nini-agents/main/install/uninstall.sh | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/install/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/LuchoNoPrograma/nini-agents/main/install/uninstall.ps1 | iex
 ```
 
 נתוני הפרופילים נשמרים אלא אם מאשרים את מחיקתם.

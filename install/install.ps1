@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Install multi-cli on Windows.
+  Install Nini Agents on Windows.
 .PARAMETER Local
   Install from the current directory instead of cloning.
 #>
@@ -10,10 +10,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$RepoUrl    = if ($env:MULTICLI_REPO)        { $env:MULTICLI_REPO }        else { 'https://github.com/Spielewoy/multi-cli.git' }
-$InstallDir = if ($env:MULTICLI_INSTALL_DIR)  { $env:MULTICLI_INSTALL_DIR }  else { Join-Path $env:LOCALAPPDATA 'multi-cli' }
-$BinDir     = if ($env:MULTICLI_BIN_DIR)      { $env:MULTICLI_BIN_DIR }      else { Join-Path $env:LOCALAPPDATA 'multi-cli\bin' }
-$JqVersion  = if ($env:MULTICLI_JQ_VERSION)   { $env:MULTICLI_JQ_VERSION }   else { '1.7.1' }
+$RepoUrl    = if ($env:NINI_AGENTS_REPO) { $env:NINI_AGENTS_REPO } elseif ($env:MULTICLI_REPO) { $env:MULTICLI_REPO } else { 'https://github.com/LuchoNoPrograma/nini-agents.git' }
+$InstallDir = if ($env:NINI_AGENTS_INSTALL_DIR) { $env:NINI_AGENTS_INSTALL_DIR } elseif ($env:MULTICLI_INSTALL_DIR) { $env:MULTICLI_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'nini-agents' }
+$BinDir     = if ($env:NINI_AGENTS_BIN_DIR) { $env:NINI_AGENTS_BIN_DIR } elseif ($env:MULTICLI_BIN_DIR) { $env:MULTICLI_BIN_DIR } else { Join-Path $env:LOCALAPPDATA 'nini-agents\bin' }
+$JqVersion  = if ($env:NINI_AGENTS_JQ_VERSION) { $env:NINI_AGENTS_JQ_VERSION } elseif ($env:MULTICLI_JQ_VERSION) { $env:MULTICLI_JQ_VERSION } else { '1.7.1' }
 
 function Test-Command {
     param([string]$Name)
@@ -33,7 +33,7 @@ function Test-UserPathEntry {
     return @($Path -split ';' | Where-Object { $_ }) -contains $Entry
 }
 
-# jq is a hard dependency: multi-cli is entirely jq-driven. Resolve it or fail.
+# jq is a hard dependency: Nini Agents is entirely jq-driven. Resolve it or fail.
 function Install-Jq {
     param([string]$BinDir)
 
@@ -80,7 +80,7 @@ function Install-Jq {
 
     Write-Host ""
     Write-Host "Error: jq is required but could not be installed automatically." -ForegroundColor Red
-    Write-Host "multi-cli is entirely jq-driven and will not run without it." -ForegroundColor Red
+    Write-Host "Nini Agents is entirely jq-driven and will not run without it." -ForegroundColor Red
     Write-Host "Install jq manually, then re-run this installer:"
     Write-Host "  winget install jqlang.jq"
     Write-Host "  choco install jq"
@@ -88,7 +88,7 @@ function Install-Jq {
     exit 1
 }
 
-Write-Host "multi-cli installer (Windows)"
+Write-Host "Nini Agents installer (Windows)"
 Write-Host ""
 
 if ($Local) {
@@ -96,9 +96,9 @@ if ($Local) {
     Write-Host "Installing from local directory: $InstallDir"
 } else {
     if ($RepoUrl -match '<owner>|<repo>') {
-        throw 'MULTICLI_REPO contains a placeholder. Set it to the multi-cli Git clone URL.'
+        throw 'NINI_AGENTS_REPO/MULTICLI_REPO contains a placeholder. Set it to the Nini Agents Git clone URL.'
     }
-    if (-not (Test-Command 'git')) { throw 'git is required to install multi-cli from GitHub.' }
+    if (-not (Test-Command 'git')) { throw 'git is required to install Nini Agents from GitHub.' }
     Write-Host "Cloning from $RepoUrl ..."
     if (Test-Path (Join-Path $InstallDir '.git')) {
         Write-Host "Updating existing installation at $InstallDir"
@@ -106,7 +106,7 @@ if ($Local) {
         Assert-NativeSuccess -Action 'git pull'
     } else {
         if (Test-Path $InstallDir) {
-            throw "$InstallDir exists but is not a Git checkout. Move it, choose MULTICLI_INSTALL_DIR, or use -Local from a multi-cli checkout."
+            throw "$InstallDir exists but is not a Git checkout. Move it, choose NINI_AGENTS_INSTALL_DIR, or use -Local from a Nini Agents checkout."
         }
         New-Item -ItemType Directory -Force -Path (Split-Path $InstallDir) | Out-Null
         git clone $RepoUrl $InstallDir
@@ -114,24 +114,30 @@ if ($Local) {
     }
 }
 
-$scriptPath = Join-Path $InstallDir 'multi-cli.ps1'
+$scriptPath = Join-Path $InstallDir 'nini-agents.ps1'
 if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
-    throw "$InstallDir does not contain the multi-cli PowerShell entrypoint."
+    throw "$InstallDir does not contain the nini-agents PowerShell entrypoint."
 }
 
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
 Install-Jq -BinDir $BinDir
 
-$wrapperPath = Join-Path $BinDir 'multi-cli.cmd'
+$wrapperPath = Join-Path $BinDir 'nini-agents.cmd'
 @"
 @echo off
 powershell.exe -ExecutionPolicy Bypass -File "$scriptPath" %*
 "@ | Set-Content -Path $wrapperPath -Encoding ASCII
+$legacyWrapperPath = Join-Path $BinDir 'multi-cli.cmd'
+@"
+@echo off
+powershell.exe -ExecutionPolicy Bypass -File "$(Join-Path $InstallDir 'multi-cli.ps1')" %*
+"@ | Set-Content -Path $legacyWrapperPath -Encoding ASCII
 
 Write-Host ""
-Write-Host "Installed multi-cli to $InstallDir"
-Write-Host "Command wrapper at $wrapperPath"
+Write-Host "Installed Nini Agents to $InstallDir"
+Write-Host "Primary command wrapper at $wrapperPath"
+Write-Host "Compatibility command wrapper at $legacyWrapperPath"
 
 $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
 if (-not (Test-UserPathEntry -Path $userPath -Entry $BinDir)) {
@@ -157,4 +163,4 @@ if (-not (Test-UserPathEntry -Path $userPath -Entry $ProfilesBinDir)) {
 }
 
 Write-Host ""
-Write-Host "Run 'multi-cli doctor' to verify your setup."
+Write-Host "Run 'nini-agents doctor' to verify your setup."

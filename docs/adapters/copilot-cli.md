@@ -11,19 +11,19 @@ The adapter points `COPILOT_HOME` at the native shared root, so configuration an
 ## Quickstart
 
 ```bash
-multi-cli new copilot-cli/work
-multi-cli auth set copilot-cli/work      # stores COPILOT_GITHUB_TOKEN in the OS credential store
-multi-cli launch copilot-cli/work
-multi-cli new copilot-cli/personal
-multi-cli auth set copilot-cli/personal
-multi-cli launch copilot-cli/personal
+nini-agents new copilot-cli/work
+nini-agents auth set copilot-cli/work      # stores COPILOT_GITHUB_TOKEN in the OS credential store
+nini-agents launch copilot-cli/work
+nini-agents new copilot-cli/personal
+nini-agents auth set copilot-cli/personal
+nini-agents launch copilot-cli/personal
 ```
 
-`multi-cli auth status copilot-cli/work` reports presence only; `multi-cli auth clear copilot-cli/work` removes the stored token.
+`nini-agents auth status copilot-cli/work` reports presence only; `nini-agents auth clear copilot-cli/work` removes the stored token.
 
 ## Account boundary
 
-- Profile-local credentials: none on disk: the token lives in the multi-cli credential store and is passed as `COPILOT_GITHUB_TOKEN` to the child process only.
+- Profile-local credentials: none on disk: the token lives in the nini-agents credential store and is passed as `COPILOT_GITHUB_TOKEN` to the child process only.
 - Credential precedence: `COPILOT_GITHUB_TOKEN` > `GH_TOKEN` > `GITHUB_TOKEN` > copilot-cli keychain > `gh auth token`. The inherited lower-priority variables are cleared at launch.
 - Launch env: `COPILOT_HOME={sharedStateRoot}`; clears `GH_TOKEN`, `GITHUB_TOKEN`.
 - Logout scope: process.
@@ -44,4 +44,4 @@ Shared root: `%USERPROFILE%\.copilot` (Windows), `~/.copilot` (macOS/Linux).
 
 | Windows | macOS | Linux |
 |---|---|---|
-| supported (process token via `multi-cli auth set`; `GH_TOKEN`/`GITHUB_TOKEN` cleared) | supported | supported |
+| supported (process token via `nini-agents auth set`; `GH_TOKEN`/`GITHUB_TOKEN` cleared) | supported | supported |

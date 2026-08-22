@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-# Semantic adapter.json validation for multi-cli (Windows).
+# Semantic adapter.json validation for nini-agents (Windows).
 # PowerShell mirror of lib/adapter-validation.sh: declared paths are relative
 # and traversal-free, credential/shared/session/unsafe lists never overlap,
 # placeholders come from the known set, and every unsupported support row

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2172 724" role="img" aria-labelledby="title desc">
-  <title id="title">Multi-CLI</title>
+  <title id="title">Nini Agents</title>
   <desc id="desc">Use multiple accounts simultaneously without switching.</desc>
   <defs>
     <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
@@ -14,7 +14,7 @@
   <rect width="2172" height="724" fill="#ffffff"/>
   <rect width="2172" height="724" fill="url(#grid)"/>
 
-  <text x="1086" y="312" text-anchor="middle" font-size="114" font-weight="400" letter-spacing="-2.5" fill="#101010">Multi-CLI</text>
+  <text x="1086" y="312" text-anchor="middle" font-size="114" font-weight="400" letter-spacing="-2.5" fill="#101010">Nini Agents</text>
   <text x="1086" y="391" text-anchor="middle" font-size="40" font-weight="600" fill="#08787b">Use multiple accounts simultaneously without switching.</text>
 
   <g aria-hidden="true">

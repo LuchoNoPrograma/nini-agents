@@ -11,19 +11,19 @@ Cursor CLI installs the `agent` binary. The adapter points `CURSOR_CONFIG_DIR` a
 ## Quickstart
 
 ```bash
-multi-cli new cursor-cli/work
-multi-cli auth set cursor-cli/work      # stores CURSOR_API_KEY in the OS credential store
-multi-cli launch cursor-cli/work
-multi-cli new cursor-cli/personal
-multi-cli auth set cursor-cli/personal
-multi-cli launch cursor-cli/personal
+nini-agents new cursor-cli/work
+nini-agents auth set cursor-cli/work      # stores CURSOR_API_KEY in the OS credential store
+nini-agents launch cursor-cli/work
+nini-agents new cursor-cli/personal
+nini-agents auth set cursor-cli/personal
+nini-agents launch cursor-cli/personal
 ```
 
-`multi-cli auth status cursor-cli/work` reports presence only; `multi-cli auth clear cursor-cli/work` removes the stored key.
+`nini-agents auth status cursor-cli/work` reports presence only; `nini-agents auth clear cursor-cli/work` removes the stored key.
 
 ## Account boundary
 
-- Profile-local credentials: none on disk: the key lives in the multi-cli credential store and is passed as `CURSOR_API_KEY` to the child process only.
+- Profile-local credentials: none on disk: the key lives in the nini-agents credential store and is passed as `CURSOR_API_KEY` to the child process only.
 - Credential precedence: `CURSOR_API_KEY` (sole declared entry).
 - Launch env: `CURSOR_CONFIG_DIR={sharedStateRoot}`.
 - Logout scope: process: nothing persists after exit.
@@ -34,11 +34,11 @@ Shared root: `%USERPROFILE%\.cursor` (Windows), `~/.cursor` (macOS/Linux). Share
 
 ## Known limitations
 
-- `CURSOR_API_KEY` is the sole declared credential; store it per profile with `multi-cli auth set`.
+- `CURSOR_API_KEY` is the sole declared credential; store it per profile with `nini-agents auth set`.
 - Browser-login desktop state is out of scope for this adapter; see `cursor` (`--isolated` whole-root) for the IDE.
 
 ## Support
 
 | Windows | macOS | Linux |
 |---|---|---|
-| supported (process token via `multi-cli auth set`) | supported | supported |
+| supported (process token via `nini-agents auth set`) | supported | supported |

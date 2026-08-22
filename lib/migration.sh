@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Legacy -> schema-v2 migration engine for multi-cli.
+# Legacy -> schema-v2 migration engine for nini-agents.
 #
-# Sourced by the multi-cli launcher (which provides abort, adapter_path,
+# Sourced by the nini-agents launcher (which provides abort, adapter_path,
 # assert_adapter_valid, split_profile_spec, validate_name, profile_dir,
 # platform, file_nlink) after lib/multicli-runtime.sh (which provides
 # runtime_json_str, runtime_json_arr, runtime_platform_root,
@@ -377,7 +377,7 @@ migration_journal_write() {
     --arg shared_root "$shared_root" \
     --arg status "$overall" \
     --argjson prefer_profile "$prefer_profile" \
-    --arg action "Re-run 'multi-cli migrate $tool/$name' to roll forward; to roll back, move each 'done' entry from 'to' back to 'from'." \
+    --arg action "Re-run 'nini-agents migrate $tool/$name' to roll forward; to roll back, move each 'done' entry from 'to' back to 'from'." \
     --argjson operations "$ops_json" \
     '{tool:$tool,profile:$profile,sharedRoot:$shared_root,status:$status,preferProfile:$prefer_profile,action:$action,operations:$operations}' \
     > "$tmp"
@@ -454,7 +454,7 @@ migration_run_fs_op() {
   migration_journal_write "$journal" failed "$tool" "$name" "$shared_root" "$prefer_profile"
   abort "Migration failed: $err
 Roll-forward/rollback journal written to $journal
-Re-run 'multi-cli migrate $tool/$name' to roll forward."
+Re-run 'nini-agents migrate $tool/$name' to roll forward."
 }
 
 # Run every planned op in order, journaling after each. Any failure marks the
@@ -530,10 +530,10 @@ migration_assert_same_volume() {
 }
 
 # =============================================================================
-# Entry point -- wired into the launcher as `multi-cli migrate`
+# Entry point -- wired into the launcher as `nini-agents migrate`
 # =============================================================================
 
-# multi-cli migrate <tool>/<name> [--dry-run] [--prefer-profile]: refuse
+# nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]: refuse
 # unclassifiable profiles before writing, plan, then either print the plan
 # (dry run) or execute it under the journal.
 cmd_migrate() {
@@ -543,13 +543,13 @@ cmd_migrate() {
     case "$1" in
       --dry-run)        dry_run=true ;;
       --prefer-profile) prefer_profile=true ;;
-      --*)              abort "Unknown option '$1'. Usage: multi-cli migrate <tool>/<name> [--dry-run] [--prefer-profile]" ;;
+      --*)              abort "Unknown option '$1'. Usage: nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]" ;;
       *)                positionals+=("$1") ;;
     esac
     shift
   done
   spec="${positionals[0]:-}"
-  [ -n "$spec" ] || abort "Usage: multi-cli migrate <tool>/<name> [--dry-run] [--prefer-profile]"
+  [ -n "$spec" ] || abort "Usage: nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]"
   split_profile_spec "$spec"
   validate_name "$NAME"
   local manifest pdir shared_root mechanism journal
@@ -603,6 +603,6 @@ cmd_migrate() {
   migration_journal_write "$journal" completed "$TOOL" "$NAME" "$shared_root" "$prefer_profile"
   echo "Migrated $spec to schema-v2 (accountOverlay)."
   if [ "$mechanism" = processSecret ]; then
-    echo "Note: adapter '$TOOL' uses process-secret credentials. Run: multi-cli auth set $spec before launching."
+    echo "Note: adapter '$TOOL' uses process-secret credentials. Run: nini-agents auth set $spec before launching."
   fi
 }

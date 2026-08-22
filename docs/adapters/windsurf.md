@@ -13,8 +13,8 @@ Windsurf is now Devin Desktop. The adapter detects both current and legacy binar
 Profiles use an owned OS user:
 
 ```bash
-multi-cli new windsurf/work
-multi-cli launch windsurf/work
+nini-agents new windsurf/work
+nini-agents launch windsurf/work
 ```
 
 ## Account boundary

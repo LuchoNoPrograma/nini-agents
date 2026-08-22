@@ -1,5 +1,5 @@
 name: Usage question
-description: Ask for help using Multi-CLI
+description: Ask for help using Nini Agents
 title: "[Question]: "
 labels:
   - "type: question"
@@ -22,7 +22,7 @@ body:
     id: environment
     attributes:
       label: Version and environment
-      placeholder: Multi-CLI 1.0.0, Windows 11, PowerShell 7.5
+      placeholder: Nini Agents 1.0.0, Windows 11, PowerShell 7.5
     validations:
       required: true
   - type: input

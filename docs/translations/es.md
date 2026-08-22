@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../../assets/i18n/es/banner.svg" alt="Multi-CLI. Usa varias cuentas a la vez sin cambiar entre ellas." width="760"/>
+  <img src="../../assets/i18n/es/banner.svg" alt="Nini Agents. Usa varias cuentas a la vez sin cambiar entre ellas." width="760"/>
 </p>
 
 <p align="center">Usa varias cuentas a la vez sin cambiar entre ellas.</p>
@@ -40,16 +40,16 @@
 Este método requiere [Git](https://git-scm.com/downloads).
 
 ```bash
-git clone https://github.com/Spielewoy/multi-cli.git
-cd multi-cli
+git clone https://github.com/LuchoNoPrograma/nini-agents.git
+cd nini-agents
 ./install/install.sh --local
 ```
 
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/Spielewoy/multi-cli.git
-cd multi-cli
+git clone https://github.com/LuchoNoPrograma/nini-agents.git
+cd nini-agents
 .\install\install.ps1 -Local
 ```
 
@@ -58,9 +58,9 @@ cd multi-cli
 ## Inicio rápido
 
 ```bash
-multi-cli doctor
-multi-cli new claude-cli/work
-multi-cli claude-cli/work
+nini-agents doctor
+nini-agents new claude-cli/work
+nini-agents claude-cli/work
 ```
 
 <a id="supported-ai-tools"></a>
@@ -87,7 +87,7 @@ multi-cli claude-cli/work
 | [Windsurf](../adapters/windsurf.md) | `windsurf` | Windows, macOS, Linux | Usuario del sistema operativo |
 | [Zed](../adapters/zed.md) | `zed` | Windows | Usuario del sistema operativo |
 
-Consulta los límites de cada plataforma en la [matriz de compatibilidad](../support-matrix.md). Ejecuta `multi-cli tools` para comprobar tu equipo.
+Consulta los límites de cada plataforma en la [matriz de compatibilidad](../support-matrix.md). Ejecuta `nini-agents tools` para comprobar tu equipo.
 
 <a id="commands"></a>
 
@@ -97,40 +97,40 @@ Consulta los límites de cada plataforma en la [matriz de compatibilidad](../sup
 
 | Comando | Acción |
 |---|---|
-| `multi-cli new <tool>/<name>` | Crear un perfil de cuenta con credenciales separadas y estado normal compartido |
-| `multi-cli new <tool>/<name> --isolated` | Crear un perfil con todo el directorio aislado si la herramienta de IA lo admite; alias: `--isolate`, `-i` |
-| `multi-cli new <tool>/<name> --from <template>` | Crear un perfil con esquema v2 desde una plantilla con esquema v2 |
-| `multi-cli <tool>/<name>` | Iniciar un perfil |
-| `multi-cli launch <tool>/<name> [-- args...]` | Iniciar y pasar argumentos a la herramienta |
-| `multi-cli list [<tool>]` | Enumerar perfiles |
-| `multi-cli clone <tool>/<src> <tool>/<dest>` | Copiar un perfil con esquema v2 |
-| `multi-cli rename <tool>/<old> <tool>/<new>` | Cambiar el nombre de un perfil |
-| `multi-cli delete <tool>/<name>` | Eliminar un perfil tras confirmar |
+| `nini-agents new <tool>/<name>` | Crear un perfil de cuenta con credenciales separadas y estado normal compartido |
+| `nini-agents new <tool>/<name> --isolated` | Crear un perfil con todo el directorio aislado si la herramienta de IA lo admite; alias: `--isolate`, `-i` |
+| `nini-agents new <tool>/<name> --from <template>` | Crear un perfil con esquema v2 desde una plantilla con esquema v2 |
+| `nini-agents <tool>/<name>` | Iniciar un perfil |
+| `nini-agents launch <tool>/<name> [-- args...]` | Iniciar y pasar argumentos a la herramienta |
+| `nini-agents list [<tool>]` | Enumerar perfiles |
+| `nini-agents clone <tool>/<src> <tool>/<dest>` | Copiar un perfil con esquema v2 |
+| `nini-agents rename <tool>/<old> <tool>/<new>` | Cambiar el nombre de un perfil |
+| `nini-agents delete <tool>/<name>` | Eliminar un perfil tras confirmar |
 
 ### Credenciales y portabilidad
 
 | Comando | Acción |
 |---|---|
-| `multi-cli auth set <tool>/<profile>` | Guardar un secreto de proceso en el almacén de credenciales del sistema |
-| `multi-cli auth status <tool>/<profile>` | Comprobar si existe el secreto |
-| `multi-cli auth clear <tool>/<profile>` | Eliminar el secreto |
-| `multi-cli continue <tool> <src> <dest> [--dry-run] [--no-merge]` | Copiar el estado de sesión compatible, nunca las credenciales |
-| `multi-cli template save <tool>/<profile> <name>` | Guardar una plantilla con esquema v2 sin credenciales |
-| `multi-cli template list \| delete <name>` | Enumerar o eliminar plantillas |
-| `multi-cli export <tool>/<name> [path]` | Exportar un perfil con esquema v2 |
-| `multi-cli import <archive> <tool>/<name>` | Importar un archivo con esquema v2 |
+| `nini-agents auth set <tool>/<profile>` | Guardar un secreto de proceso en el almacén de credenciales del sistema |
+| `nini-agents auth status <tool>/<profile>` | Comprobar si existe el secreto |
+| `nini-agents auth clear <tool>/<profile>` | Eliminar el secreto |
+| `nini-agents continue <tool> <src> <dest> [--dry-run] [--no-merge]` | Copiar el estado de sesión compatible, nunca las credenciales |
+| `nini-agents template save <tool>/<profile> <name>` | Guardar una plantilla con esquema v2 sin credenciales |
+| `nini-agents template list \| delete <name>` | Enumerar o eliminar plantillas |
+| `nini-agents export <tool>/<name> [path]` | Exportar un perfil con esquema v2 |
+| `nini-agents import <archive> <tool>/<name>` | Importar un archivo con esquema v2 |
 
 ### Mantenimiento
 
 | Comando | Acción |
 |---|---|
-| `multi-cli migrate <tool>/<name> [--dry-run] [--prefer-profile]` | Migrar un perfil antiguo al esquema v2 |
-| `multi-cli status` | Mostrar perfiles y tamaños |
-| `multi-cli stats` | Mostrar el uso de almacenamiento de los perfiles |
-| `multi-cli doctor [--deep]` | Diagnosticar el entorno y, opcionalmente, auditar los entornos de ejecución |
-| `multi-cli completion {bash\|zsh\|powershell}` | Mostrar la configuración de autocompletado del shell |
-| `multi-cli help` | Mostrar todos los comandos |
-| `multi-cli version` | Mostrar la versión instalada |
+| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]` | Migrar un perfil antiguo al esquema v2 |
+| `nini-agents status` | Mostrar perfiles y tamaños |
+| `nini-agents stats` | Mostrar el uso de almacenamiento de los perfiles |
+| `nini-agents doctor [--deep]` | Diagnosticar el entorno y, opcionalmente, auditar los entornos de ejecución |
+| `nini-agents completion {bash\|zsh\|powershell}` | Mostrar la configuración de autocompletado del shell |
+| `nini-agents help` | Mostrar todos los comandos |
+| `nini-agents version` | Mostrar la versión instalada |
 
 <a id="how-isolation-works"></a>
 
@@ -143,20 +143,20 @@ Consulta los límites de cada plataforma en la [matriz de compatibilidad](../sup
 | Usuario del sistema operativo | La identidad de credenciales fija del producto | Nada, salvo que la herramienta de IA lo permita |
 | Directorio aislado de la herramienta | Todo el directorio de la herramienta | Nada |
 
-Los perfiles usan el límite compatible más estrecho. `--isolated` crea un directorio de herramienta separado. Las credenciales fijas del sistema usan un usuario del sistema administrado por Multi-CLI y requieren una terminal con privilegios elevados en Windows.
+Los perfiles usan el límite compatible más estrecho. `--isolated` crea un directorio de herramienta separado. Las credenciales fijas del sistema usan un usuario del sistema administrado por Nini Agents y requieren una terminal con privilegios elevados en Windows.
 
 Las herramientas de IA que usan un secreto de proceso requieren un paso adicional antes de iniciarlas:
 
 ```bash
-multi-cli new cursor-cli/work
-multi-cli auth set cursor-cli/work
-multi-cli cursor-cli/work
+nini-agents new cursor-cli/work
+nini-agents auth set cursor-cli/work
+nini-agents cursor-cli/work
 ```
 
 Los perfiles antiguos conservan su aislamiento original de todo el directorio. Previsualiza la migración con:
 
 ```bash
-multi-cli migrate codex/work --dry-run
+nini-agents migrate codex/work --dry-run
 ```
 
 Solo los perfiles, plantillas y archivos con esquema v2 son portables. Migra primero los perfiles antiguos.
@@ -168,9 +168,9 @@ Solo los perfiles, plantillas y archivos con esquema v2 son portables. Migra pri
 Copia el estado compatible de una conversación cuando una cuenta llegue a su límite:
 
 ```bash
-multi-cli continue codex work personal --dry-run
-multi-cli continue codex work personal
-multi-cli codex/personal
+nini-agents continue codex work personal --dry-run
+nini-agents continue codex work personal
+nini-agents codex/personal
 codex resume
 ```
 
@@ -191,20 +191,23 @@ Cada perfil recibe un atajo como `claude-cli-work`.
 |---|---|---|
 | `MULTICLI_HOME` | `~/MultiCliProfiles` | Almacenamiento de perfiles |
 | `MULTICLI_OVERRIDE_BINARY` | sin definir | Sustituir la detección del ejecutable para un inicio |
-| `MULTICLI_REPO` | repositorio de GitHub | Cambiar el origen de instalación |
-| `MULTICLI_INSTALL_DIR` | valor predeterminado de la plataforma | Cambiar el directorio de instalación |
+| `NINI_AGENTS_REPO` | repositorio de GitHub | Cambiar el origen de instalación |
+| `NINI_AGENTS_INSTALL_DIR` | valor predeterminado de la plataforma | Cambiar el directorio de instalación |
+
+`MULTICLI_REPO` y `MULTICLI_INSTALL_DIR` permanecen como aliases temporales.
+El comando `multi-cli` también permanece como shim del motor `nini-agents`.
 
 <a id="troubleshooting"></a>
 
 ## Solución de problemas
 
 ```bash
-multi-cli doctor
-multi-cli doctor --deep
-multi-cli tools
+nini-agents doctor
+nini-agents doctor --deep
+nini-agents tools
 ```
 
-Reinicia la terminal si no encuentra `multi-cli` o el alias de un perfil nuevo después de instalar. La [matriz de compatibilidad](../support-matrix.md) incluye los requisitos específicos de cada producto.
+Reinicia la terminal si no encuentra `nini-agents` o el alias de un perfil nuevo después de instalar. La [matriz de compatibilidad](../support-matrix.md) incluye los requisitos específicos de cada producto.
 
 <a id="uninstall"></a>
 
@@ -213,13 +216,13 @@ Reinicia la terminal si no encuentra `multi-cli` o el alias de un perfil nuevo d
 macOS y Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/install/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/LuchoNoPrograma/nini-agents/main/install/uninstall.sh | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/install/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/LuchoNoPrograma/nini-agents/main/install/uninstall.ps1 | iex
 ```
 
 Los datos de los perfiles se conservan salvo que confirmes su eliminación.

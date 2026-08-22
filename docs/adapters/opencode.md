@@ -1,6 +1,6 @@
 # opencode: OpenCode
 
-**Account boundary:** `inseparable`: stored provider authentication and runtime data have no proven disjoint profile boundary, so multi-cli refuses the account-overlay contract on every platform.
+**Account boundary:** `inseparable`: stored provider authentication and runtime data have no proven disjoint profile boundary, so nini-agents refuses the account-overlay contract on every platform.
 
 OpenCode resolves config from `OPENCODE_CONFIG_DIR` and `OPENCODE_CONFIG`. That relocates configuration, but stored logins and sessions cannot yet be split truthfully; only configuration paths are classified as shareable.
 
@@ -17,8 +17,8 @@ Binary discovery: `%APPDATA%\npm\opencode.cmd` (Windows), `/usr/local/bin/openco
 Stored-login profiles use whole-root isolation:
 
 ```bash
-multi-cli new opencode/work --isolated
-multi-cli launch opencode/work
+nini-agents new opencode/work --isolated
+nini-agents launch opencode/work
 ```
 
 ## Account boundary
@@ -35,7 +35,7 @@ No session paths are declared shareable, and no profile-local credentials can be
 
 ## Known limitations
 
-- Stored-login mode cannot run two accounts with a truthful boundary; `multi-cli continue` is unavailable because sessions and credentials are not separable.
+- Stored-login mode cannot run two accounts with a truthful boundary; `nini-agents continue` is unavailable because sessions and credentials are not separable.
 - Direct provider environment credentials may become a `processSecret` candidate later; they are not part of this adapter today.
 
 ## Support

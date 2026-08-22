@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://multi-cli.local/schema/adapter.schema.json",
-  "title": "multi-cli adapter",
+  "title": "Nini Agents adapter",
   "type": "object",
   "required": [
     "id",

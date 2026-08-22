@@ -38,7 +38,7 @@ jobs:
         run: |
           version="$(tr -d '[:space:]' < release/VERSION)"
           test "$GITHUB_REF_NAME" = "v$version"
-          grep -Fx "## Multi-CLI $version" release/NOTES.md
+          grep -Fx "## Nini Agents $version" release/NOTES.md
           bash release/build.sh --check --version "$version"
           pwsh -NoProfile -File release/build.ps1 -Check -ExpectedVersion "$version"
 
@@ -60,10 +60,12 @@ jobs:
         shell: bash
         run: |
           version="$(tr -d '[:space:]' < release/VERSION)"
-          tar -tzf "dist/multi-cli-v$version-linux-macos.tar.gz" | grep -Fx "multi-cli-v$version/multi-cli"
-          tar -tzf "dist/multi-cli-v$version-linux-macos.tar.gz" | grep -Fx "multi-cli-v$version/assets/banner.svg"
-          unzip -Z1 "dist/multi-cli-v$version-windows.zip" | tr '\134' '/' | grep -Fx "multi-cli-v$version/multi-cli.ps1"
-          unzip -Z1 "dist/multi-cli-v$version-windows.zip" | tr '\134' '/' | grep -Fx "multi-cli-v$version/assets/banner.svg"
+          tar -tzf "dist/nini-agents-v$version-linux-macos.tar.gz" | grep -Fx "nini-agents-v$version/nini-agents"
+          tar -tzf "dist/nini-agents-v$version-linux-macos.tar.gz" | grep -Fx "nini-agents-v$version/multi-cli"
+          tar -tzf "dist/nini-agents-v$version-linux-macos.tar.gz" | grep -Fx "nini-agents-v$version/assets/banner.svg"
+          unzip -Z1 "dist/nini-agents-v$version-windows.zip" | tr '\134' '/' | grep -Fx "nini-agents-v$version/nini-agents.ps1"
+          unzip -Z1 "dist/nini-agents-v$version-windows.zip" | tr '\134' '/' | grep -Fx "nini-agents-v$version/multi-cli.ps1"
+          unzip -Z1 "dist/nini-agents-v$version-windows.zip" | tr '\134' '/' | grep -Fx "nini-agents-v$version/assets/banner.svg"
           (cd dist && sha256sum --check SHA256SUMS)
 
       - name: Upload release assets
@@ -111,5 +113,5 @@ jobs:
           version="$(tr -d '[:space:]' < release/VERSION)"
           gh release create "$GITHUB_REF_NAME" dist/* \
             --verify-tag \
-            --title "Multi-CLI v$version" \
+            --title "Nini Agents v$version" \
             --notes-file release/NOTES.md

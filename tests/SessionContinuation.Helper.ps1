@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-  Test helper for the multi-cli.ps1 session-continuation Pester suite.
+  Test helper for the nini-agents.ps1 session-continuation Pester suite.
 
 .DESCRIPTION
   Builds REAL fixture trees in temp dirs (no mocks) and invokes the actual
-  multi-cli.ps1 launcher in a child PowerShell process with USERPROFILE/HOME
+  nini-agents.ps1 launcher in a child PowerShell process with USERPROFILE/HOME
   and MULTICLI_HOME redirected into a scratch sandbox. Also dot-sources the
   launcher's functions into the current session for unit-level branch tests.
 
@@ -13,7 +13,7 @@
 
 Set-StrictMode -Version Latest
 
-$script:LauncherPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSCommandPath)) 'multi-cli.ps1'
+$script:LauncherPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSCommandPath)) 'nini-agents.ps1'
 $script:LauncherDefsPath = $null
 
 function Get-LauncherPath { return $script:LauncherPath }
@@ -138,7 +138,7 @@ function New-CodexProfile {
 
 function Invoke-Launcher {
     <#
-      Runs multi-cli.ps1 in a child PowerShell with USERPROFILE/HOME redirected to the
+      Runs nini-agents.ps1 in a child PowerShell with USERPROFILE/HOME redirected to the
       scratch fake home and MULTICLI_HOME set to the scratch profile root.
       Returns @{ ExitCode; StdOut; StdErr }.
       ToolsDirOverride lets a test point the launcher at a scratch tools dir holding a
@@ -245,7 +245,7 @@ function New-BrokenAdapterToolsDir {
     <#
       Builds a scratch tools dir containing a single codex adapter whose session.paths
       OVERLAP its session.credentials -> drives Test-SessionAdapterBug to throw.
-      Returns the path to a copy of multi-cli.ps1 wired to that tools dir.
+      Returns the path to a copy of nini-agents.ps1 wired to that tools dir.
     #>
     param([pscustomobject]$Scratch)
     $toolsDir = Join-Path $Scratch.Root 'broken-tools'
@@ -269,7 +269,7 @@ function New-BrokenAdapterToolsDir {
     Set-Content -Path (Join-Path $codexDir 'adapter.json') -Value ($adapter | ConvertTo-Json -Depth 6) -Encoding UTF8
 
     # Copy the launcher and runtime modules so its default ai-tools dir picks up the broken adapter.
-    $launcherCopy = Join-Path $toolsDir 'multi-cli.ps1'
+    $launcherCopy = Join-Path $toolsDir 'nini-agents.ps1'
     Copy-Item -Path $script:LauncherPath -Destination $launcherCopy -Force
     $sourceLib = Join-Path (Split-Path -Parent $script:LauncherPath) 'lib'
     Copy-Item -Path $sourceLib -Destination (Join-Path $toolsDir 'lib') -Recurse -Force

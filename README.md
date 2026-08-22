@@ -1,8 +1,13 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="Multi-CLI. Use multiple accounts simultaneously without switching." width="760"/>
+  <img src="assets/banner.svg" alt="Nini Agents. Use multiple accounts simultaneously without switching." width="760"/>
 </p>
 
 <p align="center">Use multiple accounts simultaneously without switching.</p>
+
+> [!IMPORTANT]
+> Nini Agents is currently evolving from the Multi-CLI `6efb0d2` engine base.
+> Cross-machine credential movement, the stable JSON CLI, and consumer
+> migrations are planned work and are not implemented yet.
 
 <p align="center">
   <a href="#supported-ai-tools"><img src="https://img.shields.io/badge/support-17%20AI%20tools-255C60?style=flat-square&labelColor=14101F" alt="17 supported AI tools"/></a>
@@ -38,25 +43,25 @@
 [Git](https://git-scm.com/downloads) is required for this method.
 
 ```bash
-git clone https://github.com/Spielewoy/multi-cli.git
-cd multi-cli
+git clone https://github.com/LuchoNoPrograma/nini-agents.git
+cd nini-agents
 ./install/install.sh --local
 ```
 
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/Spielewoy/multi-cli.git
-cd multi-cli
+git clone https://github.com/LuchoNoPrograma/nini-agents.git
+cd nini-agents
 .\install\install.ps1 -Local
 ```
 
 ## Quick start
 
 ```bash
-multi-cli doctor
-multi-cli new claude-cli/work
-multi-cli claude-cli/work
+nini-agents doctor
+nini-agents new claude-cli/work
+nini-agents claude-cli/work
 ```
 
 ## Supported AI tools
@@ -81,7 +86,7 @@ multi-cli claude-cli/work
 | [Windsurf](docs/adapters/windsurf.md) | `windsurf` | Windows, macOS, Linux | OS user |
 | [Zed](docs/adapters/zed.md) | `zed` | Windows | OS user |
 
-See platform limits in the [support matrix](docs/support-matrix.md). Run `multi-cli tools` to check your machine.
+See platform limits in the [support matrix](docs/support-matrix.md). Run `nini-agents tools` to check your machine.
 
 ## Commands
 
@@ -89,40 +94,40 @@ See platform limits in the [support matrix](docs/support-matrix.md). Run `multi-
 
 | Command | Action |
 |---|---|
-| `multi-cli new <tool>/<name>` | Create an account profile (credentials separate; normal state shared) |
-| `multi-cli new <tool>/<name> --isolated` | Create a whole-root isolated profile when the AI tool supports it; aliases: `--isolate`, `-i` |
-| `multi-cli new <tool>/<name> --from <template>` | Create a schema-v2 profile from a schema-v2 template |
-| `multi-cli <tool>/<name>` | Launch a profile |
-| `multi-cli launch <tool>/<name> [-- args...]` | Launch and pass arguments to the tool |
-| `multi-cli list [<tool>]` | List profiles |
-| `multi-cli clone <tool>/<src> <tool>/<dest>` | Copy a schema-v2 profile |
-| `multi-cli rename <tool>/<old> <tool>/<new>` | Rename a profile |
-| `multi-cli delete <tool>/<name>` | Delete a profile after confirmation |
+| `nini-agents new <tool>/<name>` | Create an account profile (credentials separate; normal state shared) |
+| `nini-agents new <tool>/<name> --isolated` | Create a whole-root isolated profile when the AI tool supports it; aliases: `--isolate`, `-i` |
+| `nini-agents new <tool>/<name> --from <template>` | Create a schema-v2 profile from a schema-v2 template |
+| `nini-agents <tool>/<name>` | Launch a profile |
+| `nini-agents launch <tool>/<name> [-- args...]` | Launch and pass arguments to the tool |
+| `nini-agents list [<tool>]` | List profiles |
+| `nini-agents clone <tool>/<src> <tool>/<dest>` | Copy a schema-v2 profile |
+| `nini-agents rename <tool>/<old> <tool>/<new>` | Rename a profile |
+| `nini-agents delete <tool>/<name>` | Delete a profile after confirmation |
 
 ### Credentials and portability
 
 | Command | Action |
 |---|---|
-| `multi-cli auth set <tool>/<profile>` | Store a process secret in the OS credential store |
-| `multi-cli auth status <tool>/<profile>` | Check whether that secret exists |
-| `multi-cli auth clear <tool>/<profile>` | Remove that secret |
-| `multi-cli continue <tool> <src> <dest> [--dry-run] [--no-merge]` | Copy supported session state, never credentials |
-| `multi-cli template save <tool>/<profile> <name>` | Save a credential-free schema-v2 template |
-| `multi-cli template list \| delete <name>` | List or delete templates |
-| `multi-cli export <tool>/<name> [path]` | Export a schema-v2 profile |
-| `multi-cli import <archive> <tool>/<name>` | Import a schema-v2 archive |
+| `nini-agents auth set <tool>/<profile>` | Store a process secret in the OS credential store |
+| `nini-agents auth status <tool>/<profile>` | Check whether that secret exists |
+| `nini-agents auth clear <tool>/<profile>` | Remove that secret |
+| `nini-agents continue <tool> <src> <dest> [--dry-run] [--no-merge]` | Copy supported session state, never credentials |
+| `nini-agents template save <tool>/<profile> <name>` | Save a credential-free schema-v2 template |
+| `nini-agents template list \| delete <name>` | List or delete templates |
+| `nini-agents export <tool>/<name> [path]` | Export a schema-v2 profile |
+| `nini-agents import <archive> <tool>/<name>` | Import a schema-v2 archive |
 
 ### Maintenance
 
 | Command | Action |
 |---|---|
-| `multi-cli migrate <tool>/<name> [--dry-run] [--prefer-profile]` | Migrate a legacy profile to schema v2 |
-| `multi-cli status` | Show profiles and sizes |
-| `multi-cli stats` | Show profile storage use |
-| `multi-cli doctor [--deep]` | Diagnose setup and optionally audit runtimes |
-| `multi-cli completion {bash\|zsh\|powershell}` | Print shell completion setup |
-| `multi-cli help` | Show every command |
-| `multi-cli version` | Show the installed version |
+| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]` | Migrate a legacy profile to schema v2 |
+| `nini-agents status` | Show profiles and sizes |
+| `nini-agents stats` | Show profile storage use |
+| `nini-agents doctor [--deep]` | Diagnose setup and optionally audit runtimes |
+| `nini-agents completion {bash\|zsh\|powershell}` | Print shell completion setup |
+| `nini-agents help` | Show every command |
+| `nini-agents version` | Show the installed version |
 
 ## How isolation works
 
@@ -133,20 +138,20 @@ See platform limits in the [support matrix](docs/support-matrix.md). Run `multi-
 | OS user | The product's fixed OS credential identity | Nothing unless the AI tool allows it |
 | Isolated tool home | The entire tool home | Nothing |
 
-Profiles use the narrowest supported boundary. `--isolated` creates a separate tool home. Fixed OS credentials use a Multi-CLI-owned OS user and require an elevated terminal on Windows.
+Profiles use the narrowest supported boundary. `--isolated` creates a separate tool home. Fixed OS credentials use a Nini Agents-owned OS user and require an elevated terminal on Windows.
 
 AI tools using a process secret require one extra step:
 
 ```bash
-multi-cli new cursor-cli/work
-multi-cli auth set cursor-cli/work
-multi-cli cursor-cli/work
+nini-agents new cursor-cli/work
+nini-agents auth set cursor-cli/work
+nini-agents cursor-cli/work
 ```
 
 Older profiles keep their original whole-root behavior. Preview migration with:
 
 ```bash
-multi-cli migrate codex/work --dry-run
+nini-agents migrate codex/work --dry-run
 ```
 
 Only schema-v2 profiles, templates, and archives are portable. Migrate legacy profiles first.
@@ -156,9 +161,9 @@ Only schema-v2 profiles, templates, and archives are portable. Migrate legacy pr
 Copy supported conversation state when one account reaches a limit:
 
 ```bash
-multi-cli continue codex work personal --dry-run
-multi-cli continue codex work personal
-multi-cli codex/personal
+nini-agents continue codex work personal --dry-run
+nini-agents continue codex work personal
+nini-agents codex/personal
 codex resume
 ```
 
@@ -179,31 +184,46 @@ Each profile gets a shortcut such as `claude-cli-work`.
 |---|---|---|
 | `MULTICLI_HOME` | `~/MultiCliProfiles` | Profile storage |
 | `MULTICLI_OVERRIDE_BINARY` | unset | Override binary discovery for one launch |
-| `MULTICLI_REPO` | GitHub repository | Override the install source |
-| `MULTICLI_INSTALL_DIR` | platform default | Override the installation directory |
+| `NINI_AGENTS_REPO` | Nini Agents GitHub repository | Override the install source |
+| `NINI_AGENTS_INSTALL_DIR` | platform default | Override the installation directory |
+| `NINI_AGENTS_BIN_LINK` | `~/.local/bin/nini-agents` | Override the primary POSIX launcher |
+| `NINI_AGENTS_BIN_DIR` | platform default | Override the Windows command directory |
+
+`MULTICLI_REPO`, `MULTICLI_INSTALL_DIR`, `MULTICLI_BIN_LINK`, and
+`MULTICLI_BIN_DIR` remain temporary installer compatibility variables.
+`MULTICLI_HOME`, `MULTICLI_OVERRIDE_BINARY`, `MULTICLI_PROFILE_ID`, the
+`~/MultiCliProfiles` layout, and existing credential-store targets remain
+unchanged so current profiles do not require migration or authentication.
+
+## Temporary command compatibility
+
+`nini-agents` is the canonical command. `multi-cli` is a thin compatibility
+shim that delegates to the same engine for existing aliases and consumers.
+It contains no profile or credential logic and will remain available until the
+coordinated MultiCLI AI and Codexporter migration is complete.
 
 ## Troubleshooting
 
 ```bash
-multi-cli doctor
-multi-cli doctor --deep
-multi-cli tools
+nini-agents doctor
+nini-agents doctor --deep
+nini-agents tools
 ```
 
-Restart the terminal if `multi-cli` or a new profile alias is not found after installation. The [support matrix](docs/support-matrix.md) covers product-specific requirements.
+Restart the terminal if `nini-agents` or a new profile alias is not found after installation. The [support matrix](docs/support-matrix.md) covers product-specific requirements.
 
 ## Uninstall
 
 macOS and Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/install/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/LuchoNoPrograma/nini-agents/main/install/uninstall.sh | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/install/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/LuchoNoPrograma/nini-agents/main/install/uninstall.ps1 | iex
 ```
 
 Profile data is preserved unless you confirm its removal.
@@ -217,4 +237,5 @@ Profile data is preserved unless you confirm its removal.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). See [NOTICE](NOTICE) for the Multi-CLI fork attribution and
+fixed upstream baseline.

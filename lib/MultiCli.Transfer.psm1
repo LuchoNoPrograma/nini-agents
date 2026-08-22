@@ -358,7 +358,7 @@ function Assert-TransferTemplateCompatible {
     $templateName = Split-Path -Leaf $TemplateDir
     $manifest = Read-TransferManifest -Directory $TemplateDir
     if ($null -eq $manifest -or -not (Get-TransferProperty -Object $manifest -Name 'adapterId')) {
-        throw "Template '$templateName' has no manifest; it was not saved by this version of multi-cli."
+        throw "Template '$templateName' has no manifest; it was not saved by this version of nini-agents."
     }
     if ($manifest.adapterId -ne $Adapter.id) {
         throw "Template '$templateName' was saved from adapter '$($manifest.adapterId)' and cannot be applied to '$($Adapter.id)'. Save a new template from a '$($Adapter.id)' profile."
@@ -569,7 +569,7 @@ function Import-MultiCliProfile {
         Expand-TransferArchive -ArchivePath $ArchivePath -Staging $staging
         $manifest = Read-TransferManifest -Directory $staging
         if ($null -eq $manifest) {
-            throw "Refusing to import: archive has no multi-cli manifest; only archives written by multi-cli export are accepted."
+            throw "Refusing to import: archive has no nini-agents manifest; only archives written by nini-agents export are accepted."
         }
         $archivedAdapter = Get-TransferProperty -Object $manifest -Name 'adapterId'
         if (-not $archivedAdapter) {

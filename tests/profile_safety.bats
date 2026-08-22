@@ -143,7 +143,7 @@ make_junction() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"legacy profile transfer is disabled"* ]]
-  [[ "$output" == *"multi-cli migrate fixture/legacy"* ]]
+  [[ "$output" == *"nini-agents migrate fixture/legacy"* ]]
   [ ! -e "$MULTICLI_HOME/.templates/tpl" ]
 }
 
@@ -172,7 +172,7 @@ make_junction() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"legacy profile transfer is disabled"* ]]
-  [[ "$output" == *"multi-cli migrate fixture/legacy"* ]]
+  [[ "$output" == *"nini-agents migrate fixture/legacy"* ]]
   [ ! -e "$archive" ]
 }
 
@@ -214,7 +214,7 @@ make_junction() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"legacy profile transfer is disabled"* ]]
-  [[ "$output" == *"multi-cli migrate legacycli/source"* ]]
+  [[ "$output" == *"nini-agents migrate legacycli/source"* ]]
   [ ! -e "$MULTICLI_HOME/legacycli/dest" ]
 }
 
@@ -261,6 +261,6 @@ PY
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"legacy profile transfer is disabled"* ]]
-  [[ "$output" == *"multi-cli migrate legacycli/work"* ]]
+  [[ "$output" == *"nini-agents migrate legacycli/work"* ]]
   [ ! -e "$MULTICLI_HOME/legacycli/work" ]
 }

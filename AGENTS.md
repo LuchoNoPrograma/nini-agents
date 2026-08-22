@@ -3,7 +3,7 @@
 ## Producto y etapa
 
 - Nini Agents CLI es un fork personal de Multi-CLI para administrar cuentas aisladas de herramientas de IA en Linux, macOS y Windows.
-- La base vigente de esta branch es Multi-CLI `6efb0d2`; no presentar todavia el renombre, la transferencia de Codexporter ni las migraciones consumidoras como funcionalidades implementadas.
+- La base vigente de esta branch es Multi-CLI `6efb0d2`; el ejecutable principal es `nini-agents` y `multi-cli` es un shim temporal. No presentar todavia la transferencia de Codexporter, la CLI JSON ni las migraciones consumidoras como funcionalidades implementadas.
 - El motor actual tiene dos implementaciones equivalentes: Bash 3.2 o superior y Windows PowerShell 5.1 o superior.
 - Los datos locales, perfiles y credenciales son reales aunque el producto no este en produccion empresarial. Priorizar siempre recuperabilidad y no revocacion.
 - El plan maestro y la bitacora de continuidad viven en `docs/plans/nini-agents-end-to-end.md`; describen direccion y gates, pero no conceden autorizacion para ejecutar etapas pendientes.
@@ -30,22 +30,27 @@ Activar solo las skills relevantes. `change-integral` coordina, pero no reemplaz
 ## Branches y fuentes
 
 - `multi-cli-base` conserva el upstream puro y sigue `multi-cli-upstream/main`.
-- `nini-agents-cli` contiene la evolucion propia del motor.
-- `main` y el remote local `legacy` conservan la aplicacion Flutter existente mientras se prepara una migracion separada.
+- `main` contiene la evolucion propia del motor Nini Agents.
+- `legacy-gui` y el remote local `legacy` conservan la aplicacion Flutter existente mientras se prepara una migracion separada.
 - No copiar cambios entre branches por nombre de archivo. Comparar historia, contrato y pruebas antes de portar comportamiento.
 - Conservar `LICENSE` y la atribucion MIT del proyecto original durante el fork y el renombre.
 
 ## Arquitectura vigente
 
 ```text
-multi-cli / multi-cli.ps1
+nini-agents / nini-agents.ps1
         -> comandos y dispatch
         -> lib/*.sh / lib/MultiCli.*.psm1
         -> schema/adapter.schema.json + ai-tools/*/adapter.json
         -> filesystem, credential store y proceso de la herramienta
+
+multi-cli / multi-cli.ps1
+        -> shims temporales sin logica de perfiles
+        -> entrypoints nini-agents
 ```
 
 - Mantener parsing y dispatch en los entrypoints; colocar runtime, migracion, transferencia, validacion, credenciales y OS-user isolation en sus modulos existentes.
+- Mantener `multi-cli` y `multi-cli.ps1` como shims delgados hasta migrar los consumidores; no duplicar logica del motor dentro de ellos.
 - Conservar paridad observable Bash y PowerShell cuando una capacidad sea multiplataforma.
 - Los adapters son contratos declarativos. No dispersar excepciones de una herramienta por el launcher si el schema puede expresarlas sin debilitar validaciones.
 - Schema v2 separa metadata `.profile.json`, credenciales bajo `auth/`, runtime reconstruible bajo `.runtime/` y estado normal declarado por el adapter.
@@ -55,7 +60,8 @@ multi-cli / multi-cli.ps1
 
 - No leer, imprimir, registrar, versionar ni incluir en fixtures valores de `auth.json`, tokens, secretos o identificadores privados.
 - No ejecutar logout, revocacion, `auth clear`, borrado, migracion, importacion, uninstall ni reparaciones sobre perfiles reales sin autorizacion especifica.
-- No modificar `~/.codex`, el `MULTICLI_HOME` real ni `~/.local/share/multi-cli` durante desarrollo o pruebas.
+- No modificar `~/.codex`, el `MULTICLI_HOME` real, `~/.local/share/nini-agents` ni `~/.local/share/multi-cli` durante desarrollo o pruebas.
+- Conservar temporalmente `MULTICLI_HOME`, `~/MultiCliProfiles`, `MULTICLI_PROFILE_ID`, targets `multi-cli/...` y ownership interno legacy hasta una migracion separada y aprobada.
 - Usar directorios temporales y perfiles sinteticos para toda prueba mutable.
 - Fallar cerrado ante traversal, enlaces, hardlinks, rutas fuera del root, archivos desconocidos, conflictos de credenciales o procesos activos.
 - No sobreescribir una credencial destino diferente. No borrar el origen antes de verificar staging, destino y rollback.

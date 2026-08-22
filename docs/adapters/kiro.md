@@ -2,7 +2,7 @@
 
 **Account boundary:** `osUserCredentialStore`: Kiro's browser/IAM sign-in has no per-profile credential namespace, so profiles use an owned OS user.
 
-Kiro is an agentic IDE. No IDE-internal credential file or keychain namespace is documented as profile-safe, so multi-cli does not claim one.
+Kiro is an agentic IDE. No IDE-internal credential file or keychain namespace is documented as profile-safe, so nini-agents does not claim one.
 
 ## Install
 
@@ -13,8 +13,8 @@ Kiro is an agentic IDE. No IDE-internal credential file or keychain namespace is
 Profiles use an owned OS user:
 
 ```bash
-multi-cli new kiro/work
-multi-cli launch kiro/work
+nini-agents new kiro/work
+nini-agents launch kiro/work
 ```
 
 ## Account boundary

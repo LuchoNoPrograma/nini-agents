@@ -15,13 +15,13 @@ Binary discovery: `%APPDATA%\npm\claude.cmd` (Windows), `/usr/local/bin/claude` 
 ## Quickstart
 
 ```bash
-multi-cli new claude-cli/work
-multi-cli launch claude-cli/work       # /login on first run; credentials stay profile-local
-multi-cli new claude-cli/personal
-multi-cli launch claude-cli/personal
+nini-agents new claude-cli/work
+nini-agents launch claude-cli/work       # /login on first run; credentials stay profile-local
+nini-agents new claude-cli/personal
+nini-agents launch claude-cli/personal
 ```
 
-Conversations are shared normal state, so `multi-cli continue` is not needed between schema-v2 profiles (it remains available for legacy profiles).
+Conversations are shared normal state, so `nini-agents continue` is not needed between schema-v2 profiles (it remains available for legacy profiles).
 
 ## Account boundary
 

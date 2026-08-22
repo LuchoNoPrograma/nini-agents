@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-# Schema-v2 accountOverlay runtime for multi-cli (Windows).
+# Schema-v2 accountOverlay runtime for nini-agents (Windows).
 # PowerShell mirror of lib/multicli-runtime.sh: declared credential files
 # stay profile-local under <profile>\auth, declared shared/session state is
 # junctioned/hardlinked from the adapter's native root, and the launch
@@ -168,7 +168,7 @@ function New-RuntimeOverlay {
     try {
         try { $hasLock = $mutex.WaitOne([TimeSpan]::FromSeconds(30)) }
         catch [Threading.AbandonedMutexException] { $hasLock = $true }
-        if (-not $hasLock) { throw "Timed out waiting for the profile runtime lock. Close a stuck multi-cli launch and retry." }
+        if (-not $hasLock) { throw "Timed out waiting for the profile runtime lock. Close a stuck nini-agents launch and retry." }
         return New-RuntimeOverlayLocked -Adapter $Adapter -ProfileDir $ProfileDir
     } finally {
         if ($hasLock) { $mutex.ReleaseMutex() }
@@ -279,7 +279,7 @@ function Get-AccountOverlayLaunchPlan {
         $target = Get-ProfileCredentialTarget -Adapter $Adapter -Metadata $metadata
         $secret = Get-MultiCliCredential -Target $target
         if ([string]::IsNullOrEmpty($secret)) {
-            throw "Profile '$($Adapter.id)/$(Split-Path $ProfileDir -Leaf)' has no stored credential. Run: multi-cli auth set $($Adapter.id)/$(Split-Path $ProfileDir -Leaf)"
+            throw "Profile '$($Adapter.id)/$(Split-Path $ProfileDir -Leaf)' has no stored credential. Run: nini-agents auth set $($Adapter.id)/$(Split-Path $ProfileDir -Leaf)"
         }
         $environment[$Adapter.account.secret.environmentVariable] = $secret
     }

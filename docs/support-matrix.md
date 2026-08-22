@@ -1,6 +1,6 @@
 # Support matrix
 
-`supported` means multi-cli provides working account isolation on that operating system through at least one mode (file overlay, process token, OS-user isolation, or whole-root `--isolated`); the mode requirements are noted per row. `unsupported` means no isolation mode works on that OS, and the row says why.
+`supported` means nini-agents provides working account isolation on that operating system through at least one mode (file overlay, process token, OS-user isolation, or whole-root `--isolated`); the mode requirements are noted per row. `unsupported` means no isolation mode works on that OS, and the row says why.
 
 | Adapter | Product | Auth boundary | Shared normal state | Windows | macOS | Linux |
 |---|---|---|---|---|---|---|
@@ -10,13 +10,13 @@
 | [`codex`](adapters/codex.md) | OpenAI Codex CLI | profile-local `auth.json`, file credential mode required | `.codex` configuration and conversations | supported (file overlay; file credential store mode) | supported | supported |
 | [`codex-gui`](adapters/codex-gui.md) | Codex Desktop App | owned Windows user | none | supported (Store AppX activation; first launch elevated) | unsupported; owned-user GUI/Keychain session is not proven | unsupported; no desktop Codex app on Linux |
 | [`commandcode`](adapters/commandcode.md) | Command Code | profile-local `.commandcode/auth.json` | `.commandcode` configuration and conversations | supported (file overlay; use `commandcode`, bare `cmd` collides with cmd.exe) | supported | supported |
-| [`copilot-cli`](adapters/copilot-cli.md) | GitHub Copilot CLI | per-process `COPILOT_GITHUB_TOKEN` | Copilot configuration and session state | supported (process token via `multi-cli auth set`; `GH_TOKEN`/`GITHUB_TOKEN` cleared) | supported | supported |
+| [`copilot-cli`](adapters/copilot-cli.md) | GitHub Copilot CLI | per-process `COPILOT_GITHUB_TOKEN` | Copilot configuration and session state | supported (process token via `nini-agents auth set`; `GH_TOKEN`/`GITHUB_TOKEN` cleared) | supported | supported |
 | [`copilot-vscode`](adapters/copilot-vscode.md) | GitHub Copilot in VS Code | separate OS user (GitHub auth in the OS store) | none | supported (Windows OS-user isolation; elevated terminal) | unsupported: owned-user GUI/Keychain session is not proven | unsupported: owned-user GUI/Secret Service session is not implemented |
 | [`cursor`](adapters/cursor.md) | Cursor Desktop | whole-root profile; no narrow split claimed | none | supported (`--isolated` whole-root required) | supported (`--isolated` whole-root required) | supported (`--isolated` whole-root required) |
-| [`cursor-cli`](adapters/cursor-cli.md) | Cursor CLI | per-process `CURSOR_API_KEY` | `cli-config.json` | supported (process token via `multi-cli auth set`) | supported | supported |
+| [`cursor-cli`](adapters/cursor-cli.md) | Cursor CLI | per-process `CURSOR_API_KEY` | `cli-config.json` | supported (process token via `nini-agents auth set`) | supported | supported |
 | [`gemini-cli`](adapters/gemini-cli.md) | Gemini CLI | profile-local OAuth/account files | `.gemini` configuration and conversations | supported (file overlay) | supported | supported |
-| [`grok-cli`](adapters/grok-cli.md) | Grok Build CLI | per-process `XAI_API_KEY` with precedence preconditions | documented config/sandbox state | supported (process token via `multi-cli auth set`; the shared config must not pin `model.api_key`) | supported | supported |
-| [`kimi-cli`](adapters/kimi-cli.md) | Kimi Code CLI | per-process `KIMI_MODEL_API_KEY` | documented config files | supported (process token via `multi-cli auth set`) | supported | supported |
+| [`grok-cli`](adapters/grok-cli.md) | Grok Build CLI | per-process `XAI_API_KEY` with precedence preconditions | documented config/sandbox state | supported (process token via `nini-agents auth set`; the shared config must not pin `model.api_key`) | supported | supported |
+| [`kimi-cli`](adapters/kimi-cli.md) | Kimi Code CLI | per-process `KIMI_MODEL_API_KEY` | documented config files | supported (process token via `nini-agents auth set`) | supported | supported |
 | [`kiro`](adapters/kiro.md) | Kiro IDE | fixed OS credential, separate OS user required | none | supported (OS-user isolation; elevated terminal) | supported (OS-user isolation with `sudo`) | supported (OS-user isolation with `sudo` and `acl`) |
 | [`opencode`](adapters/opencode.md) | OpenCode | auth and sessions share one database | none | supported (`--isolated` whole-root required) | supported (`--isolated` whole-root required) | supported (`--isolated` whole-root required) |
 | [`windsurf`](adapters/windsurf.md) | Devin Desktop (Windsurf) | fixed OS credential, separate OS user required | none | supported (OS-user isolation; elevated terminal) | supported (OS-user isolation with `sudo`) | supported (OS-user isolation with `sudo` and `acl`) |
@@ -25,6 +25,6 @@
 ## Mode notes
 
 - **File overlay** adapters keep only the declared credential files profile-local; everything else links to the native shared root, so conversations and configuration are shared between profiles.
-- **Process token** adapters inject a per-profile, highest-precedence credential into the child process only. Store the secret first with `multi-cli auth set <tool>/<profile>`; launch stays fail-closed until then.
-- **OS-user isolation** provisions a multi-cli-owned user per profile. Windows requires an elevated terminal. macOS and Linux require `sudo`, and Linux also requires `acl`. Products that need an unimplemented desktop credential session remain unsupported on that platform. These adapters reject `--isolated` because folder redirection cannot isolate a fixed OS credential store.
+- **Process token** adapters inject a per-profile, highest-precedence credential into the child process only. Store the secret first with `nini-agents auth set <tool>/<profile>`; launch stays fail-closed until then.
+- **OS-user isolation** provisions a nini-agents-owned user per profile. Windows requires an elevated terminal. macOS and Linux require `sudo`, and Linux also requires `acl`. Products that need an unimplemented desktop credential session remain unsupported on that platform. These adapters reject `--isolated` because folder redirection cannot isolate a fixed OS credential store.
 - **`--isolated` whole-root** redirects the product's entire home/config root into the profile dir. It separates filesystem-based products such as `opencode` and `cursor`. It does not isolate fixed OS credential identities, including Claude Code subscription OAuth in the macOS Keychain. Product availability still applies: `--isolated` cannot make an unavailable platform binary supported.

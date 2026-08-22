@@ -1,5 +1,5 @@
 ﻿<#
-  Pester 3.4-compatible real-execution test suite for the multi-cli.ps1
+  Pester 3.4-compatible real-execution test suite for the nini-agents.ps1
   session-continuation feature. No mocks: every test builds a real fixture tree
   in a temp sandbox, redirects USERPROFILE/HOME/MULTICLI_HOME into it, and runs
   the actual launcher in a child PowerShell process.
@@ -14,7 +14,7 @@ $script:CodexDest = {
     param($Scratch, $Name) Join-Path (Join-Path $Scratch.MultiCliHome 'codex') $Name
 }
 
-Describe 'multi-cli continue (codex, real fixtures)' {
+Describe 'nini-agents continue (codex, real fixtures)' {
 
     It '(1) base -> profile copies sessions+history, never auth.json, prints count and resumeHint' {
         $s = New-Scratch
@@ -131,7 +131,7 @@ Describe 'multi-cli continue (codex, real fixtures)' {
             $r = Invoke-Launcher -Scratch $s -Arguments @('continue', 'codex', 'base', 'ghost')
             $r.ExitCode | Should Be 1
             $r.StdOut | Should Match 'does not exist'
-            $r.StdOut | Should Match 'multi-cli new codex/ghost'
+            $r.StdOut | Should Match 'nini-agents new codex/ghost'
         } finally { Remove-Scratch $s }
     }
 
@@ -191,7 +191,7 @@ Describe 'multi-cli continue (codex, real fixtures)' {
     }
 }
 
-Describe 'multi-cli new (codex, profile seeding)' {
+Describe 'nini-agents new (codex, profile seeding)' {
 
     It '(13) new default profile seeds sessions and linkable share assets' {
         $s = New-Scratch

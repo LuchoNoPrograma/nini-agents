@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-# osUserCredentialStore account mechanism for multi-cli (Windows).
+# osUserCredentialStore account mechanism for nini-agents (Windows).
 #
 # Each profile gets a multi-cli-owned local OS user whose per-user Windows
 # Credential Manager namespace is the account boundary the adapter requires

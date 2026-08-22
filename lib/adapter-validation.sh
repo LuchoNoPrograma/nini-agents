@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# adapter-validation.sh -- semantic adapter.json validation for multi-cli.
+# adapter-validation.sh -- semantic adapter.json validation for nini-agents.
 #
 # Bash mirror of lib/MultiCli.AdapterValidation.psm1. Beyond the JSON schema,
 # these checks enforce the contracts the launchers rely on: declared paths are

@@ -30,7 +30,7 @@
   },
   "concurrency": { "level": "multiWriter", "singletonScope": "none" },
   "support": {
-    "windows": { "level": "supported", "reason": "process token via multi-cli auth set; GH_TOKEN/GITHUB_TOKEN cleared" },
+    "windows": { "level": "supported", "reason": "process token via nini-agents auth set; GH_TOKEN/GITHUB_TOKEN cleared" },
     "macos": { "level": "supported" },
     "linux": { "level": "supported" }
   },

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# multicli-osuser.sh -- osUserCredentialStore account mechanism for multi-cli.
+# multicli-osuser.sh -- osUserCredentialStore account mechanism for nini-agents.
 #
 # Identity derivation (deterministic sandbox usernames) and ownership-record
 # checks live here; the privileged Windows work (user provisioning, ACLs,
@@ -14,7 +14,7 @@
 #   mc_osuser_remove  <profile_dir>              -- profile delete (no-op safe)
 #   mc_osuser_is_owned <profile_dir>             -- ownership record present?
 #
-# Sourced by multi-cli after lib/multicli-runtime.sh; uses the launcher's
+# Sourced by nini-agents after lib/multicli-runtime.sh; uses the launcher's
 # abort and adapter_path like the sibling runtime lib. Pure functions
 # (username/task/target derivation) work stand-alone.
 
@@ -425,7 +425,7 @@ mc_osuser_adapter_path() {
     return
   fi
   declare -F adapter_path >/dev/null 2>&1 || \
-    abort "mc_osuser_$caller requires the multi-cli launcher (adapter_path) or an explicit adapter path"
+    abort "mc_osuser_$caller requires the nini-agents launcher (adapter_path) or an explicit adapter path"
   adapter_path "$tool"
 }
 
@@ -434,7 +434,7 @@ mc_osuser_ensure() {
   local tool="${1:-}" profile_dir="${2:-}" adapter="${3:-}" platform profile_id username recorded
   [ -n "$tool" ] && [ -n "$profile_dir" ] || abort "Usage: mc_osuser_ensure <tool> <profile_dir> [adapter.json]"
   adapter="$(mc_osuser_adapter_path "$tool" "$adapter" ensure)" || exit 1
-  [ -f "$adapter" ] || abort "Unknown tool '$tool'. Run: multi-cli tools"
+  [ -f "$adapter" ] || abort "Unknown tool '$tool'. Run: nini-agents tools"
   platform="$(mc_osuser_platform)"
   if [ "$platform" = windows ]; then
     MC_OSUSER_ADAPTER="$(cygpath -w "$adapter")" \
@@ -462,7 +462,7 @@ mc_osuser_launch() {
   shift 3
   adapter="${MC_OSUSER_ADAPTER_PATH:-}"
   adapter="$(mc_osuser_adapter_path "$tool" "$adapter" launch)" || exit 1
-  [ -f "$adapter" ] || abort "Unknown tool '$tool'. Run: multi-cli tools"
+  [ -f "$adapter" ] || abort "Unknown tool '$tool'. Run: nini-agents tools"
   platform="$(mc_osuser_platform)"
   if [ "$platform" != windows ]; then
     username="$(mc_osuser_ownership_field "$profile_dir" '.username')" || abort "Profile '$tool/$(basename "$profile_dir")' has no OS-user ownership record."

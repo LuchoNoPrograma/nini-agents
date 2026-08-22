@@ -17,11 +17,11 @@ macOS: download the Codex app from [OpenAI's Codex app page](https://openai.com/
 ## Quickstart
 
 ```powershell
-multi-cli new codex-gui/work
-multi-cli launch codex-gui/work
+nini-agents new codex-gui/work
+nini-agents launch codex-gui/work
 ```
 
-The first launch requires an elevated terminal so multi-cli can provision the owned Windows user. Later launches use that stored identity. The launcher registers the Store package for that user and activates its AppX application instead of copying or directly running the protected package executable.
+The first launch requires an elevated terminal so nini-agents can provision the owned Windows user. Later launches use that stored identity. The launcher registers the Store package for that user and activates its AppX application instead of copying or directly running the protected package executable.
 
 ## Account boundary
 
@@ -32,9 +32,9 @@ The first launch requires an elevated terminal so multi-cli can provision the ow
 
 ## Shared normal state
 
-Nothing is shared because the app's authentication, configuration, and sessions use the same `.codex` tree. Use `multi-cli continue codex ...` for portable CLI sessions when needed.
+Nothing is shared because the app's authentication, configuration, and sessions use the same `.codex` tree. Use `nini-agents continue codex ...` for portable CLI sessions when needed.
 
-This boundary is local. Profiles signed into the same OpenAI account can still show the same server-side conversations and projects. Use separate OpenAI accounts when cloud history must also be separate. multi-cli cannot reset or customize service-controlled system prompts.
+This boundary is local. Profiles signed into the same OpenAI account can still show the same server-side conversations and projects. Use separate OpenAI accounts when cloud history must also be separate. nini-agents cannot reset or customize service-controlled system prompts.
 
 ## Known limitations
 

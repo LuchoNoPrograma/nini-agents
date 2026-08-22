@@ -23,7 +23,7 @@ teardown() {
   [[ "$output" == *"refusing to remove unsafe install path"* ]]
 }
 
-@test "uninstall refuses to remove a directory that is not a multi-cli install" {
+@test "uninstall refuses to remove a directory that is not a Nini Agents install" {
   local foreign_install="$MULTICLI_SCRATCH/foreign-install"
   mkdir -p "$foreign_install"
   printf 'notes\n' > "$foreign_install/readme.txt"
@@ -32,10 +32,10 @@ teardown() {
     bash -c "printf 'y\\nn\\n' | '$MULTICLI_REPO_ROOT/install/uninstall.sh'"
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"not a recognizable multi-cli installation"* ]]
+  [[ "$output" == *"not a recognizable Nini Agents installation"* ]]
 }
 
-@test "uninstall removes a confirmed multi-cli install directory" {
+@test "uninstall removes a confirmed legacy multi-cli install directory" {
   local install_dir="$MULTICLI_SCRATCH/install"
   mkdir -p "$install_dir/lib"
   printf '#!/usr/bin/env bash\n' > "$install_dir/multi-cli"

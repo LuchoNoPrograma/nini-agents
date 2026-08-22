@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Uninstall multi-cli from Windows.
+  Uninstall Nini Agents from Windows.
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -20,9 +20,11 @@ function Assert-SafeRemovalPath {
 
 function Assert-MultiCliInstall {
     param([string]$Path)
-    if (-not (Test-Path -LiteralPath (Join-Path $Path 'multi-cli.ps1') -PathType Leaf) -or
+    $hasLauncher = (Test-Path -LiteralPath (Join-Path $Path 'nini-agents.ps1') -PathType Leaf) -or
+                   (Test-Path -LiteralPath (Join-Path $Path 'multi-cli.ps1') -PathType Leaf)
+    if (-not $hasLauncher -or
         -not (Test-Path -LiteralPath (Join-Path $Path 'lib') -PathType Container)) {
-        throw "Refusing to remove $Path because it is not a recognizable multi-cli installation."
+        throw "Refusing to remove $Path because it is not a recognizable Nini Agents installation."
     }
 }
 
@@ -64,7 +66,7 @@ function Resolve-UninstallModule {
     foreach ($candidate in $candidates) {
         if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
     }
-    throw "Cannot clean profile resources: module '$Name' is missing. Reinstall multi-cli, then retry uninstall."
+    throw "Cannot clean profile resources: module '$Name' is missing. Reinstall Nini Agents, then retry uninstall."
 }
 
 function Read-UninstallAdapter {
@@ -94,9 +96,10 @@ function Remove-UninstallProfileResources {
         $tool = Split-Path -Leaf (Split-Path -Parent $profileDir)
         $adapter = Read-UninstallAdapter -Tool $tool
         if ($null -eq $adapter) {
-            throw "Cannot determine whether '$tool' owns stored credentials because its adapter is missing. Reinstall multi-cli, then retry uninstall."
+            throw "Cannot determine whether '$tool' owns stored credentials because its adapter is missing. Reinstall Nini Agents, then retry uninstall."
         }
         $profileName = Split-Path -Leaf $profileDir
+        $ownedShortcuts += Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\nini-agents $tool $profileName.lnk"
         $ownedShortcuts += Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\multi-cli $tool $profileName.lnk"
         if ($adapter.account.mechanism -ne 'processSecret') { continue }
         $metadata = Get-Content -LiteralPath $metadataFile.FullName -Raw | ConvertFrom-Json
@@ -113,15 +116,15 @@ function Remove-UninstallProfileResources {
     }
 }
 
-$InstallDir = if ($env:MULTICLI_INSTALL_DIR) { $env:MULTICLI_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'multi-cli' }
+$InstallDir = if ($env:NINI_AGENTS_INSTALL_DIR) { $env:NINI_AGENTS_INSTALL_DIR } elseif ($env:MULTICLI_INSTALL_DIR) { $env:MULTICLI_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'nini-agents' }
 $script:InstallRoot = $InstallDir
-$BinDir     = if ($env:MULTICLI_BIN_DIR)     { $env:MULTICLI_BIN_DIR }     else { Join-Path $env:LOCALAPPDATA 'multi-cli\bin' }
+$BinDir     = if ($env:NINI_AGENTS_BIN_DIR) { $env:NINI_AGENTS_BIN_DIR } elseif ($env:MULTICLI_BIN_DIR) { $env:MULTICLI_BIN_DIR } else { Join-Path $env:LOCALAPPDATA 'nini-agents\bin' }
 $ProfileDir = if ($env:MULTICLI_HOME)        { $env:MULTICLI_HOME }        else { Join-Path $env:USERPROFILE 'MultiCliProfiles' }
 
-Write-Host "multi-cli uninstaller (Windows)"
+Write-Host "Nini Agents uninstaller (Windows)"
 Write-Host ""
 
-foreach ($cmd in @('multi-cli.cmd')) {
+foreach ($cmd in @('nini-agents.cmd', 'multi-cli.cmd')) {
     $p = Join-Path $BinDir $cmd
     if (Test-Path $p) { Remove-Item -Force $p; Write-Host "Removed $p" }
 }
@@ -180,4 +183,4 @@ if ($shouldRemoveInstall) {
 }
 
 Write-Host ""
-Write-Host "multi-cli uninstalled."
+Write-Host "Nini Agents uninstalled."

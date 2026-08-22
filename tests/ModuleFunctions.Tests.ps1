@@ -1,17 +1,17 @@
 <#
 .SYNOPSIS
-  In-process unit tests for the multi-cli lib/*.psm1 modules.
+  In-process unit tests for the Nini Agents lib/*.psm1 modules.
 
 .DESCRIPTION
   Pester 3.4's -CodeCoverage only sees commands that execute in its own
-  runspace. The launcher-based suites run multi-cli.ps1 in child processes,
+  runspace. The launcher-based suites run nini-agents.ps1 in child processes,
   so the modules report 0% there. This suite imports the lib/*.psm1 modules
   directly (Import-Module -Force) and calls their functions in-process: the
   exported surface directly, and module-internal helpers through the
   module's own session state via NewBoundScriptBlock.
 
   The runtime module resolves Resolve-PathToken from the caller's session
-  state (multi-cli.ps1 defines it in production); this file provides the
+  state (nini-agents.ps1 defines it in production); this file provides the
   same global contract so module functions run exactly as in production.
 
   Everything runs against disposable temp trees. Credential Manager
@@ -22,7 +22,7 @@
 $script:RepoRoot = Split-Path -Parent $PSScriptRoot
 $script:LibDir = Join-Path $script:RepoRoot 'lib'
 
-# Production contract: multi-cli.ps1 defines Resolve-PathToken at top level;
+# Production contract: nini-agents.ps1 defines Resolve-PathToken at top level;
 # MultiCli.Runtime calls it from module scope and finds it via the global
 # session state. Tests must provide the identical global function.
 function global:Resolve-PathToken {
@@ -558,7 +558,7 @@ Import-Module '$modulePath' -Force
                 New-RuntimeOverlay -Adapter $a -ProfileDir 'C:\unused'
             } @($adapter, $fake)
         } catch { $caught = $_.Exception.Message }
-        $caught | Should Be 'Timed out waiting for the profile runtime lock. Close a stuck multi-cli launch and retry.'
+        $caught | Should Be 'Timed out waiting for the profile runtime lock. Close a stuck nini-agents launch and retry.'
         $disposed.Value | Should Be $true
     }
 
@@ -822,7 +822,7 @@ Describe 'Get-AccountOverlayLaunchPlan in-process' {
                 Get-AccountOverlayLaunchPlan -Adapter $adapter -ProfileDir $scratch.ProfileDir -Binary 'C:\fixtures\fixture.exe' -BinaryArgs @()
             } catch { $caught = $_.Exception.Message }
             ($caught.Contains("Profile 'fixture/account-a' has no stored credential.")) | Should Be $true
-            ($caught.Contains('Run: multi-cli auth set fixture/account-a')) | Should Be $true
+            ($caught.Contains('Run: nini-agents auth set fixture/account-a')) | Should Be $true
         } finally {
             Import-CredentialStoreModule
             if ($target) { Remove-MultiCliCredential -Target $target | Out-Null }
@@ -1549,7 +1549,7 @@ Describe 'Export-MultiCliProfile and Import-MultiCliProfile guard rails in-proce
             $adapter = Get-ValidV2Adapter
             Assert-ThrownContains {
                 Assert-TransferTemplateCompatible -TemplateDir $templateDir -Adapter $adapter
-            } @("Template 'broken' has no manifest; it was not saved by this version of multi-cli.")
+            } @("Template 'broken' has no manifest; it was not saved by this version of nini-agents.")
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 

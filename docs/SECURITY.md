@@ -13,11 +13,11 @@ Upgrade to the latest available release before reporting a problem that may alre
 
 ## Report a vulnerability
 
-Use [GitHub private vulnerability reporting](https://github.com/Spielewoy/multi-cli/security/advisories/new). Do not open a public issue, pull request, or discussion for a suspected vulnerability.
+Use [GitHub private vulnerability reporting](https://github.com/LuchoNoPrograma/nini-agents/security/advisories/new). Do not open a public issue, pull request, or discussion for a suspected vulnerability.
 
 Include as much of the following as you can safely provide:
 
-- The affected Multi-CLI version or commit.
+- The affected Nini Agents version or commit.
 - The operating system, shell, AI tool, and profile mode.
 - The security boundary you expected and what occurred instead.
 - The prerequisites, impact, and shortest safe reproduction.
@@ -34,10 +34,10 @@ Security reports include, but are not limited to:
 - Credentials or authenticated state crossing profile boundaries.
 - Unexpected inheritance, storage, disclosure, or execution of secrets.
 - Authentication or account isolation that fails open.
-- Command injection, unsafe path handling, or unintended file access caused by Multi-CLI.
+- Command injection, unsafe path handling, or unintended file access caused by Nini Agents.
 - A release artifact that does not match its published checksum or provenance.
 
-Usage questions, unsupported configurations, and ordinary defects without a security impact belong in the public issue forms. Vulnerabilities in an AI tool or operating system that do not arise from Multi-CLI should be reported to that upstream project.
+Usage questions, unsupported configurations, and ordinary defects without a security impact belong in the public issue forms. Vulnerabilities in an AI tool or operating system that do not arise from Nini Agents should be reported to that upstream project.
 
 ## Response and disclosure
 
@@ -47,6 +47,6 @@ Keep the report and related evidence private until a fix and advisory are publis
 
 ## Security boundary
 
-Multi-CLI isolates account authentication only through the mode declared for each supported AI tool. Support for an AI tool does not mean every sign-in method can be isolated. Unsupported or inseparable account boundaries must fail closed.
+Nini Agents isolates account authentication only through the mode declared for each supported AI tool. Support for an AI tool does not mean every sign-in method can be isolated. Unsupported or inseparable account boundaries must fail closed.
 
 Treat profile directories, credential stores, session databases, logs, screenshots, and test evidence as sensitive. Never pass credentials as command-line arguments or commit sensitive material to the repository. Review the [support matrix](support-matrix.md) for platform-specific boundaries before relying on an isolation mode.

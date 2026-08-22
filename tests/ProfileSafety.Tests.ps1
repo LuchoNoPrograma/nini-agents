@@ -1,5 +1,5 @@
 $script:ProfileRepoRoot = Split-Path -Parent $PSScriptRoot
-$script:ProfileLauncher = Join-Path $script:ProfileRepoRoot 'multi-cli.ps1'
+$script:ProfileLauncher = Join-Path $script:ProfileRepoRoot 'nini-agents.ps1'
 Import-Module (Join-Path $script:ProfileRepoRoot 'lib\MultiCli.CredentialStore.psm1') -Force
 
 function Invoke-ProfileLauncher {
@@ -51,7 +51,7 @@ Describe 'schema-v2 profile safety boundaries' {
             $new.ExitCode | Should Be 0
             $launch = Invoke-ProfileLauncher -Root $root -Arguments @('launch', 'copilot-cli/account-a')
             $launch.ExitCode | Should Be 1
-            $launch.Output | Should Match 'multi-cli auth set'
+            $launch.Output | Should Match 'nini-agents auth set'
         } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
@@ -478,7 +478,7 @@ Describe 'profile path containment and legacy transfer hardening' {
 
             $result.ExitCode | Should Be 1
             $result.Output | Should Match 'legacy profile'
-            $result.Output | Should Match 'multi-cli migrate fixture/legacy'
+            $result.Output | Should Match 'nini-agents migrate fixture/legacy'
             (Test-Path -LiteralPath (Join-Path $scratch.Profiles '.templates\tpl')) | Should Be $false
         } finally {
             Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
@@ -500,7 +500,7 @@ Describe 'profile path containment and legacy transfer hardening' {
 
             $result.ExitCode | Should Be 1
             $result.Output | Should Match 'legacy profile'
-            $result.Output | Should Match 'multi-cli migrate fixture/legacy'
+            $result.Output | Should Match 'nini-agents migrate fixture/legacy'
             (Test-Path -LiteralPath $archive) | Should Be $false
         } finally {
             Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
@@ -540,7 +540,7 @@ Describe 'profile path containment and legacy transfer hardening' {
 
             $result.ExitCode | Should Be 1
             $result.Output | Should Match 'legacy profile transfer is disabled'
-            $result.Output | Should Match 'multi-cli migrate legacycli/source'
+            $result.Output | Should Match 'nini-agents migrate legacycli/source'
             (Test-Path -LiteralPath (Join-Path $scratch.Profiles 'legacycli\dest')) | Should Be $false
         } finally {
             Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
@@ -562,7 +562,7 @@ Describe 'profile path containment and legacy transfer hardening' {
 
             $result.ExitCode | Should Be 1
             $result.Output | Should Match 'legacy profile transfer is disabled'
-            $result.Output | Should Match 'multi-cli migrate legacycli/work'
+            $result.Output | Should Match 'nini-agents migrate legacycli/work'
             (Test-Path -LiteralPath (Join-Path $scratch.Profiles 'legacycli\work')) | Should Be $false
         } finally {
             Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
@@ -623,7 +623,7 @@ Describe 'PowerShell no-reparse profile cleanup and clone behavior' {
 
             $result.TimedOut | Should Be $false
             $result.ExitCode | Should Be 0
-            $result.Output | Should Match 'multi-cli uninstalled'
+            $result.Output | Should Match 'nini-agents uninstalled'
             (Test-Path -LiteralPath $profilesRoot) | Should Be $false
             (Get-Content -LiteralPath (Join-Path $outsideRoot 'keep.txt') -Raw).Trim() | Should Be 'outside-profile-data'
         } finally {
@@ -644,7 +644,7 @@ Describe 'PowerShell no-reparse profile cleanup and clone behavior' {
             $linkParent = Join-Path $installDir 'lib'
             $link = Join-Path $linkParent 'shared-target'
             New-Item -ItemType Directory -Force -Path $linkParent, $outsideRoot | Out-Null
-            Set-Content -LiteralPath (Join-Path $installDir 'multi-cli.ps1') -Value '# stub' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $installDir 'nini-agents.ps1') -Value '# stub' -Encoding ASCII
             Set-Content -LiteralPath (Join-Path $outsideRoot 'keep.txt') -Value 'outside-install-data' -Encoding ASCII
             New-Item -ItemType Junction -Path $link -Target $outsideRoot | Out-Null
 
@@ -658,7 +658,7 @@ Describe 'PowerShell no-reparse profile cleanup and clone behavior' {
 
             $result.TimedOut | Should Be $false
             $result.ExitCode | Should Be 0
-            $result.Output | Should Match 'multi-cli uninstalled'
+            $result.Output | Should Match 'nini-agents uninstalled'
             (Test-Path -LiteralPath $installDir) | Should Be $false
             (Get-Content -LiteralPath (Join-Path $outsideRoot 'keep.txt') -Raw).Trim() | Should Be 'outside-install-data'
         } finally {
@@ -867,7 +867,7 @@ Describe 'restored launcher behaviors' {
 
             if ($result.ExitCode -ne 0) { Write-Host $result.Output }
             $result.ExitCode | Should Be 0
-            $shortcutPath = Join-Path $startMenu 'multi-cli fixture work.lnk'
+            $shortcutPath = Join-Path $startMenu 'nini-agents fixture work.lnk'
             (Test-Path -LiteralPath $shortcutPath -PathType Leaf) | Should Be $true
             $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
             $shortcut.TargetPath | Should Match 'powershell\.exe$'

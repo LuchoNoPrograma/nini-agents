@@ -16,7 +16,7 @@ Impedir perdida, copia accidental, exposicion, sobreescritura o revocacion de cr
 
 ## Fuentes
 
-- Leer `lib/transfer.sh`, `lib/MultiCli.Transfer.psm1`, `lib/migration.sh`, `lib/MultiCli.Migration.psm1` y los comandos de perfil en ambos entrypoints.
+- Leer `lib/transfer.sh`, `lib/MultiCli.Transfer.psm1`, `lib/migration.sh`, `lib/MultiCli.Migration.psm1` y los comandos de perfil en `nini-agents` y `nini-agents.ps1`; tratar `multi-cli` y `multi-cli.ps1` solo como shims.
 - Para portar movimiento entre equipos, leer `../codexporter/lib/transfer.sh`, `../codexporter/lib/guards.sh` y `../codexporter/lib/core.sh`; tratarlos como contrato legacy que debe verificarse, no como codigo ya integrado.
 
 ## Patrones del proyecto
@@ -37,6 +37,7 @@ Impedir perdida, copia accidental, exposicion, sobreescritura o revocacion de cr
 ## Reglas
 
 - No leer, mostrar, registrar ni versionar valores de `auth.json`, tokens o secretos.
+- Conservar targets de credenciales `multi-cli/...`, `MULTICLI_HOME`, `MULTICLI_PROFILE_ID` y ownership OS-user legacy hasta que una migracion separada demuestre rollback y compatibilidad.
 - No ejecutar logout, revocacion o reautenticacion como parte de una copia o movimiento.
 - `export`, `import`, templates y `continue` permanecen libres de credenciales; un futuro `move` debe ser un contrato separado y explicito.
 - No operar sobre `~/.codex`, `MULTICLI_HOME` real ni la instalacion activa durante pruebas automatizadas.

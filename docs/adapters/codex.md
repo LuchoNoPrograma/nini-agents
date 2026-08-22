@@ -15,13 +15,13 @@ Binary discovery: `%APPDATA%\npm\codex.cmd` (Windows), `/usr/local/bin/codex` (m
 ## Quickstart
 
 ```bash
-multi-cli new codex/work
-multi-cli launch codex/work        # sign in on first run; auth.json stays profile-local
-multi-cli new codex/personal
-multi-cli launch codex/personal
+nini-agents new codex/work
+nini-agents launch codex/work        # sign in on first run; auth.json stays profile-local
+nini-agents new codex/personal
+nini-agents launch codex/personal
 ```
 
-Conversations are shared normal state, so `multi-cli continue` is not needed between schema-v2 profiles (it remains available for legacy profiles).
+Conversations are shared normal state, so `nini-agents continue` is not needed between schema-v2 profiles (it remains available for legacy profiles).
 
 ## Account boundary
 

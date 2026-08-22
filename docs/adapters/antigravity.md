@@ -1,6 +1,6 @@
 # antigravity: Google Antigravity IDE
 
-**Account boundary:** `osUserCredentialStore`: Antigravity authenticates through fixed OS credential entries, so each profile runs under a multi-cli-owned OS user.
+**Account boundary:** `osUserCredentialStore`: Antigravity authenticates through fixed OS credential entries, so each profile runs under a nini-agents-owned OS user.
 
 Antigravity IDE 2.x stores its account under a fixed keychain identity (`gemini:antigravity` on Windows, `gemini/antigravity` on macOS, `service=gemini username=antigravity` on Linux). Two profiles under the same OS user overwrite each other's login; a dedicated OS user per profile is the only declared boundary.
 
@@ -13,13 +13,13 @@ Binary discovery: `%LOCALAPPDATA%\Programs\Antigravity\Antigravity.exe` (Windows
 ## Quickstart
 
 ```bash
-multi-cli new antigravity/work
-multi-cli launch antigravity/work       # first launch provisions a profile-owned OS user
-multi-cli new antigravity/personal
-multi-cli launch antigravity/personal
+nini-agents new antigravity/work
+nini-agents launch antigravity/work       # first launch provisions a profile-owned OS user
+nini-agents new antigravity/personal
+nini-agents launch antigravity/personal
 ```
 
-The first launch requires an elevated terminal on Windows so multi-cli can provision the owned OS user. macOS and Linux remain unsupported until a real owned-user login/desktop credential session is implemented and verified.
+The first launch requires an elevated terminal on Windows so nini-agents can provision the owned OS user. macOS and Linux remain unsupported until a real owned-user login/desktop credential session is implemented and verified.
 
 ## Account boundary
 

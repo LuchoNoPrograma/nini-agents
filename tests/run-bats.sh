@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Single documented entrypoint for the multi-cli bash test suite.
+# Single documented entrypoint for the nini-agents bash test suite.
 #
 #   tests/run-bats.sh            # run every *.bats file
 #   tests/run-bats.sh foo.bats   # run a specific file

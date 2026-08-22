@@ -26,7 +26,7 @@
   },
   "concurrency": { "level": "multiWriter", "singletonScope": "none" },
   "support": {
-    "windows": { "level": "supported", "reason": "process token (CURSOR_API_KEY) via multi-cli auth set" },
+    "windows": { "level": "supported", "reason": "process token (CURSOR_API_KEY) via nini-agents auth set" },
     "macos": { "level": "supported" },
     "linux": { "level": "supported" }
   },

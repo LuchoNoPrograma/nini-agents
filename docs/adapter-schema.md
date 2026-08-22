@@ -22,8 +22,8 @@ Schema v2 separates account credentials from ordinary tool state. The machine-re
 | Mechanism | Boundary |
 |---|---|
 | `fileOverlay` | Credential files stay inside the profile. Declared normal state links to the native shared root. `account.credentialFiles` must not be empty. |
-| `processSecret` | A credential is injected into the child process. `account.secret.environmentVariable` is required, and launch fails until `multi-cli auth set` stores the secret. |
-| `osUserCredentialStore` | Each profile uses a Multi-CLI-owned OS user because the product has a fixed credential-store identity. |
+| `processSecret` | A credential is injected into the child process. `account.secret.environmentVariable` is required, and launch fails until `nini-agents auth set` stores the secret. |
+| `osUserCredentialStore` | Each profile uses a Nini Agents-owned OS user because the product has a fixed credential-store identity. |
 | `inseparable` | Authentication and ordinary state cannot be divided safely. `account.reason` is required, account-overlay launch fails closed, and the user must choose `--isolated`. |
 
 ## Support levels

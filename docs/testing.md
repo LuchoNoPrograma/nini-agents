@@ -32,7 +32,7 @@ On Windows:
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File tests/e2e/windows/Invoke-VendorSmoke.ps1 `
   -Tool codex `
-  -EvidenceDirectory "$env:TEMP\multi-cli-evidence"
+  -EvidenceDirectory "$env:TEMP\nini-agents-evidence"
 ```
 
 This only proves binary identity/version. It emits allowlisted, secret-scanned evidence and does not prove account isolation.

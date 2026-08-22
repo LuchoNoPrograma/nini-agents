@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Real-execution tests for `multi-cli new <tool>/<name> --isolated`: whole-root
+# Real-execution tests for `nini-agents new <tool>/<name> --isolated`: whole-root
 # isolation for schema-v2 adapters. An isolated profile shares NOTHING with the
 # native tool home -- the adapter's home env points at the profile dir itself,
 # no runtime overlay is built, and nothing is seeded or linked from the shared
@@ -356,7 +356,7 @@ PROBE
 
   run multicli launch secretcli/account-a
   [ "$status" -eq 1 ]
-  [[ "$output" == *"multi-cli auth set secretcli/account-a"* ]]
+  [[ "$output" == *"nini-agents auth set secretcli/account-a"* ]]
 }
 
 # --- fixed OS credential identity ---------------------------------------------

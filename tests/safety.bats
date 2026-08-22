@@ -194,7 +194,7 @@ JSON
   [ "$status" -eq 0 ]
   [[ "$output" == *"base session state is"* ]]
   [[ "$output" == *"skipped automatic copy"* ]]
-  [[ "$output" == *"multi-cli continue codex base heavy"* ]]
+  [[ "$output" == *"nini-agents continue codex base heavy"* ]]
 
   # Nothing was seeded.
   [ ! -e "$MULTICLI_HOME/codex/heavy/sessions" ]

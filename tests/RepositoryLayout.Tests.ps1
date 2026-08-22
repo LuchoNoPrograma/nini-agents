@@ -6,7 +6,7 @@ $script:ExpectedToolIds = @(
 )
 
 function Invoke-RepositoryLauncherTools {
-    $launcher = Join-Path $script:RepoRoot 'multi-cli.ps1'
+    $launcher = Join-Path $script:RepoRoot 'nini-agents.ps1'
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = (Get-Command powershell.exe).Source
     $startInfo.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$launcher`" tools"

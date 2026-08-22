@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Real-execution tests for the seeding hook in `multi-cli new`
+# Real-execution tests for the seeding hook in `nini-agents new`
 # (seed_profile_from_base). No mocks: a real ~/.codex base is built in a
 # scratch HOME and the real launcher creates profiles against it.
 

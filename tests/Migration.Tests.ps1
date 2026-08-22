@@ -1,12 +1,12 @@
 # Real-execution tests for the legacy -> schema-v2 migration engine in
 # lib/MultiCli.Migration.psm1 (Windows PowerShell 5.1, Pester 3.4).
 # No mocks: every test builds a real legacy profile tree under a temp scratch
-# root and invokes the module directly (the `multi-cli migrate` dispatch is
-# wired into multi-cli.ps1 separately).
+# root and invokes the module directly (the `nini-agents migrate` dispatch is
+# wired into nini-agents.ps1 separately).
 
 $script:RepoRoot = Split-Path -Parent $PSScriptRoot
 $script:ModulePath = Join-Path $script:RepoRoot 'lib\MultiCli.Migration.psm1'
-$script:LauncherPath = Join-Path $script:RepoRoot 'multi-cli.ps1'
+$script:LauncherPath = Join-Path $script:RepoRoot 'nini-agents.ps1'
 Import-Module $script:ModulePath -Force
 
 function New-MigrationScratch {
@@ -167,7 +167,7 @@ function Unprotect-Directory {
     & icacls $Path '/remove:d' $env:USERNAME | Out-Null
 }
 
-# Launch the real multi-cli.ps1 in a child process against the scratch tree.
+# Launch the real nini-agents.ps1 in a child process against the scratch tree.
 function Invoke-MigrationLauncher {
     param($Scratch, [string[]]$Arguments, [string]$Probe, [string]$Capture)
     $argumentLine = ($Arguments | ForEach-Object { if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '""') + '"' } else { $_ } }) -join ' '
@@ -597,7 +597,7 @@ Describe 'Invoke-MultiCliMigration apply' {
 
             $result.Migrated | Should Be $true
             ($result.Lines -contains 'Migrated fixture/work to schema-v2 (accountOverlay).') | Should Be $true
-            ($result.Lines -contains "Note: adapter 'fixture' uses process-secret credentials. Run: multi-cli auth set fixture/work before launching.") | Should Be $true
+            ($result.Lines -contains "Note: adapter 'fixture' uses process-secret credentials. Run: nini-agents auth set fixture/work before launching.") | Should Be $true
             $shared = Get-SharedRoot -Scratch $scratch
             ((Get-Content -LiteralPath (Join-Path $shared 'config.toml') -Raw).Trim()) | Should Be 'profile-config'
             ((Get-Content -LiteralPath (Join-Path $shared 'sessions\s.jsonl') -Raw).Trim()) | Should Be 'session'

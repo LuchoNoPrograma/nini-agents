@@ -13,10 +13,10 @@ Binary discovery: `code.cmd` / `code` (Windows), `code` (macOS/Linux).
 ## Quickstart
 
 ```bash
-multi-cli new copilot-vscode/work
-multi-cli launch copilot-vscode/work    # runs under a profile-owned OS user
-multi-cli new copilot-vscode/personal
-multi-cli launch copilot-vscode/personal
+nini-agents new copilot-vscode/work
+nini-agents launch copilot-vscode/work    # runs under a profile-owned OS user
+nini-agents new copilot-vscode/personal
+nini-agents launch copilot-vscode/personal
 ```
 
 On Windows, the first shared-profile launch provisions an owned OS user. macOS and Linux remain unsupported until real owned-user GUI and credential-store sessions are implemented and verified.

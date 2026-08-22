@@ -1,6 +1,7 @@
-## Multi-CLI 1.0.0
+## Nini Agents 1.0.0
 
-The first stable release of Multi-CLI.
+Draft notes for the first Nini Agents release. No tag or release has been
+published from this fork yet.
 
 ### Highlights
 
@@ -12,8 +13,8 @@ The first stable release of Multi-CLI.
 
 ### Downloads
 
-- `multi-cli-v1.0.0-windows.zip` for Windows PowerShell.
-- `multi-cli-v1.0.0-linux-macos.tar.gz` for Bash on Linux or macOS.
+- `nini-agents-v1.0.0-windows.zip` for Windows PowerShell.
+- `nini-agents-v1.0.0-linux-macos.tar.gz` for Bash on Linux or macOS.
 - `SHA256SUMS` to verify both archives.
 
-Check the [AI tool support table](https://github.com/Spielewoy/multi-cli#supported-ai-tools) before relying on a specific tool, platform, or sign-in method.
+Check the [AI tool support table](https://github.com/LuchoNoPrograma/nini-agents#supported-ai-tools) before relying on a specific tool, platform, or sign-in method.

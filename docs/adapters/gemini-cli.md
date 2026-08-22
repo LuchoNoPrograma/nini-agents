@@ -15,13 +15,13 @@ Binary discovery: `%APPDATA%\npm\gemini.cmd` (Windows), `/usr/local/bin/gemini` 
 ## Quickstart
 
 ```bash
-multi-cli new gemini-cli/work
-multi-cli launch gemini-cli/work      # sign in on first run; OAuth files stay profile-local
-multi-cli new gemini-cli/personal
-multi-cli launch gemini-cli/personal
+nini-agents new gemini-cli/work
+nini-agents launch gemini-cli/work      # sign in on first run; OAuth files stay profile-local
+nini-agents new gemini-cli/personal
+nini-agents launch gemini-cli/personal
 ```
 
-Conversations are shared normal state, so `multi-cli continue` is not needed between schema-v2 profiles (it remains available for legacy profiles).
+Conversations are shared normal state, so `nini-agents continue` is not needed between schema-v2 profiles (it remains available for legacy profiles).
 
 ## Account boundary
 

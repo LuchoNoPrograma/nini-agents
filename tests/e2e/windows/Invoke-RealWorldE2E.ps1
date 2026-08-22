@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-  Real-world end-to-end harness for multi-cli on Windows.
+  Real-world end-to-end harness for nini-agents on Windows.
 
 .DESCRIPTION
-  Drives the REAL installed CLI binaries through the REAL multi-cli.ps1 with a
+  Drives the REAL installed CLI binaries through the REAL nini-agents.ps1 with a
   fully sandboxed home: a dedicated USERPROFILE root under %TEMP% (never the
   operator's real home) and a sandboxed MULTICLI_HOME. No mocks, no fixture
   adapters, no fixture binaries.
@@ -14,9 +14,9 @@
     fileOverlay  (claude-cli, codex, gemini-cli, commandcode)
       - seed the real shared normal-state root (under the test home) before
         profile creation
-      - create profiles account-a/account-b via real `multi-cli new`
+      - create profiles account-a/account-b via real `nini-agents new`
       - launch the real binary with the adapter's safe version command via
-        real `multi-cli launch`; assert exit code and that the version output
+        real `nini-agents launch`; assert exit code and that the version output
         matches the direct binary's output
       - assert profile auth credential files are profile-local and EMPTY while
         seeded shared state content is visible through both profiles
@@ -39,7 +39,7 @@
 
   Safety: every child process gets USERPROFILE/HOME/APPDATA/LOCALAPPDATA/TEMP
   redirected under the sandbox, MULTICLI_HOME points into the sandbox, and the
-  child PATH is pre-seeded with the sandbox alias dir so `multi-cli new` never
+  child PATH is pre-seeded with the sandbox alias dir so `nini-agents new` never
   touches the registry User PATH. A snapshot of the real-home tool roots and
   the registry User PATH is taken before/after and compared. All Credential
   Manager entries written (multi-cli/<tool>/<profileId>/<var> targets) are
@@ -81,7 +81,7 @@ $ErrorActionPreference = 'Stop'
 $Tool = @($Tool | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
 $script:RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
-$script:LauncherPath = Join-Path $script:RepoRoot 'multi-cli.ps1'
+$script:LauncherPath = Join-Path $script:RepoRoot 'nini-agents.ps1'
 $script:PowerShellExe = (Get-Command powershell.exe).Source
 $script:SandboxRoot = [System.IO.Path]::GetFullPath($SandboxRoot)
 $script:SandboxHome = Join-Path $script:SandboxRoot 'home'
@@ -198,7 +198,7 @@ function Invoke-ChildProcess {
 }
 
 # Sandbox environment for EVERY child process. USERPROFILE is always the test
-# root; the alias dir is pre-seeded into PATH so `multi-cli new` never writes
+# root; the alias dir is pre-seeded into PATH so `nini-agents new` never writes
 # the registry User PATH.
 function Get-SandboxEnv {
     $envMap = @{
@@ -216,7 +216,7 @@ function Get-SandboxEnv {
     return $envMap
 }
 
-# Invokes the REAL multi-cli.ps1 in a child powershell.exe under the sandbox.
+# Invokes the REAL nini-agents.ps1 in a child powershell.exe under the sandbox.
 function Invoke-MultiCli {
     param(
         [string[]]$MultiCliArgs,
@@ -237,7 +237,7 @@ function Get-ToolAdapter {
     return Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 }
 
-# Resolves the tool's binary the way multi-cli does, but against the REAL
+# Resolves the tool's binary the way nini-agents does, but against the REAL
 # environment (children run with a redirected APPDATA), preferring
 # process-startable shims (.cmd/.exe) over npm's .ps1/extensionless stubs,
 # and never accepting a Windows system binary (guards commandcode's 'cmd').
@@ -286,7 +286,7 @@ function Get-VersionArguments {
     return $versionCommand
 }
 
-# Runs the real binary directly (no multi-cli) and returns its version output.
+# Runs the real binary directly (no nini-agents) and returns its version output.
 # This is the control the launch output must match. The adapter's isolation
 # env vars are pointed at a sandbox scratch dir: codex/gemini locate the home
 # directory via the Windows Known Folder API (not env vars), so an unadorned
@@ -329,7 +329,7 @@ function Get-CredentialTarget {
 function Remove-TrackedCredential {
     param([string]$Target)
     try { [void](Remove-MultiCliCredential -Target $Target) }
-    catch { Write-Warning "Credential cleanup failed for a multi-cli target: $($_.Exception.Message)" }
+    catch { Write-Warning "Credential cleanup failed for a nini-agents target: $($_.Exception.Message)" }
 }
 
 # Deletes a directory tree that may contain junctions/hardlinks without ever
@@ -469,7 +469,7 @@ function New-BothProfiles {
             return $false
         }
     }
-    Add-Assertion $ToolEntry 'profiles-created' $true 'account-a and account-b created via real multi-cli new.'
+    Add-Assertion $ToolEntry 'profiles-created' $true 'account-a and account-b created via real nini-agents new.'
     return $true
 }
 
@@ -679,7 +679,7 @@ function Set-ProfileSecret {
     $stored = Get-MultiCliCredential -Target $target
     $ok = $stored -eq $Token
     Add-Assertion $ToolEntry "auth-set-$ProfileName" $ok `
-        'real Credential Manager round-trip using the same target and module as multi-cli auth set.'
+        'real Credential Manager round-trip using the same target and module as nini-agents auth set.'
     return $ok
 }
 
@@ -850,7 +850,7 @@ function Clear-SandboxCredentials {
 # Main
 # =============================================================================
 
-Write-Host "multi-cli real-world E2E harness"
+Write-Host "nini-agents real-world E2E harness"
 Write-Host "  sandbox: $script:SandboxRoot"
 Write-Host "  evidence: $EvidenceDir"
 Write-Host ""
@@ -961,7 +961,7 @@ try {
 
     $registryPathAfter = [Environment]::GetEnvironmentVariable('PATH', 'User')
     # The guard's purpose: THIS harness must not mutate the registry User PATH
-    # (multi-cli new appends the alias dir unless it is pre-seeded into the
+    # (nini-agents new appends the alias dir unless it is pre-seeded into the
     # child PATH, which Get-SandboxEnv does). Other processes on a live
     # workstation may legitimately change the same value mid-run; such churn
     # is recorded as a note, not attributed to this harness -- unless an added
@@ -977,7 +977,7 @@ try {
             $registryClean = $false
             $registryDetail = "registry User PATH gained $($sandboxLeaks.Count) entr(ies) referencing the sandbox."
         } else {
-            Add-Note "Registry User PATH changed during the run due to external churn ($($added.Count) added entr(ies), none referencing the sandbox); this workstation runs concurrent multi-cli test sessions whose fixture profiles append to the User PATH."
+            Add-Note "Registry User PATH changed during the run due to external churn ($($added.Count) added entr(ies), none referencing the sandbox); this workstation runs concurrent nini-agents test sessions whose fixture profiles append to the User PATH."
             $registryDetail = "external churn only ($($added.Count) added entr(ies), none referencing the sandbox)."
         }
     }

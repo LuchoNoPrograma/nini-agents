@@ -1,15 +1,15 @@
-# Contributing to Multi-CLI
+# Contributing to Nini Agents
 
-Thank you for improving Multi-CLI. Contributions are welcome when they are focused, tested, and safe for users who rely on account isolation.
+Thank you for improving Nini Agents. Contributions are welcome when they are focused, tested, and safe for users who rely on account isolation.
 
 By participating, you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Choose the right channel
 
-- Search [existing issues](https://github.com/Spielewoy/multi-cli/issues) before opening a new one.
+- Search [existing issues](https://github.com/LuchoNoPrograma/nini-agents/issues) before opening a new one.
 - Use the repository's issue forms for reproducible bugs, focused feature requests, usage questions, and new AI tool proposals.
 - Open an issue before a large behavior change or a change to an account boundary.
-- Report vulnerabilities through [GitHub private vulnerability reporting](https://github.com/Spielewoy/multi-cli/security/advisories/new), not in a public issue. See the [security policy](SECURITY.md) for reporting details.
+- Report vulnerabilities through [GitHub private vulnerability reporting](https://github.com/LuchoNoPrograma/nini-agents/security/advisories/new), not in a public issue. See the [security policy](SECURITY.md) for reporting details.
 
 Small documentation corrections may be submitted directly as a pull request.
 
@@ -31,9 +31,9 @@ The Bats runner bootstraps its pinned Bats and `jq` test dependencies when they 
 Fork the repository, clone your fork, and create a branch from the latest `main`:
 
 ```bash
-git clone https://github.com/YOUR-USER/multi-cli.git
-cd multi-cli
-git remote add upstream https://github.com/Spielewoy/multi-cli.git
+git clone https://github.com/YOUR-USER/nini-agents.git
+cd nini-agents
+git remote add upstream https://github.com/LuchoNoPrograma/nini-agents.git
 git fetch upstream
 git switch -c concise-change-name upstream/main
 ```

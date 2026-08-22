@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# uninstall.sh -- Remove multi-cli from macOS/Linux
+# uninstall.sh -- Remove Nini Agents from macOS/Linux
 set -euo pipefail
 
-INSTALL_DIR="${MULTICLI_INSTALL_DIR:-$HOME/.local/share/multi-cli}"
-BIN_LINK="${MULTICLI_BIN_LINK:-$HOME/.local/bin/multi-cli}"
+INSTALL_DIR="${NINI_AGENTS_INSTALL_DIR:-${MULTICLI_INSTALL_DIR:-$HOME/.local/share/nini-agents}}"
+BIN_LINK="${NINI_AGENTS_BIN_LINK:-$HOME/.local/bin/nini-agents}"
+LEGACY_BIN_LINK="${MULTICLI_BIN_LINK:-$HOME/.local/bin/multi-cli}"
 PROFILE_DIR="${MULTICLI_HOME:-$HOME/MultiCliProfiles}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SOURCE_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -22,8 +23,8 @@ assert_safe_remove_dir() {
 
 assert_multi_cli_install() {
   local target="$1"
-  [ -f "$target/multi-cli" ] && [ -d "$target/lib" ] || {
-    echo "Error: refusing to remove $target because it is not a recognizable multi-cli installation." >&2
+  { [ -f "$target/nini-agents" ] || [ -f "$target/multi-cli" ]; } && [ -d "$target/lib" ] || {
+    echo "Error: refusing to remove $target because it is not a recognizable Nini Agents installation." >&2
     return 1
   }
 }
@@ -53,7 +54,7 @@ uninstall_profile_resources() {
     tool="$(basename "$(dirname "$profile_dir")")"
     adapter="$(uninstall_adapter_path "$tool" 2>/dev/null || true)"
     [ -n "$adapter" ] || {
-      echo "Cannot determine whether '$tool' owns stored credentials because its adapter is missing. Reinstall multi-cli, then retry uninstall." >&2
+      echo "Cannot determine whether '$tool' owns stored credentials because its adapter is missing. Reinstall Nini Agents, then retry uninstall." >&2
       return 1
     }
     mechanism="$(jq -r '.account.mechanism // empty' "$adapter")"
@@ -65,19 +66,24 @@ uninstall_profile_resources() {
   done < <(find "$PROFILE_DIR" -type f -name .profile.json -print0 2>/dev/null)
 }
 
-echo "multi-cli uninstaller"
+echo "Nini Agents uninstaller"
 echo ""
 
-# install.sh writes a regular launcher file (not a symlink) at BIN_LINK;
-# older installs used a symlink. Remove either, but only when the file is
-# recognizably ours -- never delete a foreign file that shares the path.
-if [ -L "$BIN_LINK" ]; then
-  rm -f "$BIN_LINK"
-  echo "Removed symlink: $BIN_LINK"
-elif [ -f "$BIN_LINK" ] && grep -q 'multi-cli' "$BIN_LINK" 2>/dev/null; then
-  rm -f "$BIN_LINK"
-  echo "Removed launcher: $BIN_LINK"
-fi
+# install.sh writes regular launcher files; older installs used a symlink.
+# Remove either form only when it is recognizably ours.
+remove_launcher() {
+  local target="$1"
+  if [ -L "$target" ]; then
+    rm -f "$target"
+    echo "Removed symlink: $target"
+  elif [ -f "$target" ] && grep -Eq 'nini-agents|multi-cli' "$target" 2>/dev/null; then
+    rm -f "$target"
+    echo "Removed launcher: $target"
+  fi
+}
+
+remove_launcher "$BIN_LINK"
+[ "$LEGACY_BIN_LINK" = "$BIN_LINK" ] || remove_launcher "$LEGACY_BIN_LINK"
 
 remove_install=false
 if [ -d "$INSTALL_DIR" ] && [ "$INSTALL_DIR" != "$(pwd)" ]; then
@@ -112,4 +118,4 @@ if [ "$remove_install" = true ]; then
 fi
 
 echo ""
-echo "multi-cli uninstalled."
+echo "Nini Agents uninstalled."

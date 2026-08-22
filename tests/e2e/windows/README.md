@@ -1,9 +1,9 @@
 # Real-world E2E harness (Windows)
 
-A user-like end-to-end test harness for multi-cli that runs against the
+A user-like end-to-end test harness for nini-agents that runs against the
 **actually installed** CLI tools on this machine. No mocks, no fixture
 adapters, no fixture binaries: every profile is created and every launch goes
-through the real `multi-cli.ps1` in a child `powershell.exe` process, against
+through the real `nini-agents.ps1` in a child `powershell.exe` process, against
 the real vendor binaries found by the real adapter manifests.
 
 ## Run it
@@ -46,9 +46,9 @@ Per schema-v2 `accountOverlay` adapter, dispatched by the adapter's **real**
 1. Seed the tool's real shared normal-state root **under the test home**
    (a session/history file from `sessionPaths` + a config file from
    `sharedPaths`) *before* building profiles.
-2. Create `account-a` and `account-b` via real `multi-cli new`.
+2. Create `account-a` and `account-b` via real `nini-agents new`.
 3. Launch the real binary with the adapter's `versionCommand` via real
-   `multi-cli launch`; assert exit code 0 and that the version output
+   `nini-agents launch`; assert exit code 0 and that the version output
    contains the direct binary's version output (proves the real binary ran
    under the overlay).
 4. Assert the profile's `auth/` credential files are profile-local, not
@@ -67,7 +67,7 @@ Per schema-v2 `accountOverlay` adapter, dispatched by the adapter's **real**
 
 1. Store per-profile dummy tokens (`dummy-token-account-a`,
    `dummy-token-account-b`) through the same real OS credential-store module
-   and target derivation used by `multi-cli auth set`. Redirected stdin behavior
+   and target derivation used by `nini-agents auth set`. Redirected stdin behavior
    is covered separately by the launcher integration suite. `auth status`,
    `auth clear`, and all launches here are the real commands.
 2. Assert real `auth status` reports the credential present.
@@ -92,7 +92,7 @@ Per schema-v2 `accountOverlay` adapter, dispatched by the adapter's **real**
 * Every child process gets `USERPROFILE`/`HOME`/`APPDATA`/`LOCALAPPDATA`/
   `TEMP` redirected under the sandbox; a probe child proves it and the
   result is recorded as the `child-env-sandboxed` safety assertion.
-* Child `PATH` is pre-seeded with the sandbox alias dir so `multi-cli new`
+* Child `PATH` is pre-seeded with the sandbox alias dir so `nini-agents new`
   never appends to the registry User PATH; the registry User PATH is
   snapshotted before/after. An added entry referencing the sandbox is a hard
   failure; churn caused by other processes on a live workstation (this repo's

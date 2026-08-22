@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Runs the multi-cli session-continuation Pester suite (Pester 3.4 compatible).
+  Runs the nini-agents session-continuation Pester suite (Pester 3.4 compatible).
 
 .DESCRIPTION
   One documented command:

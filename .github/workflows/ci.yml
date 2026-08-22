@@ -67,7 +67,7 @@ jobs:
             echo "jq removed; installer must reinstall it."
           fi
 
-      - name: Install multi-cli from the working tree
+      - name: Install Nini Agents from the working tree
         run: bash install/install.sh --local
 
       - name: jq is available after install
@@ -78,9 +78,9 @@ jobs:
       - name: doctor / tools / new must all exit 0
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          multi-cli doctor
-          multi-cli tools
-          multi-cli new codex/ciprofile
+          nini-agents doctor
+          nini-agents tools
+          nini-agents new codex/ciprofile
 
   shellcheck:
     name: shellcheck
@@ -102,7 +102,7 @@ jobs:
           fi
 
       - name: Lint shell scripts
-        run: shellcheck --severity=error multi-cli install/install.sh install/uninstall.sh release/build.sh
+        run: shellcheck --severity=error nini-agents multi-cli install/install.sh install/uninstall.sh release/build.sh
 
   pwsh-lint:
     name: PSScriptAnalyzer
@@ -126,6 +126,7 @@ jobs:
             'install/install.ps1',
             'install/uninstall.ps1',
             'release/build.ps1',
+            'nini-agents.ps1',
             'multi-cli.ps1'
           )
           $excludedRules = @(
@@ -295,8 +296,8 @@ jobs:
       - name: Validate installed launcher
         shell: powershell
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File multi-cli.ps1 doctor
-          powershell -NoProfile -ExecutionPolicy Bypass -File multi-cli.ps1 tools
+          powershell -NoProfile -ExecutionPolicy Bypass -File nini-agents.ps1 doctor
+          powershell -NoProfile -ExecutionPolicy Bypass -File nini-agents.ps1 tools
 
   release-metadata:
     name: release metadata

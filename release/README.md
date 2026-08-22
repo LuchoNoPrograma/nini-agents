@@ -8,7 +8,7 @@
 - GitHub permission to merge the release pull request and push a version tag
 - A clean feature branch with every CI job passing
 
-1. Update `release/VERSION`, `VERSION` in `multi-cli`, and `$VERSION` in `multi-cli.ps1`.
+1. Update `release/VERSION`, `VERSION` in `nini-agents`, and `$VERSION` in `nini-agents.ps1`.
 2. Update `release/NOTES.md` and the support matrix.
 3. Run the complete test suite.
 4. Build both archives locally.

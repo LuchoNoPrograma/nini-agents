@@ -1,9 +1,9 @@
 $script:RepoRoot = Split-Path -Parent $PSScriptRoot
-$script:LauncherPath = Join-Path $script:RepoRoot 'multi-cli.ps1'
+$script:LauncherPath = Join-Path $script:RepoRoot 'nini-agents.ps1'
 $script:CredentialStoreModule = Join-Path $script:RepoRoot 'lib\MultiCli.CredentialStore.psm1'
 Import-Module $script:CredentialStoreModule -Force
 
-# Real-execution tests for `multi-cli new <tool>/<name> --isolated` on Windows:
+# Real-execution tests for `nini-agents new <tool>/<name> --isolated` on Windows:
 # whole-root isolation for schema-v2 adapters. An isolated profile shares
 # NOTHING with the native tool home -- the adapter's home env points at the
 # profile dir itself, no runtime overlay is built, nothing is seeded or linked
@@ -382,7 +382,7 @@ Describe 'schema-v2 isolated mode on Windows' {
             (Invoke-IsolatedLauncher -Scratch $scratch -Arguments @('new', 'secretcli/account-a', '--isolated', '--no-seed')).ExitCode | Should Be 0
             $result = Invoke-IsolatedLauncher -Scratch $scratch -Arguments @('launch', 'secretcli/account-a') -Probe $probe -Capture $capture
             $result.ExitCode | Should Be 1
-            ($result.Output -match 'multi-cli auth set secretcli/account-a') | Should Be $true
+            ($result.Output -match 'nini-agents auth set secretcli/account-a') | Should Be $true
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 

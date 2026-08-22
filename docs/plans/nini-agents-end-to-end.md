@@ -123,6 +123,7 @@ aprobado.
 - Probar cambios mutables solo con homes y perfiles sinteticos bajo directorios
   temporales.
 - No tocar `~/.codex`, el `MULTICLI_HOME` real, `~/MultiCliProfiles` ni
+  instalaciones activas bajo `~/.local/share/nini-agents` o
   `~/.local/share/multi-cli`.
 - No instalar el motor desde el checkout para probarlo.
 - No conectarse a otros equipos durante las pruebas de construccion.
@@ -569,3 +570,44 @@ Pendientes y siguiente gate:
 - Plataformas no verificadas: Windows y macOS; no hubo cambio funcional.
 - Siguiente gate: delimitar la Etapa B y obtener G2 antes de renombrar producto,
   ejecutables, instaladores o contratos publicos.
+
+### 2026-08-22 — identidad Nini Agents y compatibilidad temporal
+
+- Estado: implementacion y validacion local terminadas bajo G2; CI remoto
+  pendiente antes de cerrar la Etapa B.
+- Objetivo: convertir `nini-agents` y `nini-agents.ps1` en los entrypoints
+  canonicos del motor sin mover perfiles ni romper consumidores existentes.
+- Antes: `multi-cli` y `multi-cli.ps1` contenian las implementaciones completas
+  del motor y el producto visible conservaba la identidad upstream.
+- Despues: los entrypoints `nini-agents` contienen el motor y los entrypoints
+  `multi-cli` son shims temporales sin logica de perfiles o credenciales. Los
+  instaladores, aliases nuevos, completions, packaging, documentacion, pruebas
+  y configuracion de GitHub usan la identidad Nini Agents y publican ambos
+  comandos durante la ventana de compatibilidad.
+- Contratos preservados: `MULTICLI_HOME`, `~/MultiCliProfiles`,
+  `MULTICLI_PROFILE_ID`, targets de credenciales `multi-cli/...`, nombres de
+  modulos `MultiCli.*` e identificadores y etiquetas de ownership de usuarios
+  de sistema. `LICENSE` conserva exactamente el blob de `multi-cli-base` y
+  `NOTICE` mantiene la atribucion upstream.
+- Efecto sobre credenciales y datos: ninguno. No se leyeron perfiles reales, no
+  se ejecuto logout, revocacion, migracion, instalacion ni uninstall, y todas
+  las pruebas mutables usaron directorios temporales y datos sinteticos.
+- Validacion local: sintaxis Bash; 23 pruebas focalizadas de branding,
+  instalacion, aliases, packaging y seguridad de uninstall; 18 pruebas de
+  transferencia con el alias de `python3` que espera el harness; validadores de
+  adapters, documentacion y metadata de release. La suite Bash completa ejecuto
+  218 pruebas: 213 pasaron o fueron omitidas y cinco quedaron bloqueadas por
+  dependencias ausentes del host, cuatro por Secret Service/keyring y una por
+  la ausencia del nombre `python`; esta ultima paso al proveer un alias temporal
+  dentro de `/tmp`.
+- Plataformas no verificadas localmente: Windows PowerShell y macOS. Tampoco
+  estan disponibles localmente `shellcheck` ni `bashcov`; sus gates quedan a
+  cargo del CI del fork.
+- Exclusiones confirmadas: movimiento entre equipos, CLI JSON, port de mejoras
+  propias, migracion de MultiCLI AI y Codexporter, instalacion activa, tag y
+  release.
+- Recuperacion: antes de publicarse, todo el cambio es un diff no instalado
+  sobre `main`; el snapshot Flutter permanece separado en `legacy-gui` y la
+  base upstream pura permanece en `multi-cli-base`.
+- Siguiente gate: publicar el commit G2 autorizado, revisar todos los jobs de
+  CI y cerrar la Etapa B solo si finalizan correctamente.

@@ -21,7 +21,7 @@ Localizar la primera divergencia del recorrido preservando perfiles, credenciale
 
 ## Patrones del proyecto
 
-- `multi-cli` - `cmd_doctor` y `multi-cli.ps1` - `Show-Doctor`: los diagnosticos reportan capacidades y fallos sin reparar silenciosamente el perfil.
+- `nini-agents` - `cmd_doctor` y `nini-agents.ps1` - `Show-Doctor`: los diagnosticos reportan capacidades y fallos sin reparar silenciosamente el perfil; `multi-cli` solo reproduce el recorrido mediante shim.
 - `lib/multicli-runtime.sh` - `runtime_overlay_is_current` y `lib/MultiCli.Runtime.psm1` - `Test-RuntimeOverlayCurrent`: el runtime se compara con el manifest esperado antes de reconstruirlo.
 - `tests/profile_safety.bats` y `tests/ProfileSafety.Tests.ps1`: los rechazos por containment, legacy o credenciales se reproducen en almacenamiento sintetico.
 
@@ -43,7 +43,7 @@ Localizar la primera divergencia del recorrido preservando perfiles, credenciale
 
 ## Validacion
 
-- Ejecutar primero `multi-cli doctor` o `doctor --deep` solo cuando sea read-only para el entorno inspeccionado.
+- Ejecutar primero `nini-agents doctor` o `doctor --deep` solo cuando sea read-only para el entorno inspeccionado.
 - Usar las pruebas Bats o Pester focalizadas del recorrido con `MULTICLI_HOME` temporal.
 - Comparar Bash y PowerShell solo con evidencia de los entornos realmente ejecutados.
 - Sanitizar rutas, metadata y salidas antes de incluirlas en el informe.

@@ -17,7 +17,7 @@
 $script:RepoRoot = Split-Path -Parent $PSScriptRoot
 $script:LibDir = Join-Path $script:RepoRoot 'lib'
 
-# Production contract: multi-cli.ps1 defines Resolve-PathToken at top level;
+# Production contract: nini-agents.ps1 defines Resolve-PathToken at top level;
 # the module resolves the operator shared root through it.
 function global:Resolve-PathToken {
     param([string]$Path)

@@ -1,12 +1,12 @@
-# Shared bats helpers for the multi-cli session-continuation suite.
+# Shared bats helpers for the nini-agents session-continuation suite.
 #
-# Every test runs the REAL multi-cli launcher against REAL fixture trees built
+# Every test runs the REAL nini-agents launcher against REAL fixture trees built
 # in mktemp scratch dirs. No mocks. HOME and MULTICLI_HOME are always redirected
 # into scratch so the operator's real ~/.codex / ~/.claude are never touched.
 
 # Absolute path to the repo root (parent of tests/).
 MULTICLI_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-MULTICLI_BIN="$MULTICLI_REPO_ROOT/multi-cli"
+MULTICLI_BIN="$MULTICLI_REPO_ROOT/nini-agents"
 MULTICLI_VENDOR="${MULTICLI_TEST_CACHE:-${TMPDIR:-/tmp}/multi-cli-test-tools}"
 
 # The pinned jq release used when bootstrapping a vendored binary on demand.

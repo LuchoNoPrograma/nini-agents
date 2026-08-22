@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../../assets/i18n/ru/banner.svg" alt="Multi-CLI. Используйте несколько аккаунтов одновременно без переключения." width="760"/>
+  <img src="../../assets/i18n/ru/banner.svg" alt="Nini Agents. Используйте несколько аккаунтов одновременно без переключения." width="760"/>
 </p>
 
 <p align="center">Используйте несколько аккаунтов одновременно без переключения.</p>
@@ -40,16 +40,16 @@
 Для этого способа требуется [Git](https://git-scm.com/downloads).
 
 ```bash
-git clone https://github.com/Spielewoy/multi-cli.git
-cd multi-cli
+git clone https://github.com/LuchoNoPrograma/nini-agents.git
+cd nini-agents
 ./install/install.sh --local
 ```
 
 Windows PowerShell:
 
 ```powershell
-git clone https://github.com/Spielewoy/multi-cli.git
-cd multi-cli
+git clone https://github.com/LuchoNoPrograma/nini-agents.git
+cd nini-agents
 .\install\install.ps1 -Local
 ```
 
@@ -58,9 +58,9 @@ cd multi-cli
 ## Быстрый старт
 
 ```bash
-multi-cli doctor
-multi-cli new claude-cli/work
-multi-cli claude-cli/work
+nini-agents doctor
+nini-agents new claude-cli/work
+nini-agents claude-cli/work
 ```
 
 <a id="supported-ai-tools"></a>
@@ -87,7 +87,7 @@ multi-cli claude-cli/work
 | [Windsurf](../adapters/windsurf.md) | `windsurf` | Windows, macOS, Linux | Пользователь ОС |
 | [Zed](../adapters/zed.md) | `zed` | Windows | Пользователь ОС |
 
-Ограничения платформ описаны в [матрице поддержки](../support-matrix.md). Выполните `multi-cli tools`, чтобы проверить свой компьютер.
+Ограничения платформ описаны в [матрице поддержки](../support-matrix.md). Выполните `nini-agents tools`, чтобы проверить свой компьютер.
 
 <a id="commands"></a>
 
@@ -97,40 +97,40 @@ multi-cli claude-cli/work
 
 | Команда | Действие |
 |---|---|
-| `multi-cli new <tool>/<name>` | Создать профиль с отдельными учётными данными и общим обычным состоянием |
-| `multi-cli new <tool>/<name> --isolated` | Создать профиль с изоляцией всего домашнего каталога, если AI-инструмент это поддерживает; псевдонимы: `--isolate`, `-i` |
-| `multi-cli new <tool>/<name> --from <template>` | Создать профиль схемы v2 из шаблона схемы v2 |
-| `multi-cli <tool>/<name>` | Запустить профиль |
-| `multi-cli launch <tool>/<name> [-- args...]` | Запустить инструмент и передать ему аргументы |
-| `multi-cli list [<tool>]` | Показать список профилей |
-| `multi-cli clone <tool>/<src> <tool>/<dest>` | Скопировать профиль схемы v2 |
-| `multi-cli rename <tool>/<old> <tool>/<new>` | Переименовать профиль |
-| `multi-cli delete <tool>/<name>` | Удалить профиль после подтверждения |
+| `nini-agents new <tool>/<name>` | Создать профиль с отдельными учётными данными и общим обычным состоянием |
+| `nini-agents new <tool>/<name> --isolated` | Создать профиль с изоляцией всего домашнего каталога, если AI-инструмент это поддерживает; псевдонимы: `--isolate`, `-i` |
+| `nini-agents new <tool>/<name> --from <template>` | Создать профиль схемы v2 из шаблона схемы v2 |
+| `nini-agents <tool>/<name>` | Запустить профиль |
+| `nini-agents launch <tool>/<name> [-- args...]` | Запустить инструмент и передать ему аргументы |
+| `nini-agents list [<tool>]` | Показать список профилей |
+| `nini-agents clone <tool>/<src> <tool>/<dest>` | Скопировать профиль схемы v2 |
+| `nini-agents rename <tool>/<old> <tool>/<new>` | Переименовать профиль |
+| `nini-agents delete <tool>/<name>` | Удалить профиль после подтверждения |
 
 ### Учётные данные и переносимость
 
 | Команда | Действие |
 |---|---|
-| `multi-cli auth set <tool>/<profile>` | Сохранить секрет процесса в хранилище учётных данных ОС |
-| `multi-cli auth status <tool>/<profile>` | Проверить наличие секрета |
-| `multi-cli auth clear <tool>/<profile>` | Удалить секрет |
-| `multi-cli continue <tool> <src> <dest> [--dry-run] [--no-merge]` | Скопировать поддерживаемое состояние сессии без учётных данных |
-| `multi-cli template save <tool>/<profile> <name>` | Сохранить шаблон схемы v2 без учётных данных |
-| `multi-cli template list \| delete <name>` | Показать или удалить шаблоны |
-| `multi-cli export <tool>/<name> [path]` | Экспортировать профиль схемы v2 |
-| `multi-cli import <archive> <tool>/<name>` | Импортировать архив схемы v2 |
+| `nini-agents auth set <tool>/<profile>` | Сохранить секрет процесса в хранилище учётных данных ОС |
+| `nini-agents auth status <tool>/<profile>` | Проверить наличие секрета |
+| `nini-agents auth clear <tool>/<profile>` | Удалить секрет |
+| `nini-agents continue <tool> <src> <dest> [--dry-run] [--no-merge]` | Скопировать поддерживаемое состояние сессии без учётных данных |
+| `nini-agents template save <tool>/<profile> <name>` | Сохранить шаблон схемы v2 без учётных данных |
+| `nini-agents template list \| delete <name>` | Показать или удалить шаблоны |
+| `nini-agents export <tool>/<name> [path]` | Экспортировать профиль схемы v2 |
+| `nini-agents import <archive> <tool>/<name>` | Импортировать архив схемы v2 |
 
 ### Обслуживание
 
 | Команда | Действие |
 |---|---|
-| `multi-cli migrate <tool>/<name> [--dry-run] [--prefer-profile]` | Перенести устаревший профиль на схему v2 |
-| `multi-cli status` | Показать профили и их размеры |
-| `multi-cli stats` | Показать использование хранилища профилями |
-| `multi-cli doctor [--deep]` | Проверить окружение и при необходимости выполнить аудит сред выполнения |
-| `multi-cli completion {bash\|zsh\|powershell}` | Вывести настройки автодополнения оболочки |
-| `multi-cli help` | Показать все команды |
-| `multi-cli version` | Показать установленную версию |
+| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]` | Перенести устаревший профиль на схему v2 |
+| `nini-agents status` | Показать профили и их размеры |
+| `nini-agents stats` | Показать использование хранилища профилями |
+| `nini-agents doctor [--deep]` | Проверить окружение и при необходимости выполнить аудит сред выполнения |
+| `nini-agents completion {bash\|zsh\|powershell}` | Вывести настройки автодополнения оболочки |
+| `nini-agents help` | Показать все команды |
+| `nini-agents version` | Показать установленную версию |
 
 <a id="how-isolation-works"></a>
 
@@ -143,20 +143,20 @@ multi-cli claude-cli/work
 | Пользователь ОС | Фиксированная идентичность учётных данных продукта | Ничего, если AI-инструмент не разрешает иное |
 | Изолированный домашний каталог инструмента | Весь домашний каталог инструмента | Ничего |
 
-Профили используют самую узкую поддерживаемую границу. `--isolated` создаёт отдельный домашний каталог инструмента. Фиксированные учётные данные ОС используют пользователя ОС под управлением Multi-CLI и требуют терминал с повышенными правами в Windows.
+Профили используют самую узкую поддерживаемую границу. `--isolated` создаёт отдельный домашний каталог инструмента. Фиксированные учётные данные ОС используют пользователя ОС под управлением Nini Agents и требуют терминал с повышенными правами в Windows.
 
 AI-инструментам с секретом процесса нужен дополнительный шаг перед запуском:
 
 ```bash
-multi-cli new cursor-cli/work
-multi-cli auth set cursor-cli/work
-multi-cli cursor-cli/work
+nini-agents new cursor-cli/work
+nini-agents auth set cursor-cli/work
+nini-agents cursor-cli/work
 ```
 
 Старые профили сохраняют исходный режим изоляции всего домашнего каталога. Предварительно проверьте миграцию командой:
 
 ```bash
-multi-cli migrate codex/work --dry-run
+nini-agents migrate codex/work --dry-run
 ```
 
 Переносимы только профили, шаблоны и архивы схемы v2. Сначала мигрируйте старые профили.
@@ -168,9 +168,9 @@ multi-cli migrate codex/work --dry-run
 Скопируйте поддерживаемое состояние диалога, когда аккаунт достигнет лимита:
 
 ```bash
-multi-cli continue codex work personal --dry-run
-multi-cli continue codex work personal
-multi-cli codex/personal
+nini-agents continue codex work personal --dry-run
+nini-agents continue codex work personal
+nini-agents codex/personal
 codex resume
 ```
 
@@ -191,20 +191,23 @@ codex resume
 |---|---|---|
 | `MULTICLI_HOME` | `~/MultiCliProfiles` | Хранилище профилей |
 | `MULTICLI_OVERRIDE_BINARY` | не задано | Переопределить найденный исполняемый файл для одного запуска |
-| `MULTICLI_REPO` | репозиторий GitHub | Переопределить источник установки |
-| `MULTICLI_INSTALL_DIR` | системное значение по умолчанию | Переопределить каталог установки |
+| `NINI_AGENTS_REPO` | репозиторий GitHub | Переопределить источник установки |
+| `NINI_AGENTS_INSTALL_DIR` | системное значение по умолчанию | Переопределить каталог установки |
+
+`MULTICLI_REPO` и `MULTICLI_INSTALL_DIR` временно сохранены как совместимые
+псевдонимы. Команда `multi-cli` также остается оболочкой для `nini-agents`.
 
 <a id="troubleshooting"></a>
 
 ## Устранение неполадок
 
 ```bash
-multi-cli doctor
-multi-cli doctor --deep
-multi-cli tools
+nini-agents doctor
+nini-agents doctor --deep
+nini-agents tools
 ```
 
-Если после установки команда `multi-cli` или псевдоним нового профиля не найдены, перезапустите терминал. Требования отдельных продуктов приведены в [матрице поддержки](../support-matrix.md).
+Если после установки команда `nini-agents` или псевдоним нового профиля не найдены, перезапустите терминал. Требования отдельных продуктов приведены в [матрице поддержки](../support-matrix.md).
 
 <a id="uninstall"></a>
 
@@ -213,13 +216,13 @@ multi-cli tools
 macOS и Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Spielewoy/multi-cli/main/install/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/LuchoNoPrograma/nini-agents/main/install/uninstall.sh | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Spielewoy/multi-cli/main/install/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/LuchoNoPrograma/nini-agents/main/install/uninstall.ps1 | iex
 ```
 
 Данные профилей сохраняются, если вы не подтвердите их удаление.

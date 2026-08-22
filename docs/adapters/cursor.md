@@ -15,8 +15,8 @@ Binary discovery: `%LOCALAPPDATA%\Programs\cursor\Cursor.exe` (Windows), `/Appli
 Use a whole-root profile for Cursor Desktop:
 
 ```bash
-multi-cli new cursor/work --isolated
-multi-cli launch cursor/work
+nini-agents new cursor/work --isolated
+nini-agents launch cursor/work
 ```
 
 For a process-token boundary, use the Cursor CLI adapter (`cursor-cli`).

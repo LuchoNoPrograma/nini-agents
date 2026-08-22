@@ -124,7 +124,7 @@ teardown() {
   run multicli launch secretcli/account-a
 
   [ "$status" -eq 1 ]
-  [[ "$output" == *"multi-cli auth set secretcli/account-a"* ]]
+  [[ "$output" == *"nini-agents auth set secretcli/account-a"* ]]
 }
 
 @test "auth rejects tools that do not use process-secret credentials" {
