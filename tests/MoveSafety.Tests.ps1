@@ -691,11 +691,7 @@ Describe 'transactional profile movement' {
             Mock New-Item -ModuleName MultiCli.Transfer {
                 param($ItemType, $Force, $Path, $ErrorAction)
                 if ($Path -eq $global:NiniMoveBackupFailurePath) { throw 'synthetic backup preparation failure' }
-                if ($ErrorAction) {
-                    Microsoft.PowerShell.Management\New-Item -ItemType $ItemType -Path $Path -Force:$Force -ErrorAction $ErrorAction
-                } else {
-                    Microsoft.PowerShell.Management\New-Item -ItemType $ItemType -Path $Path -Force:$Force
-                }
+                return [System.IO.Directory]::CreateDirectory([string]$Path)
             }
             $result = Invoke-FixtureMove -Scratch $scratch -Adapter $adapter
             $result.Code | Should Be 'backup_prepare_failed'
