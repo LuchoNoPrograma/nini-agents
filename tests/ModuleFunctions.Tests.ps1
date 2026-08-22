@@ -515,6 +515,40 @@ Import-Module '$modulePath' -Force
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
+    It 'Test-RuntimePathTarget rejects absent and plain paths and resolves relative link targets' {
+        $scratch = New-RuntimeScratch
+        try {
+            $source = Join-Path $scratch.Root 'source.txt'
+            $linkDir = Join-Path $scratch.Root 'links'
+            $linkPath = Join-Path $linkDir 'link.txt'
+            New-Item -ItemType Directory -Force -Path $linkDir | Out-Null
+            Set-Content -LiteralPath $source -Value 'source' -Encoding ASCII
+
+            (Invoke-ModuleInternal 'MultiCli.Runtime' { param($p, $s) Test-RuntimePathTarget -Path $p -ExpectedSource $s } @($linkPath, $source)) | Should Be $false
+
+            Set-Content -LiteralPath $linkPath -Value 'plain' -Encoding ASCII
+            (Invoke-ModuleInternal 'MultiCli.Runtime' { param($p, $s) Test-RuntimePathTarget -Path $p -ExpectedSource $s } @($linkPath, $source)) | Should Be $false
+
+            $relativeLink = [pscustomobject]@{ LinkType = 'SymbolicLink'; Target = '..\source.txt' }
+            $relativeCurrent = Invoke-ModuleInternal 'MultiCli.Runtime' {
+                param($p, $s, $fixture)
+                function script:Get-Item { return $fixture }
+                try { Test-RuntimePathTarget -Path $p -ExpectedSource $s }
+                finally { Remove-Item -LiteralPath function:Get-Item -Force -ErrorAction SilentlyContinue }
+            } @($linkPath, $source, $relativeLink)
+            $relativeCurrent | Should Be $true
+
+            $wrongLink = [pscustomobject]@{ LinkType = 'SymbolicLink'; Target = '..\wrong.txt' }
+            $wrongCurrent = Invoke-ModuleInternal 'MultiCli.Runtime' {
+                param($p, $s, $fixture)
+                function script:Get-Item { return $fixture }
+                try { Test-RuntimePathTarget -Path $p -ExpectedSource $s }
+                finally { Remove-Item -LiteralPath function:Get-Item -Force -ErrorAction SilentlyContinue }
+            } @($linkPath, $source, $wrongLink)
+            $wrongCurrent | Should Be $false
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
     It 'New-RuntimeOverlay survives a real abandoned mutex' {
         $scratch = New-RuntimeScratch
         $previousHome = $env:USERPROFILE
@@ -634,6 +668,16 @@ Import-Module '$modulePath' -Force
 
             ((Get-Content -LiteralPath (Join-Path $runtimeRoot '.runtime-manifest')) -join "`n") |
                 Should Be (@('state/config.toml', 'state/agents', 'state/sessions', 'state/history.jsonl', 'state/auth.json') -join "`n")
+
+            (Invoke-ModuleInternal 'MultiCli.Runtime' { param($a, $r) Test-RuntimeOverlayCurrent -Adapter $a -RuntimeRoot $r } @($adapter, $runtimeRoot)) | Should Be $true
+
+            $runtimeConfig = Join-Path $runtimeRoot 'state\config.toml'
+            $wrongSource = Join-Path $sharedRoot 'wrong-config.toml'
+            Set-Content -LiteralPath $wrongSource -Value 'wrong-config' -Encoding ASCII
+            Remove-Item -LiteralPath $runtimeConfig -Force
+            New-Item -ItemType HardLink -Path $runtimeConfig -Target $wrongSource | Out-Null
+
+            (Invoke-ModuleInternal 'MultiCli.Runtime' { param($a, $r) Test-RuntimeOverlayCurrent -Adapter $a -RuntimeRoot $r } @($adapter, $runtimeRoot)) | Should Be $false
         } finally {
             $env:USERPROFILE = $previousHome
             Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
