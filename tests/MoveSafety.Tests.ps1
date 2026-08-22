@@ -48,10 +48,11 @@ function New-MoveAdapter {
 function New-LegacyMoveProfile {
     param($Scratch)
     $profile = Join-Path $Scratch.Source 'account-a'
-    New-Item -ItemType Directory -Force -Path (Join-Path $profile 'rules'), (Join-Path $profile 'sessions') | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $profile 'rules\nested'), (Join-Path $profile 'sessions') | Out-Null
     '{"fixture":true}' | Set-Content -LiteralPath (Join-Path $profile 'auth.json') -Encoding ASCII
     'model = "fixture"' | Set-Content -LiteralPath (Join-Path $profile 'config.toml') -Encoding ASCII
     '# fixture rule' | Set-Content -LiteralPath (Join-Path $profile 'rules\default.md') -Encoding ASCII
+    '# nested fixture rule' | Set-Content -LiteralPath (Join-Path $profile 'rules\nested\deep.md') -Encoding ASCII
     '{"session":"fixture"}' | Set-Content -LiteralPath (Join-Path $profile 'sessions\one.jsonl') -Encoding ASCII
     '{"history":"fixture"}' | Set-Content -LiteralPath (Join-Path $profile 'history.jsonl') -Encoding ASCII
     return $profile
