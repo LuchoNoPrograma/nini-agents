@@ -14,6 +14,7 @@ function global:Resolve-PathToken {
 }
 
 Import-Module $script:ModulePath -Force
+$script:TransferModule = Get-Module MultiCli.Transfer
 
 function New-MoveScratch {
     $root = Join-Path ([System.IO.Path]::GetTempPath()) ("nini_move_" + [guid]::NewGuid().ToString('N'))
@@ -70,10 +71,7 @@ $script:IdleProbe = { param($Path) return $false }
 $script:BusyProbe = { param($Path) return $true }
 $script:LocalCopy = {
     param($Source, $Staging)
-    foreach ($item in (Get-ChildItem -LiteralPath $Source -Force)) {
-        if ($item.Name -eq '.runtime') { continue }
-        Copy-Item -LiteralPath $item.FullName -Destination $Staging -Recurse -Force
-    }
+    & $script:TransferModule { param($sourcePath, $stagingPath) Copy-MoveCandidateLocal -Source $sourcePath -Staging $stagingPath } $Source $Staging
 }
 
 function Invoke-FixtureMove {
@@ -383,5 +381,311 @@ Describe 'transactional profile movement' {
             $result.Code | Should Be 'ok'
             $result.Format | Should Be 'v2'
         } finally { $env:USERPROFILE = $previousHome; Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'covers every declared legacy and isolated path class' {
+        $adapter = New-MoveAdapter
+        $adapter.normalState | Add-Member -NotePropertyName runtimeSubdir -NotePropertyValue 'state'
+        $adapter.normalState.unsafePaths = @('cache')
+        $cases = @(
+            @('bad:path', 'v2', 'accountOverlay', $false),
+            @('.runtime/cache', 'v2', 'accountOverlay', $true),
+            @('rules', 'v2', 'accountOverlay', $false),
+            @('.isolated', 'v2', 'isolated', $true),
+            @('state', 'v2', 'isolated', $true),
+            @('other', 'v2', 'isolated', $false),
+            @('state/rules/default.md', 'v2', 'isolated', $true),
+            @('state/sessions/one.jsonl', 'v2', 'isolated', $true),
+            @('state/cache/entry', 'v2', 'isolated', $true),
+            @('.cli', 'legacy', 'legacy', $true),
+            @('cache/entry', 'legacy', 'legacy', $true)
+        )
+        foreach ($case in $cases) {
+            $actual = & $script:TransferModule {
+                param($a, $path, $format, $mode)
+                Test-MoveRelativeAllowed -Adapter $a -RelativePath $path -Format $format -Mode $mode
+            } $adapter $case[0] $case[1] $case[2]
+            $actual | Should Be $case[3]
+        }
+    }
+
+    It 'rejects undeclared or ambiguous runtime hardlink targets' {
+        $scratch = New-MoveScratch
+        try {
+            $adapter = New-MoveAdapter
+            $adapter.normalState | Add-Member -NotePropertyName runtimeSubdir -NotePropertyValue 'state'
+            $profile = New-V2MoveProfile -Scratch $scratch
+            $emptyTarget = [pscustomobject]@{ Target = @() }
+            $undeclared = [pscustomobject]@{ Target = @((Join-Path $profile '.runtime\state\other.json')) }
+            $expected = [pscustomobject]@{ Target = @((Join-Path $profile '.runtime\state\auth.json')) }
+
+            (& $script:TransferModule {
+                param($a, $p, $item)
+                Test-MoveExpectedRuntimeHardLink -Adapter $a -ProfilePath $p -RelativePath 'auth/other.json' -Item $item -Mode 'accountOverlay'
+            } $adapter $profile $undeclared) | Should Be $false
+            (& $script:TransferModule {
+                param($a, $p, $item)
+                Test-MoveExpectedRuntimeHardLink -Adapter $a -ProfilePath $p -RelativePath 'auth/auth.json' -Item $item -Mode 'accountOverlay'
+            } $adapter $profile $emptyTarget) | Should Be $false
+            (& $script:TransferModule {
+                param($a, $p, $item)
+                Test-MoveExpectedRuntimeHardLink -Adapter $a -ProfilePath $p -RelativePath 'auth/auth.json' -Item $item -Mode 'accountOverlay'
+            } $adapter $profile $expected) | Should Be $true
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'classifies missing, unsupported, malformed, linked, and unsafe profile shapes' {
+        $scratch = New-MoveScratch
+        try {
+            $adapter = New-MoveAdapter
+            $missing = Join-Path $scratch.Source 'missing'
+            (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $adapter $missing).Code | Should Be 'source_missing'
+
+            $outside = Join-Path $scratch.Root 'outside-profile'
+            New-Item -ItemType Directory -Path $outside | Out-Null
+            $linkedProfile = Join-Path $scratch.Source 'linked-profile'
+            New-Item -ItemType Junction -Path $linkedProfile -Target $outside | Out-Null
+            (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $adapter $linkedProfile).Code | Should Be 'unsafe_link'
+
+            $unsupported = New-MoveAdapter
+            $unsupported.account.mechanism = 'processSecret'
+            $unsupportedProfile = Join-Path $scratch.Source 'unsupported'
+            New-Item -ItemType Directory -Path $unsupportedProfile | Out-Null
+            (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $unsupported $unsupportedProfile).Code | Should Be 'unsupported_mechanism'
+
+            $metadataDirectory = Join-Path $scratch.Source 'metadata-directory'
+            New-Item -ItemType Directory -Force -Path (Join-Path $metadataDirectory '.profile.json') | Out-Null
+            (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $adapter $metadataDirectory).Code | Should Be 'invalid_metadata'
+
+            $malformedMetadata = Join-Path $scratch.Source 'malformed-metadata'
+            New-Item -ItemType Directory -Path $malformedMetadata | Out-Null
+            'not-json' | Set-Content -LiteralPath (Join-Path $malformedMetadata '.profile.json') -Encoding ASCII
+            (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $adapter $malformedMetadata).Code | Should Be 'invalid_metadata'
+
+            $missingV2Credential = Join-Path $scratch.Source 'missing-v2-credential'
+            New-Item -ItemType Directory -Path (Join-Path $missingV2Credential 'auth') | Out-Null
+            '{"schemaVersion":2,"adapterId":"fixture","profileId":"fixture-profile","mode":"accountOverlay"}' |
+                Set-Content -LiteralPath (Join-Path $missingV2Credential '.profile.json') -Encoding ASCII
+            (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $adapter $missingV2Credential).Code | Should Be 'missing_credential'
+
+            $credentialTarget = Join-Path $scratch.Root 'credential-target.json'
+            '{"fixture":true}' | Set-Content -LiteralPath $credentialTarget -Encoding ASCII
+            $linkedV2Credential = Join-Path $scratch.Source 'linked-v2-credential'
+            New-Item -ItemType Directory -Path (Join-Path $linkedV2Credential 'auth') | Out-Null
+            '{"schemaVersion":2,"adapterId":"fixture","profileId":"fixture-profile","mode":"accountOverlay"}' |
+                Set-Content -LiteralPath (Join-Path $linkedV2Credential '.profile.json') -Encoding ASCII
+            New-Item -ItemType SymbolicLink -Path (Join-Path $linkedV2Credential 'auth\auth.json') -Target $credentialTarget -ErrorAction Stop | Out-Null
+            (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $adapter $linkedV2Credential).Code | Should Be 'unsafe_link'
+
+            $missingLegacyCredential = Join-Path $scratch.Source 'missing-legacy-credential'
+            New-Item -ItemType Directory -Path $missingLegacyCredential | Out-Null
+            (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $adapter $missingLegacyCredential).Code | Should Be 'missing_credential'
+
+            $invalidLegacyCredential = Join-Path $scratch.Source 'invalid-legacy-credential'
+            New-Item -ItemType Directory -Path $invalidLegacyCredential | Out-Null
+            'not-json' | Set-Content -LiteralPath (Join-Path $invalidLegacyCredential 'auth.json') -Encoding ASCII
+            (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $adapter $invalidLegacyCredential).Code | Should Be 'invalid_auth_json'
+
+            $linkedLegacyCredential = Join-Path $scratch.Source 'linked-legacy-credential'
+            New-Item -ItemType Directory -Path $linkedLegacyCredential | Out-Null
+            New-Item -ItemType SymbolicLink -Path (Join-Path $linkedLegacyCredential 'auth.json') -Target $credentialTarget -ErrorAction Stop | Out-Null
+            (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $adapter $linkedLegacyCredential).Code | Should Be 'unsafe_link'
+
+            $unsafeRuntime = Join-Path $scratch.Source 'unsafe-runtime'
+            New-Item -ItemType Directory -Path (Join-Path $unsafeRuntime 'auth') | Out-Null
+            '{"fixture":true}' | Set-Content -LiteralPath (Join-Path $unsafeRuntime 'auth\auth.json') -Encoding ASCII
+            '{"schemaVersion":2,"adapterId":"fixture","profileId":"fixture-profile","mode":"accountOverlay"}' |
+                Set-Content -LiteralPath (Join-Path $unsafeRuntime '.profile.json') -Encoding ASCII
+            'not-a-directory' | Set-Content -LiteralPath (Join-Path $unsafeRuntime '.runtime') -Encoding ASCII
+            (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $adapter $unsafeRuntime).Code | Should Be 'unsafe_link'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'covers internal false results without exposing profile content' {
+        $scratch = New-MoveScratch
+        try {
+            $adapter = New-MoveAdapter
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            (& $script:TransferModule { param($root) Test-MoveTreesEqual -Left $root -Right (Join-Path $root 'missing') } $scratch.Source) | Should Be $false
+            (& $script:TransferModule { Invoke-MoveProbe -Probe { 'indeterminate' } -Path 'synthetic' }).Valid | Should Be $false
+            (& $script:TransferModule { param($path) Remove-MoveTransactionLock -Path $path } (Join-Path $scratch.Root 'missing-lock')).ToString() | Should Be 'False'
+
+            Remove-Module MultiCli.Runtime -Force -ErrorAction SilentlyContinue
+            (& $script:TransferModule { param($a, $p) New-MoveRuntimeOverlay -Adapter $a -ProfilePath $p } $adapter (Join-Path $scratch.Source 'account-a')) | Should Be $false
+            Import-Module (Join-Path $script:RepoRoot 'lib\MultiCli.Runtime.psm1') -Force
+            (& $script:TransferModule { param($p) New-MoveRuntimeOverlay -Adapter $null -ProfilePath $p } (Join-Path $scratch.Source 'account-a')) | Should Be $false
+        } finally {
+            if (-not (Get-Module MultiCli.Runtime)) { Import-Module (Join-Path $script:RepoRoot 'lib\MultiCli.Runtime.psm1') -Force }
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'rejects invalid identifiers, callbacks, roots, and failed artifacts' {
+        $scratch = New-MoveScratch
+        try {
+            $adapter = New-MoveAdapter
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            (Invoke-MultiCliProfileMove -Adapter $adapter -SourceRoot $scratch.Source -DestinationRoot $scratch.Destination `
+                -ProfileName '..\escape' -OperationId 'fixture-op' -ProcessProbe $script:IdleProbe -TransportCopy $script:LocalCopy).Code | Should Be 'invalid_identifier'
+            (Invoke-MultiCliProfileMove -Adapter $adapter -SourceRoot $scratch.Source -DestinationRoot $scratch.Destination `
+                -ProfileName 'account-a' -OperationId 'fixture-op' -ProcessProbe $null -TransportCopy $script:LocalCopy).Code | Should Be 'invalid_callback'
+            (Invoke-MultiCliProfileMove -Adapter $adapter -SourceRoot (Join-Path $scratch.Root 'missing-root') -DestinationRoot $scratch.Destination `
+                -ProfileName 'account-a' -OperationId 'fixture-op' -ProcessProbe $script:IdleProbe -TransportCopy $script:LocalCopy).Code | Should Be 'unsafe_root'
+            (Invoke-MultiCliProfileMove -Adapter $adapter -SourceRoot $scratch.Source -DestinationRoot $scratch.Source `
+                -ProfileName 'account-a' -OperationId 'fixture-op' -ProcessProbe $script:IdleProbe -TransportCopy $script:LocalCopy).Code | Should Be 'unsafe_root'
+
+            New-Item -ItemType Directory -Force -Path (Join-Path $scratch.Destination '.failed\account-a.fixture-op') | Out-Null
+            (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter).Code | Should Be 'failed_artifact_conflict'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'fails closed when staging, locking, or destination ownership changes race preflight' {
+        $adapter = New-MoveAdapter
+
+        $scratch = New-MoveScratch
+        try {
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            $script:StagingRaceCalls = 0
+            $script:StagingRacePath = Join-Path $scratch.Destination '.staging'
+            $stagingRaceProbe = {
+                param($Path)
+                $script:StagingRaceCalls++
+                if ($script:StagingRaceCalls -eq 2) { 'collision' | Set-Content -LiteralPath $script:StagingRacePath -Encoding ASCII }
+                return $false
+            }
+            (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter -Probe $stagingRaceProbe).Code | Should Be 'staging_create_failed'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+
+        $scratch = New-MoveScratch
+        try {
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            $script:LockRacePath = Join-Path $scratch.Source '.move-lock.account-a'
+            $lockRaceCopy = {
+                param($Source, $Staging)
+                & $script:LocalCopy $Source $Staging
+                New-Item -ItemType Directory -Path $script:LockRacePath | Out-Null
+            }
+            (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter -Copy $lockRaceCopy).Code | Should Be 'transaction_locked'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+
+        $scratch = New-MoveScratch
+        try {
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            $script:AppearingDestination = Join-Path $scratch.Destination 'account-a'
+            $destinationRaceCopy = {
+                param($Source, $Staging)
+                & $script:LocalCopy $Source $Staging
+                New-Item -ItemType Directory -Path $script:AppearingDestination | Out-Null
+            }
+            (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter -Copy $destinationRaceCopy).Code | Should Be 'destination_appeared'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rechecks integrity and process certainty while holding ownership lock' {
+        $adapter = New-MoveAdapter
+        $scratch = New-MoveScratch
+        try {
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            $global:NiniMoveTreeComparisons = 0
+            Mock Test-MoveTreesEqual -ModuleName MultiCli.Transfer {
+                $global:NiniMoveTreeComparisons++
+                return $global:NiniMoveTreeComparisons -ne 2
+            }
+            (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter).Code | Should Be 'integrity_mismatch'
+        } finally { Remove-Variable NiniMoveTreeComparisons -Scope Global -ErrorAction SilentlyContinue; Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+
+        $scratch = New-MoveScratch
+        try {
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            $script:IndeterminateProbeCalls = 0
+            $indeterminateAfterStaging = {
+                param($Path)
+                $script:IndeterminateProbeCalls++
+                if ($script:IndeterminateProbeCalls -eq 3) { return 'indeterminate' }
+                return $false
+            }
+            (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter -Probe $indeterminateAfterStaging).Code | Should Be 'process_probe_failed'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+
+        $scratch = New-MoveScratch
+        try {
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            $script:BackupRaceCalls = 0
+            $script:BackupRacePath = Join-Path $scratch.Source '.inactive'
+            $backupRaceProbe = {
+                param($Path)
+                $script:BackupRaceCalls++
+                if ($script:BackupRaceCalls -eq 4) { 'collision' | Set-Content -LiteralPath $script:BackupRacePath -Encoding ASCII }
+                return $false
+            }
+            (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter -Probe $backupRaceProbe).Code | Should Be 'backup_prepare_failed'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'preserves recoverable artifacts across every late rollback failure' {
+        $adapter = New-MoveAdapter
+
+        $scratch = New-MoveScratch
+        try {
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            $script:ExistingFailedPath = Join-Path $scratch.Destination '.failed\account-a.fixture-op'
+            $activationWithFailedArtifact = {
+                param($Staging, $Destination)
+                Move-Item -LiteralPath $Staging -Destination $Destination
+                New-Item -ItemType Directory -Force -Path $script:ExistingFailedPath | Out-Null
+                throw 'synthetic activation completion failure'
+            }
+            (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter -Activation $activationWithFailedArtifact).Code | Should Be 'rollback_failed'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+
+        $scratch = New-MoveScratch
+        try {
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            $script:RollbackCollisionPath = Join-Path $scratch.Source 'account-a'
+            $invalidActivation = {
+                param($Staging, $Destination)
+                Move-Item -LiteralPath $Staging -Destination $Destination
+                'not-json' | Set-Content -LiteralPath (Join-Path $Destination 'auth\auth.json') -Encoding ASCII
+            }
+            $quarantineWithCollision = {
+                param($Destination, $Failed)
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Failed) | Out-Null
+                Move-Item -LiteralPath $Destination -Destination $Failed
+                'collision' | Set-Content -LiteralPath $script:RollbackCollisionPath -Encoding ASCII
+            }
+            (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter -Activation $invalidActivation -Quarantine $quarantineWithCollision).Code | Should Be 'rollback_failed'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+
+        $scratch = New-MoveScratch
+        try {
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            $throwingRuntime = { param($Adapter, $Destination) throw 'synthetic runtime exception' }
+            (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter -RuntimeBuilder $throwingRuntime).Code | Should Be 'destination_runtime_failed_rolled_back'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+
+        $scratch = New-MoveScratch
+        try {
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            $tamperingRuntime = {
+                param($Adapter, $Destination)
+                '{"fixture":false}' | Set-Content -LiteralPath (Join-Path $Destination 'auth\auth.json') -Encoding ASCII
+                return $true
+            }
+            (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter -RuntimeBuilder $tamperingRuntime).Code | Should Be 'destination_invalid_rolled_back'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+
+        $scratch = New-MoveScratch
+        try {
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            $script:LockReleaseFailurePath = Join-Path $scratch.Source '.move-lock.account-a\child.txt'
+            $lockBlockingRuntime = {
+                param($Adapter, $Destination)
+                'keep-lock' | Set-Content -LiteralPath $script:LockReleaseFailurePath -Encoding ASCII
+                return $true
+            }
+            $result = Invoke-FixtureMove -Scratch $scratch -Adapter $adapter -RuntimeBuilder $lockBlockingRuntime
+            $result.Code | Should Be 'lock_release_failed'
+            $result.State | Should Be 'destination_active'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
