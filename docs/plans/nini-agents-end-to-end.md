@@ -916,3 +916,35 @@ Pendientes y siguiente gate:
   interfaz publica de movimiento. SSH/equipos reales, auditoria final y la
   migracion simultanea de MultiCLI AI y Codexporter conservan autorizaciones
   separadas.
+
+### 2026-08-22 — Etapa F: contrato JSON v1 para consultas
+
+- Estado: implementacion local en validacion; el comando publico de movimiento,
+  transporte y process probe de produccion permanecen pendientes.
+- Objetivo: sustituir el futuro parsing de texto humano por un envelope
+  versionado y seguro, manteniendo el modo humano y el shim `multi-cli`.
+- Inventario consumidor: MultiCLI AI invoca el shim y conserva descubrimiento
+  propio basado en filesystem y texto; Codexporter expone texto humano y SSH.
+  Ninguno tenia un contrato JSON que debiera copiarse literalmente. No se
+  modifico ninguno de los dos repositorios.
+- Contrato: `schemaVersion`, `command`, `ok`, `data` y `error`; consultas
+  `version`, `list/status`, `tools`, `doctor`, `stats` y `template list`; arrays
+  ordenados, tamanos numericos y codigos de salida deterministas.
+- Frontera de datos: se exponen solo nombres elegidos por el usuario necesarios
+  para direccionar perfiles/templates y capacidades publicas de adapters. No se
+  leen valores de credenciales ni se emiten rutas absolutas, rutas de binarios,
+  `profileId`, IDs de cuenta, tokens, hashes o detalles privados de runtime.
+- Movimiento: ambos motores pueden serializar cualquier resultado mediante
+  `code`, `state` y `format`, sin rutas ni identificadores. No existe dispatch
+  publico `move`; falta implementar transporte y una deteccion real de procesos
+  antes de autorizarlo.
+- Compatibilidad: Bash 3.2 y PowerShell 5.1 conservan su salida humana; `--json`
+  puede ir antes del delimitador de argumentos. `doctor --deep` y comandos de
+  mutacion rechazan JSON antes de operar.
+- Pruebas: `tests/json_cli.bats` y `tests/JsonCli.Tests.ps1` usan exclusivamente
+  homes, adapters, perfiles y credenciales sinteticos bajo temporales. La
+  caracterizacion Bash fallo 7/7 antes de implementar y paso 7/7 tras el primer
+  delta funcional.
+- Pendiente de cierre: suites completas, cobertura, validacion documental,
+  ejecucion PowerShell/Windows mediante CI, commit y push autorizados, y registro
+  de resultados definitivos.

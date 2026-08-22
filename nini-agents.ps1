@@ -70,6 +70,11 @@ function Import-RuntimeModule {
     Import-Module (Resolve-MultiCliModulePath 'MultiCli.Runtime.psm1') -Force
 }
 
+function Import-JsonModule {
+    if (Get-Command ConvertTo-NiniJsonSuccess -ErrorAction SilentlyContinue) { return }
+    Import-Module (Resolve-MultiCliModulePath 'MultiCli.Json.psm1') -Force
+}
+
 # =============================================================================
 # Adapter loading
 # =============================================================================
@@ -1520,6 +1525,147 @@ function Get-FolderSize {
     Format-Bytes $size
 }
 
+function Get-FolderSizeBytes {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return [long]0 }
+    $rootItem = Get-Item -LiteralPath $Path -Force
+    if ($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return [long]0 }
+    [long]$size = 0
+    foreach ($file in @(Get-RuntimeFilesNoReparse -Root $Path)) {
+        $item = Get-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+        if ($item -and -not $item.PSIsContainer) { $size += [long]$item.Length }
+    }
+    return $size
+}
+
+function Get-ProfileJsonData {
+    param([string]$ToolFilter)
+    $profiles = @()
+    if (Test-Path -LiteralPath $BASE -PathType Container) {
+        $tools = @(Get-ChildItem -LiteralPath $BASE -Directory -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notmatch '^\.' -and $_.Name -ne 'bin' -and -not ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) } | Sort-Object Name)
+        if ($ToolFilter) { $tools = @($tools | Where-Object { $_.Name -eq $ToolFilter }) }
+        foreach ($toolDir in $tools) {
+            foreach ($profile in @(Get-ChildItem -LiteralPath $toolDir.FullName -Directory -Force -ErrorAction SilentlyContinue |
+                Where-Object { -not ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) } | Sort-Object Name)) {
+                $type = if (Test-Path -LiteralPath (Join-Path $profile.FullName '.cli') -PathType Leaf) { 'cli' }
+                    elseif (Test-Path -LiteralPath (Join-Path $profile.FullName '.shared') -PathType Leaf) { 'shared' }
+                    elseif (Test-Path -LiteralPath (Join-Path $profile.FullName '.isolated') -PathType Leaf) { 'isolated' }
+                    else { 'full' }
+                $profiles += [ordered]@{
+                    tool = $toolDir.Name
+                    name = $profile.Name
+                    type = $type
+                    schemaVersion = $(if (Test-Path -LiteralPath (Join-Path $profile.FullName '.profile.json') -PathType Leaf) { 2 } else { 1 })
+                    sizeBytes = [long](Get-FolderSizeBytes -Path $profile.FullName)
+                }
+            }
+        }
+    }
+    return [ordered]@{ profiles = @($profiles); count = $profiles.Count }
+}
+
+function Get-ToolsJsonArray {
+    $tools = @()
+    foreach ($adapter in @(Get-Adapters 3>$null | Sort-Object id)) {
+        $support = if ($adapter.support -and $adapter.support.windows -and $adapter.support.windows.level) {
+            [string]$adapter.support.windows.level
+        } elseif ($adapter.status) { [string]$adapter.status } else { 'unknown' }
+        $tools += [ordered]@{
+            id = [string]$adapter.id
+            kind = [string]$adapter.kind
+            strategy = [string]$adapter.isolation.strategy
+            supportLevel = $support
+            installed = [bool](Find-AdapterBinary $adapter)
+        }
+    }
+    return @($tools)
+}
+
+function Invoke-JsonQuery {
+    param([string]$Command, [string]$First, [string]$Second)
+    Import-JsonModule
+    $script:NiniJsonExitCode = 0
+    switch ($Command) {
+        { $_ -in @('version', '--version', '-v') } {
+            if ($First) { Write-Output (ConvertTo-NiniJsonError -Command 'version' -Code 'invalid_arguments' -Message 'This JSON command received unsupported arguments.'); $script:NiniJsonExitCode = 2; return }
+            Write-Output (ConvertTo-NiniJsonSuccess -Command 'version' -Data ([ordered]@{ product = 'nini-agents'; version = $VERSION }))
+            return
+        }
+        { $_ -in @('list', 'status') } {
+            if ($Second) { Write-Output (ConvertTo-NiniJsonError -Command $Command -Code 'invalid_arguments' -Message 'This JSON command received unsupported arguments.'); $script:NiniJsonExitCode = 2; return }
+            Write-Output (ConvertTo-NiniJsonSuccess -Command $Command -Data (Get-ProfileJsonData -ToolFilter $First))
+            return
+        }
+        'tools' {
+            if ($First) { Write-Output (ConvertTo-NiniJsonError -Command 'tools' -Code 'invalid_arguments' -Message 'This JSON command received unsupported arguments.'); $script:NiniJsonExitCode = 2; return }
+            $tools = @(Get-ToolsJsonArray)
+            Write-Output (ConvertTo-NiniJsonSuccess -Command 'tools' -Data ([ordered]@{ platform = 'windows'; tools = $tools; count = $tools.Count }))
+            return
+        }
+        'doctor' {
+            if ($First) { Write-Output (ConvertTo-NiniJsonError -Command 'doctor' -Code 'invalid_arguments' -Message 'JSON doctor does not support deep runtime auditing yet.'); $script:NiniJsonExitCode = 2; return }
+            $exists = Test-Path -LiteralPath $BASE -PathType Container
+            $writable = $false
+            $probeRoot = if ($exists) { $BASE } else { Split-Path -Parent $BASE }
+            if ($probeRoot -and (Test-Path -LiteralPath $probeRoot -PathType Container)) {
+                $probe = Join-Path $probeRoot ('.nini-json-write-test-' + [guid]::NewGuid().ToString('N'))
+                try {
+                    New-Item -ItemType File -Path $probe -ErrorAction Stop | Out-Null
+                    $writable = $true
+                } catch { $writable = $false }
+                finally { Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue }
+            }
+            $tools = @(Get-ToolsJsonArray)
+            $data = [ordered]@{
+                platform = 'windows'
+                storage = [ordered]@{ exists = [bool]$exists; writable = [bool]$writable }
+                aliasDirectoryOnPath = [bool](Test-AliasDirInPath)
+                tools = $tools
+            }
+            if ($writable) {
+                Write-Output (ConvertTo-NiniJsonSuccess -Command 'doctor' -Data $data)
+                return
+            }
+            Write-Output (ConvertTo-NiniJsonError -Command 'doctor' -Code 'health_check_failed' -Message 'One or more required health checks failed.' -Details ([ordered]@{ result = $data }))
+            $script:NiniJsonExitCode = 6
+            return
+        }
+        'stats' {
+            if ($First) { Write-Output (ConvertTo-NiniJsonError -Command 'stats' -Code 'invalid_arguments' -Message 'This JSON command received unsupported arguments.'); $script:NiniJsonExitCode = 2; return }
+            $data = Get-ProfileJsonData
+            [long]$total = 0
+            foreach ($profile in @($data.profiles)) { $total += [long]$profile.sizeBytes }
+            $data['totalBytes'] = $total
+            Write-Output (ConvertTo-NiniJsonSuccess -Command 'stats' -Data $data)
+            return
+        }
+        'template' {
+            if ($First -ne 'list' -or $Second) {
+                Write-Output (ConvertTo-NiniJsonError -Command 'template' -Code 'json_unsupported' -Message 'JSON output is not available for this command.')
+                $script:NiniJsonExitCode = 2
+                return
+            }
+            $templates = @()
+            $root = Get-TemplatesDir
+            if (Test-Path -LiteralPath $root -PathType Container) {
+                foreach ($item in @(Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue |
+                    Where-Object { -not ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) } | Sort-Object Name)) {
+                    $templates += [ordered]@{ name = $item.Name; sizeBytes = [long](Get-FolderSizeBytes -Path $item.FullName) }
+                }
+            }
+            Write-Output (ConvertTo-NiniJsonSuccess -Command 'template-list' -Data ([ordered]@{ templates = @($templates); count = $templates.Count }))
+            return
+        }
+        default {
+            $safeCommand = if ($Command) { $Command } else { 'unknown' }
+            Write-Output (ConvertTo-NiniJsonError -Command $safeCommand -Code 'json_unsupported' -Message 'JSON output is not available for this command.')
+            $script:NiniJsonExitCode = 2
+            return
+        }
+    }
+}
+
 # Every regular file under a root via an iterative stack walk. Reparse-point
 # items are skipped entirely (never listed, never descended): a runtime
 # overlay links into the shared normal state, and following those links would
@@ -1843,6 +1989,7 @@ nini-agents $VERSION -- sandboxed profiles for CLIs, IDEs, and GUI apps
 
 USAGE
   nini-agents <command> [args]
+  nini-agents --json <query> [args]
 
 COMMANDS
   new <tool>/<name> [--shared] [--isolated] [--cli] [--from <tpl>] [--no-seed]   Create a profile
@@ -1864,6 +2011,10 @@ COMMANDS
   stats                                                 Storage usage
   completion powershell                                 Print completion script
   help | version                                        This / version
+
+JSON QUERIES
+  --json supports version, list/status, tools, doctor, stats, and template list.
+  See docs/json-cli.md for the versioned envelope and exit codes.
 
 PROFILE SHORTHAND
   nini-agents <tool>/<name> [args...]   -- same as `launch`
@@ -1969,6 +2120,41 @@ function Read-ContinueArgs {
         DestName = $positional[2]
         NoMerge = $noMerge
         DryRun  = $dryRun
+    }
+}
+
+$jsonOutput = $false
+$normalizedTokens = @()
+$afterDelimiter = $false
+$rawTokens = @()
+if ($Cmd) { $rawTokens += $Cmd }
+if ($Arg1) { $rawTokens += $Arg1 }
+if ($Arg2) { $rawTokens += $Arg2 }
+if ($ForwardArgs) { $rawTokens += $ForwardArgs }
+foreach ($token in $rawTokens) {
+    if (-not $afterDelimiter -and $token -eq '--') {
+        $afterDelimiter = $true
+        $normalizedTokens += $token
+    } elseif (-not $afterDelimiter -and $token -eq '--json') {
+        $jsonOutput = $true
+    } else {
+        $normalizedTokens += $token
+    }
+}
+$Cmd = if ($normalizedTokens.Count -gt 0) { [string]$normalizedTokens[0] } else { '' }
+$Arg1 = if ($normalizedTokens.Count -gt 1) { [string]$normalizedTokens[1] } else { $null }
+$Arg2 = if ($normalizedTokens.Count -gt 2) { [string]$normalizedTokens[2] } else { $null }
+$ForwardArgs = if ($normalizedTokens.Count -gt 3) { @($normalizedTokens[3..($normalizedTokens.Count - 1)]) } else { @() }
+
+if ($jsonOutput) {
+    try {
+        Invoke-JsonQuery -Command $Cmd -First $Arg1 -Second $Arg2
+        exit $script:NiniJsonExitCode
+    } catch {
+        Import-JsonModule
+        Write-Output (ConvertTo-NiniJsonError -Command $(if ($Cmd) { $Cmd } else { 'unknown' }) `
+            -Code 'operation_failed' -Message 'The JSON query could not be completed.')
+        exit 6
     }
 }
 

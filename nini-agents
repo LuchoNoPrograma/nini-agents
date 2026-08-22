@@ -27,6 +27,8 @@ source "$SCRIPT_DIR/lib/transfer.sh"
 source "$SCRIPT_DIR/lib/migration.sh"
 # shellcheck source=lib/multicli-osuser.sh
 source "$SCRIPT_DIR/lib/multicli-osuser.sh"
+# shellcheck source=lib/cli-json.sh
+source "$SCRIPT_DIR/lib/cli-json.sh"
 
 # Skip automatic session seeding when the base state exceeds this size.
 SEED_MAX_BYTES=$((500 * 1024 * 1024))
@@ -1496,6 +1498,145 @@ folder_size() {
   format_bytes "$bytes"
 }
 
+# Logical bytes in regular files. Symlinks are not followed, so a JSON query
+# cannot escape the requested profile or template tree.
+folder_size_bytes() {
+  local p="$1" total=0 f bytes
+  [ -d "$p" ] || { printf '0\n'; return; }
+  while IFS= read -r -d '' f; do
+    bytes="$(stat -c '%s' "$f" 2>/dev/null || stat -f '%z' "$f" 2>/dev/null || printf '0')"
+    case "$bytes" in ''|*[!0-9]*) bytes=0 ;; esac
+    total=$((total + bytes))
+  done < <(find "$p" -type f -print0 2>/dev/null)
+  printf '%s\n' "$total"
+}
+
+json_profile_data() {
+  local tool_filter="${1:-}" tool_dir tname pdir pname ptype schema_version size
+  {
+    if [ -d "$BASE" ]; then
+      for tool_dir in "$BASE"/*/; do
+        tool_dir="${tool_dir%/}"
+        [ -d "$tool_dir" ] && [ ! -L "$tool_dir" ] || continue
+        tname="$(basename "$tool_dir")"
+        [[ "$tname" == .* ]] && continue
+        [ "$tname" = bin ] && continue
+        [ -n "$tool_filter" ] && [ "$tname" != "$tool_filter" ] && continue
+        for pdir in "$tool_dir"/*/; do
+          pdir="${pdir%/}"
+          [ -d "$pdir" ] && [ ! -L "$pdir" ] || continue
+          pname="$(basename "$pdir")"
+          ptype=full
+          [ -f "$pdir/.cli" ] && ptype=cli
+          [ -f "$pdir/.shared" ] && ptype=shared
+          [ -f "$pdir/.isolated" ] && ptype=isolated
+          schema_version=1
+          [ -f "$pdir/.profile.json" ] && schema_version=2
+          size="$(folder_size_bytes "$pdir")"
+          jq -cn --arg tool "$tname" --arg name "$pname" --arg type "$ptype" \
+            --argjson schemaVersion "$schema_version" --argjson sizeBytes "$size" \
+            '{tool:$tool,name:$name,type:$type,schemaVersion:$schemaVersion,sizeBytes:$sizeBytes}'
+        done
+      done
+    fi
+  } | jq -sc '{profiles:.,count:length}'
+}
+
+json_tools_array() {
+  local tid apath kind strategy support installed
+  {
+    for tid in $(list_tool_ids | sort); do
+      apath="$(adapter_path "$tid")"
+      kind="$(json_str '.kind' "$apath")"
+      strategy="$(json_str '.isolation.strategy' "$apath")"
+      support="$(json_str ".support.$(platform).level" "$apath")"
+      [ -n "$support" ] || support="$(json_str '.status' "$apath")"
+      [ -n "$support" ] || support=unknown
+      if find_adapter_binary "$tid" >/dev/null 2>&1; then installed=true; else installed=false; fi
+      jq -cn --arg id "$tid" --arg kind "$kind" --arg strategy "$strategy" \
+        --arg supportLevel "$support" --argjson installed "$installed" \
+        '{id:$id,kind:$kind,strategy:$strategy,supportLevel:$supportLevel,installed:$installed}'
+    done
+  } | jq -sc '.'
+}
+
+cmd_json_query() {
+  local command="$1" arg1="${2:-}" arg2="${3:-}" data tools storage_exists storage_writable total
+  case "$command" in
+    version|--version|-v)
+      [ -z "$arg1" ] || { cli_json_error version invalid_arguments 'This JSON command received unsupported arguments.'; return 2; }
+      cli_json_success version "$(jq -cn --arg product nini-agents --arg version "$VERSION" '{product:$product,version:$version}')"
+      ;;
+    list|status)
+      [ -z "$arg2" ] || { cli_json_error "$command" invalid_arguments 'This JSON command received unsupported arguments.'; return 2; }
+      data="$(json_profile_data "$arg1")"
+      cli_json_success "$command" "$data"
+      ;;
+    tools)
+      [ -z "$arg1" ] || { cli_json_error tools invalid_arguments 'This JSON command received unsupported arguments.'; return 2; }
+      tools="$(json_tools_array)"
+      data="$(jq -cn --arg platform "$(platform)" --argjson tools "$tools" '{platform:$platform,tools:$tools,count:($tools|length)}')"
+      cli_json_success tools "$data"
+      ;;
+    doctor)
+      [ -z "$arg1" ] || { cli_json_error doctor invalid_arguments 'JSON doctor does not support deep runtime auditing yet.'; return 2; }
+      if [ -d "$BASE" ]; then
+        storage_exists=true
+        if [ -w "$BASE" ]; then storage_writable=true; else storage_writable=false; fi
+      else
+        storage_exists=false
+        if [ -w "$(dirname "$BASE")" ]; then storage_writable=true; else storage_writable=false; fi
+      fi
+      tools="$(json_tools_array)"
+      data="$(jq -cn \
+        --arg platform "$(platform)" \
+        --argjson exists "$storage_exists" \
+        --argjson writable "$storage_writable" \
+        --argjson aliasDirectoryOnPath "$(alias_dir_in_path && printf true || printf false)" \
+        --argjson tools "$tools" \
+        '{platform:$platform,storage:{exists:$exists,writable:$writable},aliasDirectoryOnPath:$aliasDirectoryOnPath,tools:$tools}')"
+      if [ "$storage_writable" = true ]; then
+        cli_json_success doctor "$data"
+      else
+        cli_json_error doctor health_check_failed 'One or more required health checks failed.' \
+          "$(jq -cn --argjson result "$data" '{result:$result}')"
+        return 6
+      fi
+      ;;
+    stats)
+      [ -z "$arg1" ] || { cli_json_error stats invalid_arguments 'This JSON command received unsupported arguments.'; return 2; }
+      data="$(json_profile_data '')"
+      total="$(printf '%s' "$data" | jq '[.profiles[].sizeBytes] | add // 0')"
+      data="$(printf '%s' "$data" | jq -c --argjson totalBytes "$total" '{profiles:.profiles,count:.count,totalBytes:$totalBytes}')"
+      cli_json_success stats "$data"
+      ;;
+    template)
+      [ "$arg1" = list ] && [ -z "$arg2" ] || {
+        cli_json_error template json_unsupported 'JSON output is not available for this command.'
+        return 2
+      }
+      data="$({
+        local tdir d name size
+        tdir="$(templates_dir)"
+        if [ -d "$tdir" ]; then
+          for d in "$tdir"/*/; do
+            d="${d%/}"
+            [ -d "$d" ] && [ ! -L "$d" ] || continue
+            name="$(basename "$d")"
+            size="$(folder_size_bytes "$d")"
+            jq -cn --arg name "$name" --argjson sizeBytes "$size" '{name:$name,sizeBytes:$sizeBytes}'
+          done
+        fi
+      } | jq -sc '{templates:.,count:length}')"
+      cli_json_success template-list "$data"
+      ;;
+    *)
+      cli_json_error "${command:-unknown}" json_unsupported 'JSON output is not available for this command.'
+      return 2
+      ;;
+  esac
+}
+
 cmd_list() {
   local tool_filter="${1:-}"
   [ -d "$BASE" ] || { echo "No profiles yet."; return; }
@@ -1780,6 +1921,7 @@ nini-agents $VERSION -- sandboxed profiles for AI CLIs and agent IDEs
 
 USAGE
   nini-agents <command> [args]
+  nini-agents --json <query> [args]
 
 COMMANDS
   new <tool>/<name> [--shared] [--isolated] [--cli] [--no-seed] [--from <tpl>]   Create a profile
@@ -1801,6 +1943,10 @@ COMMANDS
   stats                                                 Storage usage
   completion {bash|zsh}                                 Print completion script
   help | version                                        This / version
+
+JSON QUERIES
+  --json supports version, list/status, tools, doctor, stats, and template list.
+  See docs/json-cli.md for the versioned envelope and exit codes.
 
 PROFILE SHORTHAND
   nini-agents <tool>/<name> [args...]   -- same as 'launch'
@@ -1884,7 +2030,45 @@ COMP
 # Main dispatch
 # =============================================================================
 
-need_jq
+CLI_JSON=false
+cli_args=()
+cli_after_delimiter=false
+for cli_arg in "$@"; do
+  if [ "$cli_after_delimiter" = false ] && [ "$cli_arg" = -- ]; then
+    cli_after_delimiter=true
+    cli_args+=("$cli_arg")
+  elif [ "$cli_after_delimiter" = false ] && [ "$cli_arg" = --json ]; then
+    CLI_JSON=true
+  else
+    cli_args+=("$cli_arg")
+  fi
+done
+set -- "${cli_args[@]+"${cli_args[@]}"}"
+
+if ! command -v jq >/dev/null 2>&1; then
+  if [ "$CLI_JSON" = true ]; then
+    printf '%s\n' '{"schemaVersion":1,"command":"unknown","ok":false,"data":null,"error":{"code":"dependency_missing","message":"jq is required for JSON output."}}'
+    exit 6
+  fi
+  need_jq
+fi
+
+if [ "$CLI_JSON" = true ]; then
+  set +e
+  cli_json_output="$(cmd_json_query "${1:-}" "${2:-}" "${3:-}" 2>/dev/null)"
+  cli_json_status=$?
+  set -e
+  if printf '%s' "$cli_json_output" | jq -se '
+    (length == 1) and (.[0].schemaVersion == 1) and
+    ((.[0].ok | type) == "boolean") and
+    (.[0] | has("data") and has("error"))
+  ' >/dev/null 2>&1; then
+    printf '%s\n' "$cli_json_output"
+    exit "$cli_json_status"
+  fi
+  cli_json_error "${1:-unknown}" operation_failed 'The JSON query could not be completed.'
+  exit 6
+fi
 
 cmd="${1:-}"
 shift || true

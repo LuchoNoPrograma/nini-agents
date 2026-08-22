@@ -79,3 +79,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-pester.ps1 -Path M
 ```
 
 These suites never contact another machine or inspect a real credential store.
+
+Stable JSON output has dedicated hermetic suites. They build profiles and
+templates only beneath disposable homes and assert both the envelope and the
+absence of credential values, private metadata IDs, and absolute paths:
+
+```bash
+bash tests/run-bats.sh tests/json_cli.bats
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-pester.ps1 -Path JsonCli.Tests.ps1
+```

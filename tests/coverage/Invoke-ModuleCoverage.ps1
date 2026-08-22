@@ -68,6 +68,7 @@ $testFiles = @(
     (Join-Path $testsRoot 'Migration.Tests.ps1'),
     (Join-Path $testsRoot 'TransferSafety.Tests.ps1'),
     (Join-Path $testsRoot 'MoveSafety.Tests.ps1'),
+    (Join-Path $testsRoot 'JsonCli.Tests.ps1'),
     (Join-Path $testsRoot 'OsUser.Tests.ps1'),
     (Join-Path $testsRoot 'OverlayState.Tests.ps1')
 )
