@@ -17,11 +17,11 @@ Import-Module $script:ModulePath -Force
 
 function New-MoveScratch {
     $root = Join-Path ([System.IO.Path]::GetTempPath()) ("nini_move_" + [guid]::NewGuid().ToString('N'))
-    $home = Join-Path $root 'home'
+    $userHome = Join-Path $root 'home'
     $source = Join-Path $root 'source'
     $destination = Join-Path $root 'destination'
-    New-Item -ItemType Directory -Force -Path $home, $source, $destination | Out-Null
-    return [pscustomobject]@{ Root = $root; Home = $home; Source = $source; Destination = $destination }
+    New-Item -ItemType Directory -Force -Path $userHome, $source, $destination | Out-Null
+    return [pscustomobject]@{ Root = $root; Home = $userHome; Source = $source; Destination = $destination }
 }
 
 function New-MoveAdapter {
