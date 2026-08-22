@@ -12,6 +12,7 @@ setup() {
   export USERPROFILE="$HOME"
   export APPDATA="$HOME/AppData/Roaming"
   export LOCALAPPDATA="$HOME/AppData/Local"
+  export MULTICLI_PLATFORM=linux
   export MULTICLI_TOOLS_DIR="$TOOLS_ROOT"
   export MULTICLI_OVERRIDE_BINARY="$MULTICLI_SCRATCH/capture-child"
   export CAPTURE_OUTPUT="$MULTICLI_SCRATCH/capture.json"
@@ -64,7 +65,7 @@ teardown() {
   if [ -n "$MULTICLI_TEST_TARGET" ]; then
     mc_cred_clear "$MULTICLI_TEST_TARGET" 2>/dev/null || true
   fi
-  unset MULTICLI_TOOLS_DIR MULTICLI_OVERRIDE_BINARY CAPTURE_OUTPUT
+  unset MULTICLI_PLATFORM MULTICLI_TOOLS_DIR MULTICLI_OVERRIDE_BINARY CAPTURE_OUTPUT
   teardown_scratch
 }
 
