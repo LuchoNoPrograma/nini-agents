@@ -703,7 +703,7 @@ function Test-MoveExpectedRuntimeHardLink {
     $runtimeRoot = Join-Path $ProfilePath '.runtime'
     if ($runtimeSubdir) { $runtimeRoot = Join-Path $runtimeRoot ($runtimeSubdir -replace '/', '\') }
     $expectedRuntime = [System.IO.Path]::GetFullPath((Join-Path $runtimeRoot ($credentialRelative -replace '/', '\')))
-    $targets = @(Get-TransferProperty -Object $Item -Name 'Target') | Where-Object { $_ }
+    $targets = @(@(Get-TransferProperty -Object $Item -Name 'Target') | Where-Object { $_ })
     if ($targets.Count -ne 1) { return $false }
     return [System.IO.Path]::GetFullPath([string]$targets[0]) -eq $expectedRuntime
 }
