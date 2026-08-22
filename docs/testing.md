@@ -65,3 +65,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests/coverage/Run-PowerShel
 The Bash gate requires Bashcov, Ruby, and Python 3. CI installs the checksum-verified Bashcov 3.3.0 gem; Bashcov supports Bats and tracks nested Bash processes without kcov's Bats/xtrace incompatibilities. The PowerShell gate requires Pester 3.4.
 
 Both gates read `COVERAGE_BASELINE` when CI supplies it and otherwise compare with `HEAD^`. They write machine-readable changed-line reports under `tests/coverage/out/` and fail when a changed production file has no coverage data.
+
+Transactional profile movement has dedicated hermetic suites. They use only
+synthetic JSON and disposable roots, with injected process probes and
+transports:
+
+```bash
+bash tests/run-bats.sh tests/move_safety.bats
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-pester.ps1 -Path MoveSafety.Tests.ps1
+```
+
+These suites never contact another machine or inspect a real credential store.

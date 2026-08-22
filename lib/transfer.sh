@@ -626,3 +626,473 @@ transfer_import_profile() {
   fi
   rm -rf "$staging"
 }
+
+# =============================================================================
+# Credential-bearing transactional movement
+# =============================================================================
+#
+# This protocol is deliberately separate from template/export/import above.
+# Those flows remain credential-free. A caller supplies both the candidate
+# transport and the process probe; the engine alone decides ownership,
+# staging, verification, activation and rollback. Callers must never use a
+# probe that cannot prove the relevant tool is closed.
+
+move_set_result() {
+  MOVE_RESULT_CODE="$1"
+  MOVE_RESULT_STATE="$2"
+  MOVE_RESULT_FORMAT="${3:-${MOVE_PROFILE_FORMAT:-unknown}}"
+}
+
+move_fail() {
+  move_set_result "$1" "$2" "${3:-${MOVE_PROFILE_FORMAT:-unknown}}"
+  return 1
+}
+
+move_safe_component() {
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]
+}
+
+move_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -- "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -- "$1" | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
+move_file_identity() {
+  stat -c '%d:%i' "$1" 2>/dev/null || stat -f '%d:%i' "$1" 2>/dev/null
+}
+
+move_expected_runtime_hardlink() {
+  local manifest="$1" profile="$2" rel="$3" source="$4" credential_rel state_subdir runtime_path
+  [ "$MOVE_PROFILE_FORMAT" = v2 ] && [ "$MOVE_PROFILE_MODE" = accountOverlay ] || return 1
+  case "$rel" in auth/*) credential_rel="${rel#auth/}" ;; *) return 1 ;; esac
+  move_relative_matches_declaration "$manifest" "$credential_rel" '.account.credentialFiles' || return 1
+  [ "$(file_nlink "$source")" -eq 2 ] || return 1
+  state_subdir="$(runtime_json_str '.normalState.runtimeSubdir' "$manifest")"
+  runtime_path="$profile/.runtime/${state_subdir:+$state_subdir/}$credential_rel"
+  [ -f "$runtime_path" ] && [ ! -L "$runtime_path" ] || return 1
+  [ "$(move_file_identity "$source")" = "$(move_file_identity "$runtime_path")" ]
+}
+
+# True when a relative entry is equal to, below, or a parent of a declared
+# adapter path. Parent directories are allowed only to contain declarations.
+move_relative_matches_declaration() {
+  local manifest="$1" rel="$2" jq_path="$3" declared
+  while IFS= read -r declared; do
+    [ -n "$declared" ] || continue
+    case "$rel" in
+      "$declared"|"$declared"/*) return 0 ;;
+    esac
+    case "$declared" in
+      "$rel"/*) return 0 ;;
+    esac
+  done < <(runtime_json_arr "$jq_path" "$manifest")
+  return 1
+}
+
+move_relative_allowed() {
+  local manifest="$1" rel="$2" format="$3" mode="$4" state_subdir declared_rel
+  case "$rel" in
+    *:*|*\\*|*$'\n'*|*$'\r'*) return 1 ;;
+  esac
+
+  if [ "$format" = v2 ]; then
+    case "$rel" in
+      .profile.json|.cli) return 0 ;;
+      auth) return 0 ;;
+      auth/*) move_relative_matches_declaration "$manifest" "${rel#auth/}" '.account.credentialFiles'; return ;;
+      .runtime|.runtime/*) return 0 ;;
+    esac
+    if [ "$mode" = isolated ]; then
+      [ "$rel" = .isolated ] && return 0
+      state_subdir="$(runtime_json_str '.normalState.runtimeSubdir' "$manifest")"
+      declared_rel="$rel"
+      if [ -n "$state_subdir" ]; then
+        [ "$rel" = "$state_subdir" ] && return 0
+        case "$rel" in
+          "$state_subdir"/*) declared_rel="${rel#"$state_subdir"/}" ;;
+          *) return 1 ;;
+        esac
+      fi
+      move_relative_matches_declaration "$manifest" "$declared_rel" '.normalState.sharedPaths' && return 0
+      move_relative_matches_declaration "$manifest" "$declared_rel" '.normalState.sessionPaths' && return 0
+      move_relative_matches_declaration "$manifest" "$declared_rel" '.normalState.unsafePaths' && return 0
+    fi
+    return 1
+  fi
+
+  [ "$rel" = .cli ] && return 0
+  move_relative_matches_declaration "$manifest" "$rel" '.account.credentialFiles' && return 0
+  move_relative_matches_declaration "$manifest" "$rel" '.normalState.sharedPaths' && return 0
+  move_relative_matches_declaration "$manifest" "$rel" '.normalState.sessionPaths' && return 0
+  move_relative_matches_declaration "$manifest" "$rel" '.normalState.unsafePaths' && return 0
+  return 1
+}
+
+# Detect and validate profile structure without exposing JSON values. Runtime
+# is accepted only for schema v2 and is excluded from transport: it is rebuilt
+# from the adapter at the destination and never becomes a credential source.
+move_validate_profile() {
+  local manifest="$1" profile="$2" adapter_id mechanism metadata mode relative credential entry rel
+  MOVE_PROFILE_FORMAT=unknown
+  MOVE_PROFILE_MODE=unknown
+
+  [ -d "$profile" ] && [ ! -L "$profile" ] || return 20
+  adapter_id="$(runtime_json_str '.id' "$manifest")"
+  mechanism="$(runtime_json_str '.account.mechanism' "$manifest")"
+  [ -n "$adapter_id" ] && [ "$mechanism" = fileOverlay ] || return 21
+
+  metadata="$profile/.profile.json"
+  if [ -e "$metadata" ] || [ -L "$metadata" ]; then
+    MOVE_PROFILE_FORMAT=v2
+    [ -f "$metadata" ] && [ ! -L "$metadata" ] || return 22
+    jq -e --arg adapter "$adapter_id" '
+      type == "object" and .schemaVersion == 2 and
+      .adapterId == $adapter and (.profileId | type == "string" and length > 0) and
+      (.mode == "accountOverlay" or .mode == "isolated")
+    ' "$metadata" >/dev/null 2>&1 || return 22
+    mode="$(runtime_json_str '.mode' "$metadata")"
+    MOVE_PROFILE_MODE="$mode"
+    while IFS= read -r relative; do
+      [ -n "$relative" ] || continue
+      credential="$profile/auth/$relative"
+      [ -f "$credential" ] && [ ! -L "$credential" ] || return 23
+      if [ "$(basename "$relative")" = auth.json ]; then
+        jq -e 'type == "object"' "$credential" >/dev/null 2>&1 || return 24
+      fi
+    done < <(runtime_json_arr '.account.credentialFiles' "$manifest")
+  else
+    MOVE_PROFILE_FORMAT=legacy
+    MOVE_PROFILE_MODE=legacy
+    credential="$profile/auth.json"
+    [ -f "$credential" ] && [ ! -L "$credential" ] || return 23
+    jq -e 'type == "object"' "$credential" >/dev/null 2>&1 || return 24
+  fi
+
+  while IFS= read -r -d '' entry; do
+    rel="${entry#"$profile"/}"
+    # Schema-v2 runtime is disposable and never crosses the transport. Reject
+    # a replaced runtime root, then ignore its derived contents.
+    if [ "$MOVE_PROFILE_FORMAT" = v2 ]; then
+      case "$rel" in
+        .runtime)
+          [ -d "$entry" ] && [ ! -L "$entry" ] || return 25
+          continue
+          ;;
+        .runtime/*) continue ;;
+      esac
+    fi
+    move_relative_allowed "$manifest" "$rel" "$MOVE_PROFILE_FORMAT" "$MOVE_PROFILE_MODE" || return 26
+    [ ! -L "$entry" ] || return 25
+    if [ -f "$entry" ]; then
+      if [ "$(file_nlink "$entry")" -gt 1 ]; then
+        move_expected_runtime_hardlink "$manifest" "$profile" "$rel" "$entry" || return 27
+      fi
+    elif [ ! -d "$entry" ]; then
+      return 28
+    fi
+  done < <(find "$profile" -mindepth 1 -print0 2>/dev/null)
+  return 0
+}
+
+move_validation_failure() {
+  case "$1" in
+    20) move_fail source_missing preflight_rejected ;;
+    21) move_fail unsupported_mechanism preflight_rejected ;;
+    22) move_fail invalid_metadata preflight_rejected ;;
+    23) move_fail missing_credential preflight_rejected ;;
+    24) move_fail invalid_auth_json preflight_rejected ;;
+    25) move_fail unsafe_link preflight_rejected ;;
+    26) move_fail unknown_content preflight_rejected ;;
+    27) move_fail unsafe_hardlink preflight_rejected ;;
+    *)  move_fail unsafe_entry preflight_rejected ;;
+  esac
+}
+
+# Build a deterministic structure/size/hash inventory, excluding disposable
+# schema-v2 runtime. The inventory contains no file contents.
+move_write_inventory() {
+  local root="$1" output="$2" entry rel digest size
+  : > "$output"
+  while IFS= read -r -d '' entry; do
+    rel="${entry#"$root"/}"
+    case "$rel" in .runtime|.runtime/*) continue ;; esac
+    if [ -d "$entry" ]; then
+      printf 'd\t%s\n' "$rel" >> "$output"
+    elif [ -f "$entry" ]; then
+      digest="$(move_sha256 "$entry")" || return 1
+      size="$(file_size "$entry")"
+      printf 'f\t%s\t%s\t%s\n' "$rel" "$size" "$digest" >> "$output"
+    else
+      return 1
+    fi
+  done < <(find "$root" -mindepth 1 -print0 2>/dev/null)
+  LC_ALL=C sort "$output" -o "$output"
+}
+
+move_trees_equal() {
+  local left="$1" right="$2" left_inventory right_inventory result=1
+  left_inventory="$(mktemp "${TMPDIR:-/tmp}/nini-move-left.XXXXXX")" || return 1
+  right_inventory="$(mktemp "${TMPDIR:-/tmp}/nini-move-right.XXXXXX")" || {
+    rm -f "$left_inventory"
+    return 1
+  }
+  if move_write_inventory "$left" "$left_inventory" &&
+     move_write_inventory "$right" "$right_inventory" &&
+     cmp -s "$left_inventory" "$right_inventory"; then
+    result=0
+  fi
+  rm -f "$left_inventory" "$right_inventory"
+  return "$result"
+}
+
+# Default synthetic/local transport. Remote transports may replace this
+# callback, but must only populate the already-reserved staging directory.
+move_copy_candidate_local() {
+  local source="$1" staging="$2" item name
+  (
+    shopt -s dotglob nullglob
+    for item in "$source"/*; do
+      name="$(basename "$item")"
+      [ "$name" = .runtime ] && continue
+      cp -pR -- "$item" "$staging/" || exit 1
+    done
+  )
+}
+
+move_activate_candidate() {
+  mv -- "$1" "$2"
+}
+
+move_deactivate_source() {
+  mv -- "$1" "$2"
+}
+
+move_quarantine_destination() {
+  local destination="$1" failed="$2"
+  [ ! -e "$failed" ] && [ ! -L "$failed" ] || return 1
+  mkdir -p "$(dirname "$failed")" || return 1
+  mv -- "$destination" "$failed"
+}
+
+move_check_probe() {
+  local probe="$1" path="$2" rc
+  if "$probe" "$path"; then
+    return 0
+  else
+    rc=$?
+  fi
+  [ "$rc" -eq 1 ] && return 1
+  return 2
+}
+
+move_restore_after_failure() {
+  local source="$1" backup="$2" destination="$3" failed="$4" code="$5"
+  if [ -e "$destination" ] || [ -L "$destination" ]; then
+    if ! move_quarantine_destination "$destination" "$failed"; then
+      move_fail rollback_failed ownership_indeterminate
+      return 1
+    fi
+  fi
+  if mv -- "$backup" "$source"; then
+    move_fail "$code" source_restored
+    return 1
+  fi
+  move_fail rollback_failed ownership_indeterminate
+}
+
+# Transactionally move one profile between two local ownership roots. The
+# caller-provided process probe returns 0 when busy, 1 when proven idle, and
+# any other status when it cannot prove either state. The transport callback
+# copies source into the pre-created staging directory without activating it.
+move_profile_transaction() {
+  local manifest="$1" source_root="$2" destination_root="$3" profile_name="$4"
+  local operation_id="$5" process_probe="$6" transport_copy="$7" dry_run="${8:-false}"
+  local source destination staging backup failed lock rc
+
+  MOVE_PROFILE_FORMAT=unknown
+  MOVE_PROFILE_MODE=unknown
+  move_set_result uninitialized preflight unknown
+
+  move_safe_component "$profile_name" && move_safe_component "$operation_id" || {
+    move_fail invalid_identifier preflight_rejected unknown
+    return 1
+  }
+  declare -F "$process_probe" >/dev/null 2>&1 && declare -F "$transport_copy" >/dev/null 2>&1 || {
+    move_fail invalid_callback preflight_rejected unknown
+    return 1
+  }
+  [ -d "$source_root" ] && [ ! -L "$source_root" ] &&
+    [ -d "$destination_root" ] && [ ! -L "$destination_root" ] || {
+      move_fail unsafe_root preflight_rejected unknown
+      return 1
+    }
+  [ "$(transfer_canonical "$source_root")" != "$(transfer_canonical "$destination_root")" ] || {
+    move_fail unsafe_root preflight_rejected unknown
+    return 1
+  }
+  source="$source_root/$profile_name"
+  destination="$destination_root/$profile_name"
+  staging="$destination_root/.staging/$profile_name.$operation_id"
+  backup="$source_root/.inactive/$profile_name.$operation_id"
+  failed="$destination_root/.failed/$profile_name.$operation_id"
+  lock="$source_root/.move-lock.$profile_name"
+
+  local transaction_parent
+  for transaction_parent in "$(dirname "$staging")" "$(dirname "$backup")" "$(dirname "$failed")"; do
+    if [ -e "$transaction_parent" ] || [ -L "$transaction_parent" ]; then
+      [ -d "$transaction_parent" ] && [ ! -L "$transaction_parent" ] || {
+        move_fail unsafe_root preflight_rejected unknown
+        return 1
+      }
+    fi
+  done
+
+  if [ -e "$destination" ] || [ -L "$destination" ]; then
+    move_fail destination_active preflight_rejected unknown
+    return 1
+  fi
+  if move_validate_profile "$manifest" "$source"; then
+    :
+  else
+    rc=$?
+    move_validation_failure "$rc"
+    return 1
+  fi
+  if [ -e "$staging" ] || [ -L "$staging" ]; then
+    move_fail staging_conflict preflight_rejected
+    return 1
+  fi
+  if [ -e "$backup" ] || [ -L "$backup" ]; then
+    move_fail backup_conflict preflight_rejected
+    return 1
+  fi
+  if [ -e "$failed" ] || [ -L "$failed" ]; then
+    move_fail failed_artifact_conflict preflight_rejected
+    return 1
+  fi
+  if [ -e "$lock" ] || [ -L "$lock" ]; then
+    move_fail transaction_locked preflight_rejected
+    return 1
+  fi
+
+  if move_check_probe "$process_probe" "$source"; then
+    move_fail process_active preflight_rejected
+    return 1
+  else
+    rc=$?
+    [ "$rc" -eq 1 ] || { move_fail process_probe_failed preflight_rejected; return 1; }
+  fi
+  if move_check_probe "$process_probe" "$destination"; then
+    move_fail process_active preflight_rejected
+    return 1
+  else
+    rc=$?
+    [ "$rc" -eq 1 ] || { move_fail process_probe_failed preflight_rejected; return 1; }
+  fi
+
+  if [ "$dry_run" = true ]; then
+    move_set_result dry_run validated
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$staging")" || { move_fail staging_create_failed source_active; return 1; }
+  (umask 077; mkdir "$staging") || { move_fail staging_create_failed source_active; return 1; }
+  if ! "$transport_copy" "$source" "$staging"; then
+    move_fail transport_failed staging_preserved
+    return 1
+  fi
+  if ! move_trees_equal "$source" "$staging"; then
+    move_fail integrity_mismatch staging_rejected
+    return 1
+  fi
+
+  # Serialize the ownership swap. Staging is allowed before the lock, but the
+  # source, destination and hashes are checked again while it is held.
+  if ! mkdir "$lock" 2>/dev/null; then
+    move_fail transaction_locked staging_preserved
+    return 1
+  fi
+  if [ -e "$destination" ] || [ -L "$destination" ]; then
+    rmdir "$lock" 2>/dev/null || true
+    move_fail destination_appeared staging_preserved
+    return 1
+  fi
+  if ! move_validate_profile "$manifest" "$source" ||
+     ! move_trees_equal "$source" "$staging"; then
+    rmdir "$lock" 2>/dev/null || true
+    move_fail integrity_mismatch staging_rejected
+    return 1
+  fi
+
+  if move_check_probe "$process_probe" "$source"; then
+    rmdir "$lock" 2>/dev/null || true
+    move_fail process_appeared staging_preserved
+    return 1
+  else
+    rc=$?
+    [ "$rc" -eq 1 ] || { rmdir "$lock" 2>/dev/null || true; move_fail process_probe_failed staging_preserved; return 1; }
+  fi
+  if move_check_probe "$process_probe" "$destination"; then
+    rmdir "$lock" 2>/dev/null || true
+    move_fail process_appeared staging_preserved
+    return 1
+  else
+    rc=$?
+    [ "$rc" -eq 1 ] || { rmdir "$lock" 2>/dev/null || true; move_fail process_probe_failed staging_preserved; return 1; }
+  fi
+
+  mkdir -p "$(dirname "$backup")" || { rmdir "$lock" 2>/dev/null || true; move_fail backup_prepare_failed source_active; return 1; }
+  if ! move_deactivate_source "$source" "$backup"; then
+    rmdir "$lock" 2>/dev/null || true
+    move_fail source_deactivation_failed source_active
+    return 1
+  fi
+  if ! move_activate_candidate "$staging" "$destination"; then
+    move_restore_after_failure "$source" "$backup" "$destination" "$failed" activation_failed_rolled_back
+    rmdir "$lock" 2>/dev/null || true
+    return 1
+  fi
+
+  if move_validate_profile "$manifest" "$destination"; then
+    rc=0
+  else
+    rc=$?
+  fi
+  if [ "$rc" -ne 0 ] || ! move_trees_equal "$backup" "$destination"; then
+    move_restore_after_failure "$source" "$backup" "$destination" "$failed" destination_invalid_rolled_back
+    rmdir "$lock" 2>/dev/null || true
+    return 1
+  fi
+
+  if [ "$MOVE_PROFILE_FORMAT" = v2 ] && [ "$MOVE_PROFILE_MODE" = accountOverlay ]; then
+    if ! runtime_build_overlay "$manifest" "$destination" >/dev/null; then
+      move_restore_after_failure "$source" "$backup" "$destination" "$failed" destination_runtime_failed_rolled_back
+      rmdir "$lock" 2>/dev/null || true
+      return 1
+    fi
+    if ! runtime_overlay_is_current "$manifest" "$destination/.runtime"; then
+      move_restore_after_failure "$source" "$backup" "$destination" "$failed" destination_runtime_failed_rolled_back
+      rmdir "$lock" 2>/dev/null || true
+      return 1
+    fi
+  fi
+
+  # Final byte/hash comparison after runtime reconstruction. Runtime is
+  # excluded, so it cannot mask a changed canonical credential or metadata.
+  if ! move_trees_equal "$backup" "$destination"; then
+    move_restore_after_failure "$source" "$backup" "$destination" "$failed" destination_invalid_rolled_back
+    rmdir "$lock" 2>/dev/null || true
+    return 1
+  fi
+  if ! rmdir "$lock" 2>/dev/null; then
+    move_set_result lock_release_failed destination_active
+    return 1
+  fi
+  move_set_result ok destination_active
+  return 0
+}

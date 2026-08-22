@@ -6,9 +6,9 @@
   Pester 3.4's -CodeCoverage only counts commands executed in its own
   runspace, so the suite is built around tests/ModuleFunctions.Tests.ps1,
   which imports the three modules and drives their functions in-process.
-  tests/OverlayState.Tests.ps1 runs alongside as the end-to-end check that
-  the launcher still wires the same modules correctly from child processes
-  (its child-process execution contributes no coverage by itself).
+  Movement, migration, transfer and overlay suites run alongside so each
+  security boundary executes in-process; child launcher processes still do
+  not contribute coverage by themselves.
 
   Prints per-module and total command coverage, writes JSON and Cobertura
   reports under the system temporary directory by default, and enforces executable-line coverage for
@@ -67,6 +67,7 @@ $testFiles = @(
     (Join-Path $testsRoot 'ModuleFunctions.Tests.ps1'),
     (Join-Path $testsRoot 'Migration.Tests.ps1'),
     (Join-Path $testsRoot 'TransferSafety.Tests.ps1'),
+    (Join-Path $testsRoot 'MoveSafety.Tests.ps1'),
     (Join-Path $testsRoot 'OsUser.Tests.ps1'),
     (Join-Path $testsRoot 'OverlayState.Tests.ps1')
 )
