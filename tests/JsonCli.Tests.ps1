@@ -70,7 +70,9 @@ Describe 'stable JSON CLI v1' {
         Assert-NoPrivateJsonData $result.StdOut $scratch
 
         $result = Invoke-Launcher -Scratch $scratch -Arguments @('--json', 'status', 'codex')
-        $result.ExitCode | Should Be 0
+        if ($result.ExitCode -ne 0) {
+            throw "status JSON failed with exit $($result.ExitCode); stdout=$($result.StdOut.Trim()); stderr=$($result.StdErr.Trim())"
+        }
         $json = Convert-LauncherJson $result
         Assert-JsonEnvelope $json 'status'
         $json.data.count | Should Be 1
