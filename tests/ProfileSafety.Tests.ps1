@@ -623,7 +623,7 @@ Describe 'PowerShell no-reparse profile cleanup and clone behavior' {
 
             $result.TimedOut | Should Be $false
             $result.ExitCode | Should Be 0
-            $result.Output | Should Match 'nini-agents uninstalled'
+            $result.Output | Should Match 'Nini Agents uninstalled'
             (Test-Path -LiteralPath $profilesRoot) | Should Be $false
             (Get-Content -LiteralPath (Join-Path $outsideRoot 'keep.txt') -Raw).Trim() | Should Be 'outside-profile-data'
         } finally {
@@ -658,7 +658,7 @@ Describe 'PowerShell no-reparse profile cleanup and clone behavior' {
 
             $result.TimedOut | Should Be $false
             $result.ExitCode | Should Be 0
-            $result.Output | Should Match 'nini-agents uninstalled'
+            $result.Output | Should Match 'Nini Agents uninstalled'
             (Test-Path -LiteralPath $installDir) | Should Be $false
             (Get-Content -LiteralPath (Join-Path $outsideRoot 'keep.txt') -Raw).Trim() | Should Be 'outside-install-data'
         } finally {
