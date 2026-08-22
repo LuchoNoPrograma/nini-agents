@@ -57,20 +57,22 @@ el checkout vigente. Al inicio del 2026-08-22:
 
 Al corte documental del 2026-08-22:
 
-- El checkout activo es `main`, alineado con `origin/main` en `6704860`.
+- El checkout activo es `main`, alineado con `origin/main`; el tip funcional
+  anterior a este cierre documental es `73c9d50`.
 - `main` contiene el motor Nini Agents renombrado y conserva los shims de
-  compatibilidad; las Etapas A y B estan cerradas con su evidencia en la
-  bitacora. Las Etapas C y D tienen cambios implementados y validados localmente
-  en Bash, con comprobacion PowerShell y gates de cobertura pendientes en un
-  entorno que disponga de sus dependencias.
+  compatibilidad. Las Etapas A, B, C y D estan cerradas con evidencia local y
+  CI remoto efimero. El tramo aprobado de la Etapa E contiene el protocolo
+  transaccional interno y sus pruebas, pero no expone todavia comando publico,
+  transporte SSH ni respuesta JSON estable.
 - `multi-cli-base` y `origin/multi-cli-base` conservan el upstream puro
   `6efb0d2`.
 - `legacy-gui` y `origin/legacy-gui` conservan el snapshot Flutter `7426e98`.
 - `origin` apunta al fork publico `LuchoNoPrograma/nini-agents` y
   `multi-cli-upstream` apunta a `Spielewoy/multi-cli`.
-- El movimiento seguro heredado de Codexporter, la CLI JSON estable y las
-  migraciones consumidoras siguen pendientes; no deben presentarse como
-  funcionalidades implementadas.
+- El nucleo interno del movimiento seguro inspirado por el contrato de
+  Codexporter esta implementado en Bash y PowerShell. La integracion remota, la
+  CLI JSON estable y las migraciones consumidoras siguen pendientes; no deben
+  presentarse como funcionalidades implementadas.
 - Las referencias locales y el trabajo registrado por este plan no contienen
   un tag ni una release de Nini Agents; el estado remoto debe verificarse otra
   vez antes de cualquier publicacion.
@@ -748,15 +750,15 @@ Pendientes y siguiente gate:
 
 ### 2026-08-22 — Etapa C: descubrimiento local y reglas de Codex
 
-- Estado: implementado y validado localmente bajo G2; cierre multiplataforma
-  pendiente de ejecutar Pester en Windows.
+- Estado: terminado bajo G2; validacion local y CI remoto completos.
 - Objetivo: restaurar el descubrimiento de Codex instalado en
   `~/.local/bin/codex` y compartir el directorio de reglas de usuario como
   estado normal declarado por el adapter.
-- Alcance aprobado: adapter de Codex, guia, matriz, pruebas contractuales Bash y
-  PowerShell y esta bitacora. Quedaron excluidos launchers, modulos, schema,
-  Hyper, Codexporter, CLI JSON, SSH, instalacion, perfiles reales, commit, push
-  y release.
+- Alcance funcional inicial: adapter de Codex, guia, matriz, pruebas
+  contractuales Bash y PowerShell y esta bitacora. Quedaron excluidos
+  launchers, modulos, schema, Hyper, Codexporter, CLI JSON, SSH, instalacion,
+  perfiles reales y release. Una autorizacion posterior incluyo commit, push y
+  CI para cerrar las Etapas C y D juntas.
 - Antes: los candidatos macOS/Linux omitian `~/.local/bin/codex` y `rules/` no
   formaba parte de `normalState.sharedPaths`.
 - Despues: macOS y Linux declaran el candidato local; `rules/` es estado normal
@@ -768,29 +770,33 @@ Pendientes y siguiente gate:
   transitoria en esa primera ejecucion y pasaron al repetir la suite completa.
 - Validacion posterior: 37 pruebas Bash focalizadas correctas en
   `runtime_paths.bats`, `adapter_schema.bats` y `overlay_state.bats`; 17 adapters
-  validados; documentacion validada; `git diff --check` correcto.
+  validados; documentacion validada; `git diff --check` correcto. El CI
+  `32595087549` comprobo el contrato PowerShell, PSScriptAnalyzer, Bats en
+  Ubuntu y macOS, cobertura y smoke tests de instalacion sobre runners
+  efimeros.
 - Efecto sobre credenciales y datos: ninguno. Todas las operaciones mutables
   usaron homes sinteticos temporales; no se leyeron perfiles reales ni se
   ejecuto logout, revocacion, migracion o instalacion.
-- Plataformas no verificadas localmente: Windows PowerShell y macOS. Se agrego
-  cobertura Pester para el contrato y el enlace de runtime, pero este host no
-  dispone de PowerShell para ejecutarla. No se probo un binario Codex real.
-- Siguiente gate: ejecutar Pester/CI en Windows antes de cerrar completamente la
-  Etapa C; cualquier commit, push o ejecucion remota requiere instruccion
-  expresa.
+- Plataformas no verificadas localmente: Windows PowerShell y macOS. Se
+  verificaron en GitHub Actions, no con cuentas ni herramientas reales. No se
+  probo un binario Codex real.
+- Publicacion Git: la secuencia compartida con la Etapa D quedo en `3ebfef7`,
+  `4c40ae3` y `dd03bad`, publicada en `origin/main`; no se creo tag ni release.
+- Siguiente gate al cierre: la Etapa D quedo cerrada en el mismo run y el tramo
+  interno aprobado de la Etapa E requirio su propio alcance G2.
 
 ### 2026-08-22 — Etapa D: cierre focalizado de brechas del nucleo
 
-- Estado: implementado y validado localmente en Bash bajo G2; cierre de
-  cobertura y comprobacion PowerShell pendientes.
+- Estado: terminado bajo G2; validacion local y CI remoto completos.
 - Objetivo: corregir brechas demostradas en el contrato declarativo, la
   reconstruccion y auditoria del runtime y el ciclo de vida seguro de perfiles,
   manteniendo paridad Bash/PowerShell.
-- Alcance aprobado: adapter de Command Code; validadores y runtime Bash y
-  PowerShell; `doctor --deep`; borrado process-secret; ayuda/completion y
-  compatibilidad `--shared`; documentacion y pruebas sinteticas. Se excluyeron
-  Hyper, Codexporter, movimiento/SSH, CLI JSON, instalacion, perfiles reales,
-  commit, push, CI y release.
+- Alcance funcional inicial: adapter de Command Code; validadores y runtime
+  Bash y PowerShell; `doctor --deep`; borrado process-secret; ayuda/completion
+  y compatibilidad `--shared`; documentacion y pruebas sinteticas. Se
+  excluyeron Hyper, Codexporter, movimiento/SSH, CLI JSON, instalacion, perfiles
+  reales y release. Una autorizacion posterior incluyo commit, push y CI para
+  cerrar las Etapas C y D juntas.
 - Antes: Command Code tomaba el home completo como shared root aunque su estado
   documentado vive bajo `.commandcode`; un runtime existente podia reutilizar
   enlaces hacia una raiz antigua; shared/session podian solaparse; `filePaths`
@@ -817,10 +823,12 @@ Pendientes y siguiente gate:
   228 casos sin fallos (los casos exclusivos de otras plataformas quedaron
   omitidos por el propio harness); sintaxis Bash correcta; 17 adapters y toda
   la documentacion validados; `git diff --check` correcto.
-- Gates no ejecutados: Pester, validacion PowerShell y cobertura PowerShell no
-  se ejecutaron porque el host no tiene `powershell` ni `pwsh`. El gate de
-  cobertura Bash no se ejecuto porque falta `bashcov`; no se instalo ninguna
-  dependencia por estar fuera del alcance aprobado.
+- Validacion remota: el workflow `32595087549` termino verde con 11 jobs. Bats
+  ejecuto 228 casos en Ubuntu y macOS; Pester ejecuto 359 casos sin fallos; la
+  cobertura instrumentada ejecuto 240 casos y obtuvo 100% en
+  `MultiCli.Transfer.psm1`, 99.52% total y cero misses inesperados. Tambien
+  pasaron ShellCheck, PSScriptAnalyzer, Actionlint, metadata de release y smoke
+  tests efimeros de instalacion en Linux, macOS y Windows.
 - Efecto sobre credenciales y datos: no se leyeron secretos ni perfiles reales;
   no hubo logout, revocacion, migracion, instalacion, borrado real ni acceso a
   equipos remotos. El cambio de `delete` aumenta recuperabilidad al preservar
@@ -828,7 +836,83 @@ Pendientes y siguiente gate:
 - Compatibilidad: se conservan Bash 3.2, PowerShell 5.1, `MULTICLI_HOME`,
   `~/MultiCliProfiles`, el shim `multi-cli` y los comandos legacy. No se declara
   verificacion real en Windows, macOS, Command Code ni Codex.
-- Siguiente gate: ejecutar Pester y ambos gates de cobertura en un entorno
-  equipado; revisar el diff y autorizar por separado cualquier commit, push o
-  CI. La Etapa E requiere un nuevo alcance G2 antes de implementar movimiento
-  seguro.
+- Publicacion Git: `3ebfef7`, `4c40ae3` y `dd03bad` estan en `origin/main`; no
+  se creo tag ni release.
+- Siguiente gate al cierre: el movimiento seguro de la Etapa E requirio un
+  alcance G2 independiente.
+
+### 2026-08-22 — Etapa E: motor transaccional interno de movimiento
+
+- Estado: tramo interno aprobado terminado bajo G2; la interfaz publica, el
+  transporte remoto y la CLI JSON permanecen pendientes.
+- Objetivo: incorporar al motor el contrato valioso de Codexporter —staging,
+  integridad, procesos cerrados, propietario activo unico, activacion atomica,
+  backup y rollback— sin logout, revocacion, regeneracion ni consulta a
+  OpenAI.
+- Alcance aprobado: implementaciones equivalentes Bash y PowerShell;
+  deteccion legacy y schema v2; validacion JSON sin mostrar valores; hashes
+  SHA-256; lock atomico por perfil; transporte y process probe inyectados;
+  reconstruccion de `.runtime`; inventario de estados y codigos para la futura
+  CLI JSON; documentacion, fixtures sinteticos, commit, push y CI.
+- Antes: `lib/transfer.sh` y `lib/MultiCli.Transfer.psm1` implementaban
+  templates, export e import sin credenciales, pero no existia un motor
+  separado que pudiera transferir ownership de credenciales.
+- Despues: `move_profile_transaction` e `Invoke-MultiCliProfileMove` ejecutan el
+  mismo protocolo interno. Legacy reconoce `<perfil>/auth.json`; schema v2
+  reconoce `.profile.json` y las credenciales declaradas bajo `auth/`. El
+  runtime se excluye del transporte y se reconstruye desde el adapter despues
+  de activar el destino.
+- Seguridad: el motor falla cerrado ante identifiers inseguros, roots
+  enlazados, traversal implicito, contenido desconocido, enlaces, hardlinks no
+  declarados, credenciales faltantes o distintas, procesos activos o
+  indeterminados, artefactos preexistentes y carreras de ownership. Un destino
+  parcial se mueve a `.failed/`; el origen verificado permanece en
+  `.inactive/`; ningun artefacto recuperable se poda automaticamente.
+- Ownership y rollback: la copia viaja primero a `.staging/`, se compara por
+  estructura, tamano y hash, se revalida bajo `.move-lock.<perfil>`, el origen
+  se desactiva antes de activar destino y cualquier fallo tardio intenta
+  cuarentena y restauracion. Si no puede probarse la restauracion, devuelve
+  `ownership_indeterminate` y conserva todos los artefactos.
+- Separacion de contratos: `export`, `import`, templates y `continue` siguen
+  libres de credenciales. No se agrego un comando `move` a los entrypoints ni
+  se congelo el envelope JSON.
+- Archivos principales: `lib/transfer.sh`, `lib/MultiCli.Transfer.psm1`,
+  `tests/move_safety.bats`, `tests/MoveSafety.Tests.ps1`,
+  `tests/coverage/Invoke-ModuleCoverage.ps1`, `docs/move-protocol.md` y
+  `docs/testing.md`.
+- Caracterizacion y correcciones: las pruebas detectaron y corrigieron una
+  colision con la variable automatica `$HOME`, la reduccion escalar de targets
+  de hardlink en PowerShell 5.1 y una expresion regular invalida al normalizar
+  `runtimeSubdir`. El gate de cobertura se completo con escenarios reales e
+  inyecciones focalizadas, sin agregar excepciones.
+- Validacion local: 18/18 pruebas focalizadas Bash; suite Bash completa de
+  246 casos; 17 adapters validados; documentacion validada; sintaxis Bash y
+  `git diff --check` correctos. Todas las pruebas mutables usaron scratch
+  sintetico bajo directorios temporales.
+- Validacion remota: el workflow `32599572338` termino verde con sus 11 jobs.
+  Bats ejecuto 246/246 en Ubuntu y macOS; Pester ejecuto 385/385 en Windows; la
+  cobertura instrumentada ejecuto 266 casos, alcanzo 948/948 comandos (100%)
+  en `MultiCli.Transfer.psm1`, 99.61% total y cero misses inesperados. Bash
+  obtuvo 76.79% global y paso el gate de lineas cambiadas; tambien pasaron
+  ShellCheck, PSScriptAnalyzer, Actionlint, metadata y smoke tests efimeros en
+  los tres sistemas.
+- Commits publicados: `f0b83f0`, `8a3dba5`, `1fc2811`, `02e6024`, `2e09b41`,
+  `7784d94`, `858d57b` y `73c9d50`, todos en `origin/main`. No se creo tag ni
+  release.
+- Efecto sobre credenciales y datos: ninguno real. No se leyeron ni
+  modificaron perfiles del operador, `MULTICLI_HOME`, `~/.codex`, keyrings,
+  instalaciones activas ni otros equipos; no hubo logout, revoke, auth clear,
+  migracion real ni acceso a OpenAI.
+- Plataformas verificadas: Linux local con fixtures; Linux, macOS y Windows en
+  runners efimeros con fixtures. No se verifico una herramienta, cuenta,
+  credencial, instalacion o maquina remota real.
+- Exclusiones confirmadas: SSH y transporte de produccion, comando publico,
+  CLI JSON estable, instalacion activa, release, modificacion de MultiCLI AI o
+  Codexporter y migracion de consumidores.
+- Recuperacion: una operacion exitosa conserva el origen como backup inactivo;
+  una operacion fallida no poda staging, backup ni cuarentena. Los cambios del
+  repositorio no fueron instalados sobre la copia activa.
+- Siguiente gate: Etapa F debe definir y congelar la CLI JSON y decidir la
+  interfaz publica de movimiento. SSH/equipos reales, auditoria final y la
+  migracion simultanea de MultiCLI AI y Codexporter conservan autorizaciones
+  separadas.
