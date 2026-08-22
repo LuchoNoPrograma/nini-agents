@@ -596,19 +596,6 @@ Describe 'transactional profile movement' {
             (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter -Probe $indeterminateAfterStaging).Code | Should Be 'process_probe_failed'
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
 
-        $scratch = New-MoveScratch
-        try {
-            New-V2MoveProfile -Scratch $scratch | Out-Null
-            $script:BackupRaceCalls = 0
-            $script:BackupRacePath = Join-Path $scratch.Source '.inactive'
-            $backupRaceProbe = {
-                param($Path)
-                $script:BackupRaceCalls++
-                if ($script:BackupRaceCalls -eq 4) { 'collision' | Set-Content -LiteralPath $script:BackupRacePath -Encoding ASCII }
-                return $false
-            }
-            (Invoke-FixtureMove -Scratch $scratch -Adapter $adapter -Probe $backupRaceProbe).Code | Should Be 'backup_prepare_failed'
-        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
     It 'preserves recoverable artifacts across every late rollback failure' {
@@ -693,5 +680,26 @@ Describe 'transactional profile movement' {
             $global:NiniMoveTreeComparisons = 100
             Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
         }
+    }
+
+    It 'keeps the source active when the backup directory cannot be prepared' {
+        $scratch = New-MoveScratch
+        try {
+            $adapter = New-MoveAdapter
+            New-V2MoveProfile -Scratch $scratch | Out-Null
+            $global:NiniMoveBackupFailurePath = Join-Path $scratch.Source '.inactive'
+            Mock New-Item -ModuleName MultiCli.Transfer {
+                param($ItemType, $Force, $Path, $ErrorAction)
+                if ($Path -eq $global:NiniMoveBackupFailurePath) { throw 'synthetic backup preparation failure' }
+                if ($ErrorAction) {
+                    Microsoft.PowerShell.Management\New-Item -ItemType $ItemType -Path $Path -Force:$Force -ErrorAction $ErrorAction
+                } else {
+                    Microsoft.PowerShell.Management\New-Item -ItemType $ItemType -Path $Path -Force:$Force
+                }
+            }
+            $result = Invoke-FixtureMove -Scratch $scratch -Adapter $adapter
+            $result.Code | Should Be 'backup_prepare_failed'
+            $result.State | Should Be 'source_active'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
