@@ -5,7 +5,7 @@ $script:JsonModule = Join-Path $script:RepoRoot 'lib\MultiCli.Json.psm1'
 
 function Convert-LauncherJson {
     param($Result)
-    $Result.StdErr.Trim() | Should Be ''
+    if ($Result.StdErr.Trim()) { throw "JSON launcher wrote to stderr: $($Result.StdErr.Trim())" }
     return ($Result.StdOut | ConvertFrom-Json)
 }
 
@@ -14,8 +14,8 @@ function Assert-JsonEnvelope {
     $Envelope.schemaVersion | Should Be 1
     $Envelope.command | Should Be $Command
     ($Envelope.ok -is [bool]) | Should Be $true
-    $Envelope.PSObject.Properties.Name | Should Contain 'data'
-    $Envelope.PSObject.Properties.Name | Should Contain 'error'
+    ($Envelope.PSObject.Properties.Name -contains 'data') | Should Be $true
+    ($Envelope.PSObject.Properties.Name -contains 'error') | Should Be $true
 }
 
 function Assert-NoPrivateJsonData {
@@ -157,7 +157,7 @@ Describe 'transactional movement JSON serialization' {
         Assert-JsonEnvelope $without 'fixture'
         $without.ok | Should Be $false
         $without.error.code | Should Be 'invalid_arguments'
-        $without.error.PSObject.Properties.Name | Should Not Contain 'details'
+        ($without.error.PSObject.Properties.Name -contains 'details') | Should Be $false
 
         $with = (ConvertTo-NiniJsonEnvelope -Command 'fixture' -Succeeded $false -ErrorCode 'conflict' `
             -ErrorMessage 'Conflict.' -ErrorDetails ([ordered]@{ state = 'preserved' })) | ConvertFrom-Json

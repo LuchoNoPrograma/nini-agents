@@ -63,11 +63,13 @@ assert_no_private_data() {
 }
 
 @test "tools JSON reports public adapter capabilities without binary paths" {
+  local expected_platform=linux
+  [ "$(uname -s)" = Darwin ] && expected_platform=macos
   run multicli tools --json
   [ "$status" -eq 0 ]
   assert_envelope tools
-  printf '%s' "$output" | jq -e '
-    .data.platform == "linux" and .data.count == 2 and
+  printf '%s' "$output" | jq -e --arg platform "$expected_platform" '
+    .data.platform == $platform and .data.count == 2 and
     (.data.tools | all(has("id") and has("kind") and has("strategy") and has("supportLevel") and has("installed"))) and
     (.data.tools | all((.installed | type) == "boolean"))
   ' >/dev/null
@@ -75,11 +77,13 @@ assert_no_private_data() {
 }
 
 @test "doctor JSON contains verdicts but no storage or binary paths" {
+  local expected_platform=linux
+  [ "$(uname -s)" = Darwin ] && expected_platform=macos
   run multicli doctor --json
   [ "$status" -eq 0 ]
   assert_envelope doctor
-  printf '%s' "$output" | jq -e '
-    .ok and .data.platform == "linux" and
+  printf '%s' "$output" | jq -e --arg platform "$expected_platform" '
+    .ok and .data.platform == $platform and
     (.data.storage.exists | type) == "boolean" and
     (.data.storage.writable | type) == "boolean" and
     (.data.tools | type) == "array"
