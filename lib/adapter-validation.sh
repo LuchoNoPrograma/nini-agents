@@ -39,6 +39,15 @@ adapter_paths_overlap() {
   [ "$left" = "$right" ] || [[ "$left" == "$right"/* ]] || [[ "$right" == "$left"/* ]]
 }
 
+# True when $2 is a non-empty dot-suffix sibling of $1, for example
+# `.credentials.json.before-migration` beside `.credentials.json`.
+adapter_path_is_dot_suffix_backup() {
+  local base="${1//\\//}" candidate="${2//\\//}"
+  base="$(printf '%s' "${base%/}" | tr '[:upper:]' '[:lower:]')"
+  candidate="$(printf '%s' "${candidate%/}" | tr '[:upper:]' '[:lower:]')"
+  [ "$candidate" != "$base." ] && [[ "$candidate" == "$base."* ]]
+}
+
 # Record an error for every entry of the jq array at $2 that is not a safe
 # relative path; $3 labels the list in messages.
 validate_adapter_path_list() {
@@ -65,25 +74,26 @@ validate_adapter_path_separation() {
   done < <(jq -r "$left_path // [] | .[]?" "$manifest" 2>/dev/null | tr -d '\r')
 }
 
-# filePaths only classifies entries already owned by sharedPaths or
-# sessionPaths. An orphan file classification would create undeclared state.
-validate_adapter_file_path_membership() {
-  local manifest="$1" file_path declared normalized_file normalized_declared found
-  while IFS= read -r file_path; do
-    [ -z "$file_path" ] && continue
-    is_safe_adapter_path "$file_path" || continue
-    normalized_file="$(printf '%s' "${file_path//\\//}" | tr '[:upper:]' '[:lower:]')"
+# filePaths, directPaths, and migrationPreservePaths only classify entries
+# already owned by sharedPaths or sessionPaths. An orphan classification would
+# introduce undeclared state.
+validate_adapter_state_path_membership() {
+  local manifest="$1" jq_path="$2" label="$3" state_path declared normalized_path normalized_declared found
+  while IFS= read -r state_path; do
+    [ -z "$state_path" ] && continue
+    is_safe_adapter_path "$state_path" || continue
+    normalized_path="$(printf '%s' "${state_path//\\//}" | tr '[:upper:]' '[:lower:]')"
     found=false
     while IFS= read -r declared; do
       [ -z "$declared" ] && continue
       normalized_declared="$(printf '%s' "${declared//\\//}" | tr '[:upper:]' '[:lower:]')"
-      if [ "$normalized_file" = "$normalized_declared" ]; then
+      if [ "$normalized_path" = "$normalized_declared" ]; then
         found=true
         break
       fi
     done < <({ jq -r '.normalState.sharedPaths // [] | .[]?' "$manifest"; jq -r '.normalState.sessionPaths // [] | .[]?' "$manifest"; } 2>/dev/null | tr -d '\r')
-    [ "$found" = true ] || adapter_validation_error "file path '$file_path' must also be declared in sharedPaths or sessionPaths"
-  done < <(jq -r '.normalState.filePaths // [] | .[]?' "$manifest" 2>/dev/null | tr -d '\r')
+    [ "$found" = true ] || adapter_validation_error "$label '$state_path' must also be declared in sharedPaths or sessionPaths"
+  done < <(jq -r "$jq_path // [] | .[]?" "$manifest" 2>/dev/null | tr -d '\r')
 }
 
 # Reject any {placeholder} outside the known set; an unknown one would expand
@@ -102,7 +112,7 @@ validate_adapter_object_fields() {
   local manifest="$1" path="$2" allowed="$3" label="$4" key
   while IFS= read -r key; do
     [ -z "$key" ] && continue
-    if ! printf '%s\n' "$allowed" | grep -qxF "$key"; then
+    if ! grep -qxF "$key" <<< "$allowed"; then
       if [ -n "$label" ]; then
         adapter_validation_error "unsupported field '$label.$key'"
       else
@@ -118,7 +128,7 @@ validate_adapter_fields() {
   if [ "$schema_version" -eq 1 ]; then
     top_level+=$'\nshare\nsession\nstatus'
   else
-    top_level+=$'\naccount\nnormalState\nconcurrency\nsupport'
+    top_level+=$'\naccount\nnormalState\nsharedCredentialState\nconcurrency\nsupport'
   fi
   validate_adapter_object_fields "$manifest" '.' "$top_level" ''
   validate_adapter_object_fields "$manifest" '.isolation' $'strategy\nmode\nenv\nclearEnv\nargs\nshareFromRealHome' 'isolation'
@@ -129,13 +139,103 @@ validate_adapter_fields() {
   fi
   validate_adapter_object_fields "$manifest" '.account' $'mechanism\ncredentialFiles\ncredentialPrecedence\nlogoutScope\nreason\nsecret' 'account'
   validate_adapter_object_fields "$manifest" '.account.secret' 'environmentVariable' 'account.secret'
-  validate_adapter_object_fields "$manifest" '.normalState' $'root\nruntimeSubdir\nsharedPaths\nsessionPaths\nfilePaths\nunsafePaths' 'normalState'
+  validate_adapter_object_fields "$manifest" '.normalState' $'root\nruntimeSubdir\nsharedPaths\nsessionPaths\nruntimePaths\nfilePaths\ndirectPaths\nmigrationPreservePaths\nunsafePaths' 'normalState'
   validate_adapter_object_fields "$manifest" '.normalState.root' $'windows\nmacos\nlinux' 'normalState.root'
+  validate_adapter_object_fields "$manifest" '.sharedCredentialState' $'root\nentries\nlegacyMigration\nlegacyBackupPattern' 'sharedCredentialState'
+  validate_adapter_object_fields "$manifest" '.sharedCredentialState.entries[]?' $'path\nkind' 'sharedCredentialState.entries'
   validate_adapter_object_fields "$manifest" '.concurrency' $'level\nsingletonScope' 'concurrency'
   validate_adapter_object_fields "$manifest" '.support' $'windows\nmacos\nlinux' 'support'
   local platform
   for platform in windows macos linux; do
     validate_adapter_object_fields "$manifest" ".support.$platform" $'level\nreason' "support.$platform"
+  done
+}
+
+# Validate the optional schema-v2 store for credential state that is shared
+# deliberately across every profile of one adapter. The source root is kept
+# below MULTICLI_HOME/.shared/<adapter>/ so a manifest cannot target another
+# profile's auth directory. Runtime paths remain disjoint from every other
+# declared class.
+validate_adapter_shared_credential_state() {
+  local manifest="$1" id mechanism root normalized_root expected_prefix migration backup_pattern
+  local entry path kind other_path normal_path
+  jq -e '.sharedCredentialState != null' "$manifest" >/dev/null 2>&1 || return 0
+
+  if [ "$(jq -r '.sharedCredentialState | type' "$manifest" 2>/dev/null)" != object ]; then
+    adapter_validation_error "sharedCredentialState must be an object"
+    return
+  fi
+
+  mechanism="$(jq -r '.account.mechanism // empty' "$manifest")"
+  [ "$mechanism" = fileOverlay ] || \
+    adapter_validation_error "sharedCredentialState requires account.mechanism 'fileOverlay'"
+
+  id="$(jq -r '.id // empty' "$manifest")"
+  root="$(jq -r '.sharedCredentialState.root // empty' "$manifest")"
+  if ! is_safe_adapter_path "$root"; then
+    adapter_validation_error "sharedCredentialState.root '$root' must be a safe relative path"
+  else
+    normalized_root="$(printf '%s' "${root//\\//}" | tr '[:upper:]' '[:lower:]')"
+    expected_prefix=".shared/$(printf '%s' "$id" | tr '[:upper:]' '[:lower:]')/"
+    case "$normalized_root" in
+      "$expected_prefix"*) ;;
+      *) adapter_validation_error "sharedCredentialState.root must be below '.shared/$id/'" ;;
+    esac
+  fi
+
+  migration="$(jq -r '.sharedCredentialState.legacyMigration // empty' "$manifest")"
+  [ "$migration" = preserveInactive ] || \
+    adapter_validation_error "sharedCredentialState.legacyMigration must be 'preserveInactive'"
+
+  backup_pattern="$(jq -r '.sharedCredentialState.legacyBackupPattern // empty' "$manifest")"
+  case "$backup_pattern" in
+    ''|dotSuffix) ;;
+    *) adapter_validation_error "sharedCredentialState.legacyBackupPattern must be 'dotSuffix' when present" ;;
+  esac
+
+  if [ "$(jq -r '.sharedCredentialState.entries | type' "$manifest" 2>/dev/null)" != array ] || \
+     [ "$(jq -r '.sharedCredentialState.entries | if type == "array" then length else 0 end' "$manifest" 2>/dev/null)" -eq 0 ]; then
+    adapter_validation_error "sharedCredentialState.entries must be a non-empty array"
+    return
+  fi
+
+  local shared_paths=()
+  while IFS=$'\t' read -r path kind; do
+    [ -n "$path" ] || {
+      adapter_validation_error "shared credential entry path is required"
+      continue
+    }
+    is_safe_adapter_path "$path" || adapter_validation_error "shared credential path '$path' must be a safe relative path"
+    case "$kind" in
+      jsonObjectFile|directory) ;;
+      *) adapter_validation_error "shared credential kind '$kind' is not supported" ;;
+    esac
+    shared_paths+=("$path")
+  done < <(jq -r '.sharedCredentialState.entries[]? | [(.path // ""), (.kind // "")] | @tsv' "$manifest" 2>/dev/null | tr -d '\r')
+
+  local i j
+  for ((i = 0; i < ${#shared_paths[@]}; i++)); do
+    path="${shared_paths[$i]}"
+    for ((j = i + 1; j < ${#shared_paths[@]}; j++)); do
+      other_path="${shared_paths[$j]}"
+      if adapter_paths_overlap "$path" "$other_path" || \
+         { [ "$backup_pattern" = dotSuffix ] && adapter_path_is_dot_suffix_backup "$path" "$other_path"; } || \
+         { [ "$backup_pattern" = dotSuffix ] && adapter_path_is_dot_suffix_backup "$other_path" "$path"; }; then
+        adapter_validation_error "shared credential path '$path' overlaps shared credential path '$other_path'"
+      fi
+    done
+    for entry in '.account.credentialFiles credential' '.normalState.sharedPaths shared' '.normalState.sessionPaths session' '.normalState.runtimePaths runtime' '.normalState.unsafePaths unsafe'; do
+      local jq_path label
+      jq_path="${entry% *}"
+      label="${entry##* }"
+      while IFS= read -r normal_path; do
+        [ -n "$normal_path" ] || continue
+        if adapter_paths_overlap "$path" "$normal_path" || \
+           { [ "$backup_pattern" = dotSuffix ] && adapter_path_is_dot_suffix_backup "$path" "$normal_path"; }; then
+          adapter_validation_error "shared credential path '$path' overlaps $label path '$normal_path'"
+        fi
+      done < <(jq -r "$jq_path // [] | .[]?" "$manifest" 2>/dev/null | tr -d '\r')
+    done
   done
 }
 
@@ -245,15 +345,25 @@ validate_adapter_v2() {
   validate_adapter_path_list "$manifest" '.account.credentialFiles' 'credential path'
   validate_adapter_path_list "$manifest" '.normalState.sharedPaths' 'shared path'
   validate_adapter_path_list "$manifest" '.normalState.sessionPaths' 'session path'
+  validate_adapter_path_list "$manifest" '.normalState.runtimePaths' 'runtime path'
   validate_adapter_path_list "$manifest" '.normalState.filePaths' 'file path'
+  validate_adapter_path_list "$manifest" '.normalState.directPaths' 'direct path'
+  validate_adapter_path_list "$manifest" '.normalState.migrationPreservePaths' 'migration preserve path'
   validate_adapter_path_list "$manifest" '.normalState.unsafePaths' 'unsafe path'
   validate_adapter_path_separation "$manifest" '.account.credentialFiles' 'credential path' '.normalState.sharedPaths' 'shared path'
   validate_adapter_path_separation "$manifest" '.account.credentialFiles' 'credential path' '.normalState.sessionPaths' 'session path'
+  validate_adapter_path_separation "$manifest" '.account.credentialFiles' 'credential path' '.normalState.runtimePaths' 'runtime path'
   validate_adapter_path_separation "$manifest" '.account.credentialFiles' 'credential path' '.normalState.unsafePaths' 'unsafe path'
   validate_adapter_path_separation "$manifest" '.normalState.sharedPaths' 'shared path' '.normalState.sessionPaths' 'session path'
+  validate_adapter_path_separation "$manifest" '.normalState.sharedPaths' 'shared path' '.normalState.runtimePaths' 'runtime path'
   validate_adapter_path_separation "$manifest" '.normalState.sharedPaths' 'shared path' '.normalState.unsafePaths' 'unsafe path'
   validate_adapter_path_separation "$manifest" '.normalState.sessionPaths' 'session path' '.normalState.unsafePaths' 'unsafe path'
-  validate_adapter_file_path_membership "$manifest"
+  validate_adapter_path_separation "$manifest" '.normalState.sessionPaths' 'session path' '.normalState.runtimePaths' 'runtime path'
+  validate_adapter_path_separation "$manifest" '.normalState.runtimePaths' 'runtime path' '.normalState.unsafePaths' 'unsafe path'
+  validate_adapter_state_path_membership "$manifest" '.normalState.filePaths' 'file path'
+  validate_adapter_state_path_membership "$manifest" '.normalState.directPaths' 'direct path'
+  validate_adapter_state_path_membership "$manifest" '.normalState.migrationPreservePaths' 'migration preserve path'
+  validate_adapter_shared_credential_state "$manifest"
   validate_adapter_support "$manifest"
 }
 

@@ -114,6 +114,7 @@ nini-agents claude-cli/work
 | `nini-agents auth set <tool>/<profile>` | Сохранить секрет процесса в хранилище учётных данных ОС |
 | `nini-agents auth status <tool>/<profile>` | Проверить наличие секрета |
 | `nini-agents auth clear <tool>/<profile>` | Удалить секрет |
+| `nini-agents permissions show \| set <read-only\|workspace\|full-access>` | Показать или сохранить общие разрешения Codex для новых сессий |
 | `nini-agents continue <tool> <src> <dest> [--dry-run] [--no-merge]` | Скопировать поддерживаемое состояние сессии без учётных данных |
 | `nini-agents template save <tool>/<profile> <name>` | Сохранить шаблон схемы v2 без учётных данных |
 | `nini-agents template list \| delete <name>` | Показать или удалить шаблоны |
@@ -124,7 +125,7 @@ nini-agents claude-cli/work
 
 | Команда | Действие |
 |---|---|
-| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]` | Перенести устаревший профиль на схему v2 |
+| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile] [--preserve-unknown]` | Перенести устаревший профиль на схему v2 |
 | `nini-agents status` | Показать профили и их размеры |
 | `nini-agents stats` | Показать использование хранилища профилями |
 | `nini-agents doctor [--deep]` | Проверить окружение и при необходимости выполнить аудит сред выполнения |

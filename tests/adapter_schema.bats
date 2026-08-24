@@ -86,6 +86,129 @@ JSON
   [[ "$output" == *"Validated 1 adapter(s)"* ]]
 }
 
+@test "validator accepts shared credential state below the adapter-owned store" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.sharedCredentialState={
+    root:".shared/test-cli/mcp",
+    entries:[
+      {path:".credentials.json",kind:"jsonObjectFile"},
+      {path:"mcp-oauth-locks",kind:"directory"}
+    ],
+    legacyMigration:"preserveInactive"
+  }')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 0 ]
+}
+
+@test "validator accepts reconstructible runtime paths and dot-suffix credential backups" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '
+    .normalState.runtimePaths=["runtime-cache", "models_cache.json"] |
+    .sharedCredentialState={
+      root:".shared/test-cli/mcp",
+      entries:[
+        {path:".credentials.json",kind:"jsonObjectFile"},
+        {path:"mcp-oauth-locks",kind:"directory"}
+      ],
+      legacyMigration:"preserveInactive",
+      legacyBackupPattern:"dotSuffix"
+    }')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [ "$status" -eq 0 ]
+}
+
+@test "validator rejects runtime paths overlapping state or credential backup namespaces" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '
+    .normalState.runtimePaths=["sessions/cache", ".credentials.json.before-test"] |
+    .sharedCredentialState={
+      root:".shared/test-cli/mcp",
+      entries:[{path:".credentials.json",kind:"jsonObjectFile"}],
+      legacyMigration:"preserveInactive",
+      legacyBackupPattern:"dotSuffix"
+    }')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"session path 'sessions' overlaps runtime path 'sessions/cache'"* ]]
+  [[ "$output" == *"shared credential path '.credentials.json' overlaps runtime path '.credentials.json.before-test'"* ]]
+}
+
+@test "validator rejects shared credential roots outside the adapter-owned store" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.sharedCredentialState={root:"test-cli/mcp",entries:[{path:"oauth.json",kind:"jsonObjectFile"}],legacyMigration:"preserveInactive"}')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"sharedCredentialState.root must be below '.shared/test-cli/'"* ]]
+}
+
+@test "validator rejects invalid or overlapping shared credential entries" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.sharedCredentialState={
+    root:".shared/test-cli/mcp",
+    entries:[
+      {path:"oauth",kind:"secretFile"},
+      {path:"oauth/locks",kind:"directory"}
+    ],
+    legacyMigration:"copy"
+  }')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"shared credential kind 'secretFile' is not supported"* ]]
+  [[ "$output" == *"shared credential path 'oauth' overlaps shared credential path 'oauth/locks'"* ]]
+  [[ "$output" == *"sharedCredentialState.legacyMigration must be 'preserveInactive'"* ]]
+}
+
+@test "validator rejects shared credential entries overlapping profile or normal state" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.sharedCredentialState={
+    root:".shared/test-cli/mcp",
+    entries:[
+      {path:"auth.json",kind:"jsonObjectFile"},
+      {path:"sessions/oauth.json",kind:"jsonObjectFile"}
+    ],
+    legacyMigration:"preserveInactive"
+  }')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"shared credential path 'auth.json' overlaps credential path 'auth.json'"* ]]
+  [[ "$output" == *"shared credential path 'sessions/oauth.json' overlaps session path 'sessions'"* ]]
+}
+
+@test "object-field validation is deterministic under pipefail" {
+  local manifest="$MULTICLI_SCRATCH/object-fields.json"
+  printf '%s\n' '{"known":{}}' > "$manifest"
+
+  run bash -c '
+    set -o pipefail
+    source "$1/lib/adapter-validation.sh"
+    allowed="$(awk '\''BEGIN { print "known"; for (i = 0; i < 20000; i++) print "padding" i }'\'')"
+    ADAPTER_VALIDATION_ERRORS=()
+    validate_adapter_object_fields "$2" "." "$allowed" ""
+    [ "${#ADAPTER_VALIDATION_ERRORS[@]}" -eq 0 ]
+  ' _ "$MULTICLI_REPO_ROOT" "$manifest"
+
+  [ "$status" -eq 0 ]
+}
+
 @test "JSON schema accepts the runtime subdirectory used by Command Code" {
   run jq -e '
     .properties.normalState.properties.runtimeSubdir["$ref"] == "#/$defs/relativePath"
@@ -94,11 +217,65 @@ JSON
   [ "$status" -eq 0 ]
 }
 
-@test "Codex adapter declares user-local POSIX discovery and shared rules state" {
+@test "JSON schema exposes direct normal-state paths" {
+  run jq -e '
+    .properties.normalState.properties.directPaths.items["$ref"] == "#/$defs/relativePath" and
+    .properties.normalState.properties.migrationPreservePaths.items["$ref"] == "#/$defs/relativePath"
+  ' "$MULTICLI_REPO_ROOT/schema/adapter.schema.json"
+
+  [ "$status" -eq 0 ]
+}
+
+@test "JSON schema exposes shared credential state only to schema-v2 adapters" {
+  run jq -e '
+    .properties.sharedCredentialState.properties.root["$ref"] == "#/$defs/relativePath" and
+    .properties.sharedCredentialState.properties.entries.minItems == 1 and
+    .properties.sharedCredentialState.properties.legacyMigration.const == "preserveInactive" and
+    .properties.sharedCredentialState.properties.legacyBackupPattern.const == "dotSuffix" and
+    .properties.normalState.properties.runtimePaths.items["$ref"] == "#/$defs/relativePath" and
+    .allOf[0].else.properties.sharedCredentialState == false
+  ' "$MULTICLI_REPO_ROOT/schema/adapter.schema.json"
+
+  [ "$status" -eq 0 ]
+}
+
+@test "Codex adapter isolates main auth and shares MCP OAuth state explicitly" {
   run jq -e '
     (.binary.macos | index("$HOME/.local/bin/codex")) != null and
     (.binary.linux | index("$HOME/.local/bin/codex")) != null and
     (.normalState.sharedPaths | index("rules")) != null and
+    (.normalState.sharedPaths | index("AGENTS.md")) != null and
+    (.normalState.sharedPaths | index("log")) != null and
+    (.normalState.filePaths | index("AGENTS.md")) != null and
+    .isolation.args == [
+      "-c", "cli_auth_credentials_store=\"file\"",
+      "-c", "mcp_oauth_credentials_store=\"file\"",
+      "-c", "sqlite_home=\"{sharedStateRoot}\""
+    ] and
+    (.normalState.sessionPaths | index("state_5.sqlite")) != null and
+    .normalState.runtimePaths == [
+      ".sandbox_migration",
+      "cache",
+      "models_cache.json",
+      "version.json"
+    ] and
+    (.normalState.sessionPaths | index("shell_snapshots")) != null and
+    (.normalState.sessionPaths | index("thread-writer-locks")) != null and
+    (.normalState.directPaths | index("state_5.sqlite")) != null and
+    (.normalState.migrationPreservePaths | sort) == ((.normalState.directPaths + ["thread-writer-locks"]) | sort) and
+    (.normalState.filePaths | index("state_5.sqlite")) != null and
+    (.normalState.sharedPaths | index("installation_id")) != null and
+    .sharedCredentialState == {
+      root: ".shared/codex/mcp",
+      entries: [
+        {path: ".credentials.json", kind: "jsonObjectFile"},
+        {path: "mcp-oauth-locks", kind: "directory"}
+      ],
+      legacyMigration: "preserveInactive",
+      legacyBackupPattern: "dotSuffix"
+    } and
+    (.normalState.unsafePaths | index(".credentials.json")) == null and
+    (.normalState.unsafePaths | index("mcp-oauth-locks")) == null and
     (.account.credentialFiles | index("rules")) == null and
     (.normalState.sessionPaths | index("rules")) == null
   ' "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json"
@@ -218,6 +395,39 @@ JSON
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"file path 'undeclared.json' must also be declared in sharedPaths or sessionPaths"* ]]
+}
+
+@test "validator rejects direct paths that are not declared as shared or session state" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.normalState.directPaths=["undeclared.sqlite"]')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"direct path 'undeclared.sqlite' must also be declared in sharedPaths or sessionPaths"* ]]
+}
+
+@test "validator accepts migration preserve paths only as declared shared or session state" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.normalState.migrationPreservePaths=["history.jsonl", "sessions"]')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+}
+
+@test "validator rejects unsafe or undeclared migration preserve paths" {
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.normalState.migrationPreservePaths=["../outside", "undeclared.sqlite"]')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"migration preserve path '../outside' must be a safe relative path"* ]]
+  [[ "$output" == *"migration preserve path 'undeclared.sqlite' must also be declared in sharedPaths or sessionPaths"* ]]
 }
 
 @test "validator rejects parent traversal in declared state paths" {

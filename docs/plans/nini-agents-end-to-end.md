@@ -21,13 +21,17 @@ Cada cambio mantiene su propio alcance, aprobacion, pruebas y cierre.
 
 Antes de actuar, todo agente debe:
 
-1. Leer [AGENTS.md](../../AGENTS.md), este documento y la skill canonica
-   aplicable bajo `.agents/skills/`.
+1. Leer [AGENTS.md](../../AGENTS.md), el
+   [checkpoint operativo](nini-agents-resume.md) y la skill canonica aplicable
+   bajo `.agents/skills/`. Consultar este documento completo solo cuando haga
+   falta reconstruir historia o evidencia, resolver una contradiccion o
+   delimitar una etapa nueva.
 2. Revisar `git status`, branch, remotes, base comun y cambios concurrentes sin
    modificar referencias ni archivos.
 3. Separar siempre estado existente, direccion aprobada y trabajo pendiente.
 4. Registrar aqui el alcance aprobado, decisiones estables, validaciones y
-   resultado de cada tramo terminado.
+   resultado de cada tramo terminado; actualizar tambien el checkpoint cuando
+   cambien el estado, los bloqueos o el siguiente gate.
 5. Detenerse y pedir una aprobacion nueva si cambia una frontera, aparecen datos
    reales o la accion requiere instalar, publicar, migrar, borrar o conectarse a
    otro equipo.
@@ -57,13 +61,18 @@ el checkout vigente. Al inicio del 2026-08-22:
 
 Al corte documental del 2026-08-22:
 
-- El checkout activo es `main`, alineado con `origin/main`; el tip funcional
-  anterior a este cierre documental es `73c9d50`.
+- El checkout activo es `main`; el tip anterior al tramo local vigente es
+  `293c48d`, alineado con `origin/main`. El worktree contiene el G2 aprobado de
+  compatibilidad de lanzamiento whole-root para perfiles legacy y el
+  endurecimiento transaccional del migrador legacy a schema v2, todavia sin
+  commit ni push.
 - `main` contiene el motor Nini Agents renombrado y conserva los shims de
   compatibilidad. Las Etapas A, B, C y D estan cerradas con evidencia local y
   CI remoto efimero. El tramo aprobado de la Etapa E contiene el protocolo
-  transaccional interno y sus pruebas, pero no expone todavia comando publico,
-  transporte SSH ni respuesta JSON estable.
+  transaccional interno y sus pruebas, pero no expone todavia comando publico
+  ni transporte SSH. La Etapa F ya entrega JSON v1 para consultas read-only;
+  movimiento publico, ejecucion machine-safe y migraciones consumidoras siguen
+  pendientes.
 - `multi-cli-base` y `origin/multi-cli-base` conservan el upstream puro
   `6efb0d2`.
 - `legacy-gui` y `origin/legacy-gui` conservan el snapshot Flutter `7426e98`.
@@ -71,8 +80,13 @@ Al corte documental del 2026-08-22:
   `multi-cli-upstream` apunta a `Spielewoy/multi-cli`.
 - El nucleo interno del movimiento seguro inspirado por el contrato de
   Codexporter esta implementado en Bash y PowerShell. La integracion remota, la
-  CLI JSON estable y las migraciones consumidoras siguen pendientes; no deben
-  presentarse como funcionalidades implementadas.
+  CLI JSON de mutaciones y las migraciones consumidoras siguen pendientes; no
+  deben presentarse como funcionalidades implementadas.
+- La direccion aprobada para perfiles es crear en schema v2, conservar el
+  lanzamiento legacy y migrar los perfiles existentes de forma voluntaria y
+  gradual. Un inventario read-only y sanitizado encontro 15 perfiles Codex,
+  todos legacy, con `auth.json` raiz estructuralmente valido; no se registraron
+  nombres, valores, hashes, IDs ni rutas privadas. Ninguno fue migrado.
 - Las referencias locales y el trabajo registrado por este plan no contienen
   un tag ni una release de Nini Agents; el estado remoto debe verificarse otra
   vez antes de cualquier publicacion.
@@ -963,3 +977,879 @@ Pendientes y siguiente gate:
 - Pendiente de la Etapa F: integrar el serializador con un dispatch publico de
   movimiento solo despues de completar process probe y transporte seguros. La
   migracion de MultiCLI AI y Codexporter conserva su gate independiente.
+
+### 2026-08-22 — compatibilidad whole-root legacy y migracion gradual a v2
+
+- Estado: cambio G2 terminado localmente; no se hizo commit, push, instalacion
+  ni prueba con una cuenta real.
+- Objetivo: hacer verdadera la compatibilidad que upstream documenta para
+  perfiles antiguos, manteniendo schema v2 como unico formato de creacion y
+  como destino de una migracion posterior, voluntaria y gradual.
+- Branch y base: `main`, tip inicial `293c48d`; upstream puro fijado en
+  `6efb0d2`.
+- Hallazgo upstream: su README afirma que los perfiles antiguos conservan el
+  comportamiento whole-root, pero el dispatcher de un adapter schema v2
+  enviaba todo perfil sin `.profile.json` al runtime account-overlay y la
+  prueba upstream exigia el error `missing schema-v2 metadata`. Por tanto, la
+  intencion contractual y la implementacion no coincidian.
+- Decision del producto: los perfiles nuevos siguen siendo schema v2; los
+  legacy existentes permanecen utilizables; `migrate` nunca se ejecuta de
+  forma implicita. La adopcion v2 sobre datos existentes empezara con perfiles
+  elegidos por el usuario como poco importantes y conservara la ruta legacy
+  hasta completar y verificar la transicion.
+- Inventario real previo, solo lectura y sanitizado: 15 perfiles Codex, todos
+  legacy, todos con un `auth.json` raiz que parsea como objeto JSON. No se
+  leyeron ni registraron valores, nombres privados, IDs o hashes. Un recorrido
+  recursivo posterior fue interrumpido por ser innecesariamente lento y no se
+  repetira para este cambio.
+- Antes: un perfil `accountOverlay` sin `.profile.json` abortaba incluso cuando
+  el mecanismo `fileOverlay` podia conservar de forma segura su home completo.
+- Despues: Bash y PowerShell detectan exclusivamente la combinacion
+  `accountOverlay + fileOverlay + metadata ausente` y lanzan el directorio del
+  perfil como whole-root. El launcher no crea `.profile.json`, `auth/` ni
+  `.runtime`, no mueve `auth.json` y limpia cualquier `MULTICLI_PROFILE_ID`
+  heredado en vez de atribuirle al legacy una identidad v2. Un proceso real de
+  la herramienta puede modificar su propio home como siempre; eso no se probo
+  ni se autorizo en este tramo.
+- Fallo cerrado: `processSecret`, `osUserCredentialStore` e `inseparable` no
+  heredan esta compatibilidad. Sin metadata siguen rechazados por sus rutas
+  schema v2. Un enlace, incluso roto, en `.profile.json` no se reinterpreta en
+  Bash como ausencia segura.
+- Portabilidad legacy: clone, export, import y templates legacy permanecen
+  bloqueados para impedir que una copia whole-root transporte credenciales. La
+  compatibilidad agregada cubre lanzamiento y recuperacion, no copia insegura.
+- Archivos modificados: `nini-agents`, `nini-agents.ps1`,
+  `tests/overlay_state.bats`, `tests/OverlayState.Tests.ps1` y esta bitacora. No
+  cambiaron adapters, schema JSON, modulos de migracion, shims ni consumidores.
+- Caracterizacion previa: la nueva prueba Bash de file-overlay legacy fallo
+  antes del cambio porque el launcher devolvio estado 1 antes de iniciar el
+  proceso sintetico.
+- Validacion posterior: sintaxis Bash correcta; 2/2 casos legacy; 38/38 casos
+  combinados de overlay e isolated-mode; 2/2 casos focalizados de migracion
+  (dry-run sin escritura y lanzamiento posterior a migracion); suite Bash
+  completa 258/258 sobre el diff productivo final; documentacion validada;
+  `git diff --check` correcto. Todo uso filesystem mutable ocurrio bajo homes
+  temporales con credenciales ficticias. La prueba legacy compara la credencial
+  sintetica antes y despues, inyecta un `MULTICLI_PROFILE_ID` obsoleto y
+  demuestra que el hijo no lo recibe y que no aparece metadata ni runtime.
+- Plataformas no verificadas: el host no dispone de Windows PowerShell,
+  PowerShell Core, Pester, ShellCheck ni Bashcov. La paridad PowerShell fue
+  implementada y caracterizada, pero no ejecutada. Tampoco se probo macOS,
+  Windows, un binario Codex real ni una cuenta real. El gate formal de cobertura
+  se intento con baseline `HEAD` y termino con codigo 2 antes de instrumentar
+  porque `bashcov` no esta instalado; no se instalo ninguna dependencia fuera
+  del alcance.
+- Efecto sobre credenciales y datos reales: ninguno. No se establecio
+  `CODEX_HOME` hacia un perfil real, no se ejecuto Codex, logout, revoke,
+  `auth clear`, migracion, copia, borrado ni escritura bajo el store real.
+- Recuperacion del cambio: revertir solamente las ramas de dispatch restaura el
+  rechazo anterior; no existe recuperacion de datos asociada porque el cambio
+  no transforma perfiles.
+- Preparacion de MultiCLI AI: el consumidor futuro debe aceptar
+  `profile.schemaVersion` 1 y 2 y delegar launch al motor. Antes de ese G4, el
+  motor aun debe decidir un estado publico de credencial que no exponga rutas y
+  una ejecucion machine-safe con stdout limpio para `codex app-server`; el
+  launch humano actual escribe una linea informativa y no debe contaminar
+  JSON-RPC.
+- Plan del piloto real, aun no autorizado: elegir explicitamente un perfil de
+  baja importancia; cerrar procesos; revisar `migrate --dry-run`; preparar un
+  backup inactivo y rollback verificables; migrar solo ese perfil; comprobar
+  cuenta, credencial, sesiones y configuracion; y restaurar ante cualquier
+  diferencia. No usar `--prefer-profile` sin revisar cada conflicto.
+- Siguientes gates: G5/G9 separados para inspeccion y migracion del perfil real
+  elegido; G2 para ampliar el contrato machine-safe o JSON; G4 para modificar
+  MultiCLI AI. Ninguno queda autorizado por este cierre.
+- Punto de reanudacion tras compactacion: este G2 esta completo y validado
+  localmente, pero permanece sin commit ni push. El siguiente trabajo requiere
+  presentar un alcance nuevo; no repetir la auditoria profunda de perfiles ni
+  iniciar automaticamente la migracion real o el refactor consumidor.
+
+### 2026-08-22 — migrador legacy a v2 endurecido antes del piloto
+
+- Estado: cambio G2 terminado localmente; no se hizo commit, push, instalacion,
+  lanzamiento real ni acceso nuevo a perfiles o credenciales reales.
+- Objetivo: convertir el `migrate` ya existente en una transaccion suficientemente
+  conservadora para preparar un primer piloto voluntario sin copiar, regenerar,
+  revocar ni dejar dos propietarios independientes de la credencial.
+- Candidato acordado para una fase real posterior: `codex-luis`.
+  `codex-vivi` queda expresamente fuera. Registrar el candidato no autoriza
+  inspeccionarlo, ejecutar su dry-run ni migrarlo.
+- Antes: el motor producia un plan ordenado, usaba movimientos atomicos y
+  escribia journal, pero no comprobaba procesos, no serializaba migraciones y
+  un fallo manejado podia dejar operaciones completadas para recuperacion
+  manual. Tampoco demostraba que el movimiento de la credencial conservara su
+  identidad fisica.
+- Despues, preflight: apply comprueba los procesos antes de escribir y otra vez
+  bajo un lock exclusivo por perfil. Linux busca el environment de aislamiento
+  declarado por el adapter —para Codex, `CODEX_HOME`— en procesos del mismo
+  usuario; otros hosts usan de forma conservadora los nombres de binario
+  declarados. Un resultado ocupado o indeterminado aborta cerrado. El lock
+  serializa migraciones del motor; no impide por si solo que un proceso externo
+  sea iniciado despues de la segunda comprobacion, por lo que el piloto exige
+  una ventana operativa sin lanzamientos.
+- Despues, rutas: dry-run y apply rechazan locks, staging o temporales
+  inconclusos, metadata enlazada, perfiles enlazados, destinos de credencial o
+  estado que crucen symlinks/junctions, credenciales hardlinked, destinos de
+  credencial no regulares y volumenes que convertirian el rename en copia.
+  Schema, adapter y plan siguen siendo la fuente declarativa de las rutas.
+- Despues, credencial: Bash registra en memoria dispositivo e inode, ejecuta un
+  rename dentro del mismo volumen y exige la misma identidad con link count uno
+  al terminar. PowerShell exige el mismo volumen y una unica ruta regular no
+  enlazada alrededor de `Move-Item`; el host actual no permite ejecutar ni
+  demostrar esa rama. Ningun valor, hash, token o identificador se escribe al
+  journal o a la salida.
+- Despues, rollback: operaciones destructivas o de reemplazo conservan su
+  contraparte en `.migration-rollback`; un fallo manejado revierte en orden
+  inverso, retira solo directorios creados por la transaccion, restaura el root
+  compartido si fue creado por ella y deja journal `rolled_back`. Si no puede
+  demostrar la restauracion, conserva evidencia, marca `rollback_failed` y
+  ordena no lanzar. Un corte abrupto, `SIGKILL` o caida del equipo no ejecuta
+  cleanup automatico: el lock, journal o staging remanente bloquean nuevos
+  intentos, incluso dry-run, hasta una recuperacion manual separada.
+- Determinismo: con el mismo arbol, adapter y politica de conflictos, el
+  inventario, orden de operaciones y decisiones son reproducibles. El
+  `profileId` de una migracion nueva sigue siendo un UUID aleatorio por diseno;
+  nunca se deriva de la credencial. Un reintento tras `rolled_back` vuelve a
+  calcular el mismo plan; un perfil ya v2 es no-op.
+- Distincion de ownership: esta migracion local no crea un backup de
+  `auth.json`; mueve el mismo archivo a `auth/auth.json` y el rollback invierte
+  el rename. El runtime posterior puede exponer esa credencial mediante
+  symlink/hardlink reconstruible, que es otra ruta al mismo objeto y no una
+  segunda copia ni un token regenerado. El requisito de copia inactiva pertenece
+  al futuro movimiento entre equipos, no a este cambio de layout dentro del
+  mismo perfil.
+- Compatibilidad: no se crean perfiles schema v1, el lanzamiento whole-root
+  legacy sigue disponible y la migracion continua siendo voluntaria. No cambio
+  el schema, el adapter Codex, los shims ni los contratos de MultiCLI AI o
+  Codexporter. Bash 3.2 y Windows PowerShell 5.1 conservan implementaciones
+  equivalentes en el codigo.
+- Archivos de este endurecimiento: `lib/migration.sh`,
+  `lib/MultiCli.Migration.psm1`, `tests/migration.bats`,
+  `tests/Migration.Tests.ps1`, `tests/ModuleFunctions.Tests.ps1` y esta
+  bitacora. El worktree conserva ademas los launchers y pruebas del G2
+  whole-root anterior.
+- Caracterizacion: cuatro casos nuevos de seguridad fallaron 4/4 contra sus
+  bordes anteriores —destinos enlazados o cross-volume, limpieza del root
+  creado y movimiento cross-volume de estado— y pasaron 4/4 tras sus deltas.
+  La suite focalizada final contiene 31 casos Bash; incluye proceso real
+  sintetico con environment del perfil, lock, rollback posterior a reemplazo,
+  links, hardlinks, artefactos stale, identidad fisica y lanzamiento schema v2
+  sobre credenciales ficticias.
+- Efecto sobre datos reales: ninguno. No se leyo, parseo, comparo, copio ni
+  modifico `auth.json` de ningun perfil real; no se establecio `CODEX_HOME`
+  hacia uno, no se ejecuto Codex y no hubo logout, refresh, revoke, auth clear,
+  migracion o backup de una cuenta real.
+- Fase real siguiente, aun pendiente de G5: inspeccion read-only de
+  `codex-luis` limitada a tipo/existencia de entradas declaradas, links,
+  link-count, volumen, artefactos de control y procesos; confirmar que no existe
+  un segundo destino `auth/auth.json`; luego ejecutar solamente
+  `nini-agents migrate codex/codex-luis --dry-run` desde el checkout aislado.
+  No se leeran valores de auth, no se lanzara Codex y no se escribira el perfil.
+- Apply real, aun pendiente de un G9 separado: solo despues de revisar juntos
+  el preflight y el plan. Sera un apply sin `--prefer-profile`, con todos los
+  procesos cerrados y sin lanzamientos concurrentes; cualquier conflicto o
+  evidencia inconclusa cancela el piloto. Verificar el lanzamiento y la cuenta
+  requerira otro alcance explicito porque el proceso real puede escribir estado
+  o refrescar su propia sesion.
+- Validacion final local: caracterizacion nueva 4/4 fallos antes de sus deltas
+  y 4/4 pases despues; migracion Bash 31/31; bloque acumulado hasta migracion
+  145/145; sintaxis Bash correcta; 17/17 adapters validos; documentacion valida
+  y `git diff --check` limpio. Una suite completa anterior al ultimo guard
+  cross-volume paso 268/268. Con el diff final, tres pasadas completas de 269
+  casos terminaron 267/269, 268/269 y 268/269 por fallos intermitentes distintos
+  fuera del migrador; cada caso fallido paso al repetirlo aisladamente y el
+  migrador permanecio verde. Por ello no se registra un gate completo limpio
+  de 269/269. Una reproduccion adicional localizo una causa preexistente:
+  `validate_adapter_object_fields` combina `printf | grep -q` con `pipefail`, y
+  el cierre temprano de `grep` puede convertir el `SIGPIPE` del productor en un
+  falso campo no soportado. El validador paso 17/17 al repetir; no se modifico
+  porque ese arreglo pertenece a otro alcance G2. Su efecto actual sobre un
+  piloto es fail-closed antes de cualquier escritura. La cobertura se intento
+  con baseline `HEAD` y termino con codigo 2 antes de instrumentar porque
+  `bashcov` no esta instalado; no se instalo la dependencia.
+- Plataformas no verificadas: PowerShell/Pester, Windows y macOS no estan
+  disponibles en este host. La paridad PowerShell fue implementada y
+  caracterizada en pruebas, pero no ejecutada; tampoco se probo un binario
+  Codex real ni una cuenta real.
+- Punto de reanudacion tras compactacion: cerrar los gates sinteticos y reportar
+  resultados. No inspeccionar ni migrar automaticamente `codex-luis`; pedir G5
+  para el preflight read-only y dry-run, y despues G9 para un apply distinto.
+
+### 2026-08-22 — preflight de `codex/luis` y limite moderno del adapter Codex
+
+- Estado: el G5 read-only del candidato y el G2 minimo derivado quedaron
+  completados localmente. No se hizo apply real, lanzamiento de Codex, commit,
+  push, instalacion ni publicacion.
+- Correccion de identidad: `codex-luis` es el launcher legacy y corresponde al
+  spec almacenado `codex/luis`; el spec `codex/codex-luis` escrito en la entrada
+  anterior fue una suposicion incorrecta. No se listaron otros perfiles para
+  resolverla.
+- Preflight real sanitizado: el perfil existe como directorio legacy regular;
+  `auth.json` existe como archivo regular con link count uno;
+  `auth/auth.json`, `auth/`, metadata v2 y artefactos de migracion no existen;
+  perfil y root compartido estan en el mismo volumen; el root compartido es un
+  directorio regular; y el probe Linux demostro el perfil inactivo. El arbol
+  legacy contiene seis symlinks y ningun archivo hardlinked.
+- Dry-run real: `nini-agents migrate codex/luis --dry-run`, ejecutado desde el
+  checkout con el store legacy explicitamente seleccionado, termino en rechazo
+  fail-closed por entradas no declaradas. La identidad estructural de
+  `auth.json` —dispositivo, inode, link count, tamano y mtime— quedo igual;
+  `auth/auth.json`, `.profile.json`, journal, lock y rollback siguieron
+  ausentes. No se abrio ni parseo el contenido de autenticacion.
+- Inventario read-only limitado al rechazo: 37 entradas top-level no
+  declaradas y cero overlaps. Por nombre y tipo, 29 parecen estado operativo
+  moderno —bases SQLite y sus sidecars, caches, logs, locks, snapshots y
+  marcadores—, cuatro son configuracion o backups locales y cuatro pertenecen
+  a la topologia de credenciales/OAuth MCP y sus respaldos. Esta agrupacion es
+  una inferencia; no concede una clasificacion de adapter.
+- Enlaces sensibles: `.credentials.json` y `mcp-oauth-locks` son symlinks con
+  target existente fuera tanto del perfil como del root compartido Codex. Se
+  determino solo el alcance del target; no se mostro la ruta, no se siguio para
+  leer contenido y no se modifico. Por ello `codex/luis` no es un piloto simple
+  y no debe forzarse con `--prefer-profile`, borrados ni allowlists locales.
+- Evidencia primaria: la documentacion oficial de
+  [autenticacion de Codex](https://developers.openai.com/codex/auth) confirma
+  que `auth.json` bajo `CODEX_HOME` contiene tokens y que el store puede ser
+  file/keyring/auto. La
+  [referencia de configuracion](https://developers.openai.com/codex/config-reference)
+  confirma `log/` bajo `CODEX_HOME` y un store separado file/keyring/auto para
+  OAuth MCP. La guia oficial de
+  [AGENTS.md](https://developers.openai.com/codex/guides/agents-md) confirma
+  `AGENTS.md` global bajo `CODEX_HOME`. El paquete local
+  `@openai/codex` 0.147.0 se inspecciono sin ejecutarlo; sus strings confirman
+  `.credentials.json`, `mcp-oauth-locks`, los nombres de bases observados,
+  caches, locks y snapshots, pero no prueban por si solos que puedan
+  compartirse entre cuentas.
+- Decision implementada: el adapter Codex agrega solo las rutas ordinarias
+  demostradas `AGENTS.md` —tambien en `filePaths`— y `log/` a `sharedPaths`.
+  No se agregaron las bases, `.credentials.json`, `mcp-oauth-locks`, backups o
+  marcadores; no se amplio schema v2 y no se debilito el rechazo de entradas
+  desconocidas. La documentacion del adapter y la matriz aclaran que OAuth MCP
+  file-based aun no pertenece al boundary probado.
+- Validador: se reemplazo `printf | grep -q` dentro de
+  `validate_adapter_object_fields` por una entrada directa a `grep`. Esto
+  elimina el falso campo no soportado causado por `SIGPIPE` bajo `pipefail` sin
+  cambiar el conjunto de campos permitido. Una prueba con una allowlist mayor
+  que el pipe buffer caracteriza el caso de forma determinista.
+- Pruebas sinteticas: el adapter se caracterizo primero en rojo —23/24, fallo
+  exclusivo por `AGENTS.md` y `log/` ausentes— y luego paso 25/25 con la
+  regresion del validador. Overlay Bash paso 14/14 y demuestra links compartidos
+  para instrucciones, rules y logs sin crearlos bajo `auth/`. El migrador
+  incorpora un perfil Codex sintetico con `state_5.sqlite`, `.credentials.json`
+  y `mcp-oauth-locks`: debe rechazar y conservar sin cambios la credencial
+  ficticia, metadata y journal ausentes. Migracion Bash paso 32/32 y la suite
+  Bash completa paso 271/271 en una unica ejecucion limpia. Ninguna prueba uso
+  el store o home real.
+- Archivos de este tramo: `ai-tools/codex/adapter.json`,
+  `lib/adapter-validation.sh`, `tests/adapter_schema.bats`,
+  `tests/AdapterSchema.Tests.ps1`, `tests/migration.bats`,
+  `tests/Migration.Tests.ps1`, `tests/overlay_state.bats`,
+  `tests/OverlayState.Tests.ps1`, `docs/adapters/codex.md`,
+  `docs/support-matrix.md` y esta bitacora. El resto del worktree modificado
+  pertenece a los G2 anteriores y se preservo.
+- Plataformas y gates: 17/17 adapters, sintaxis Bash, JSON del adapter,
+  validacion documental y `git diff --check` pasan; la suite Bash completa pasa
+  271/271. El gate formal de cobertura termino con codigo 2 antes de
+  instrumentar porque `bashcov` no esta instalado. PowerShell, Pester, Windows,
+  macOS, ShellCheck y Bashcov no estan disponibles en este host; no se instalo
+  nada y esas plataformas permanecen sin ejecutar.
+- Efecto sobre credenciales: ningun valor, hash, token, ID de cuenta o ruta
+  privada fue leido, registrado o versionado. No hubo logout, refresh, revoke,
+  reautenticacion, copia, move, borrado ni regeneracion. El unico acceso real
+  fue estructural/read-only y el dry-run se rechazo antes de escribir.
+- Punto de reanudacion tras compactacion: no repetir el inventario real y no
+  volver a tocar `codex/luis` automaticamente. El siguiente G2 debe investigar
+  y decidir, con evidencia primaria y fixtures, la frontera de las bases
+  modernas y de OAuth MCP —incluido si schema v2 necesita credenciales
+  opcionales o un mecanismo distinto— antes de modificar runtime, schema o el
+  adapter. Solo despues repetir el dry-run real bajo un G5 nuevo. El apply real
+  conserva un G9 separado; MultiCLI AI y Codexporter siguen fuera de este gate.
+
+### 2026-08-23 — checkpoint compacto de continuidad
+
+- Estado: G0 documental completado; no se modificaron codigo, adapters, schema,
+  perfiles, credenciales, instalaciones ni referencias Git.
+- Objetivo: evitar releer toda la bitacora en cada compactacion sin borrar su
+  historia, evidencia ni decisiones. Se creo
+  [nini-agents-resume.md](nini-agents-resume.md) como indice operativo y se
+  mantuvo este documento como fuente historica canonica.
+- Contenido preservado en el checkpoint: direccion schema v2 con compatibilidad
+  legacy, estado del worktree, garantias del migrador, semantica de rutas,
+  preflight sanitizado de `codex/luis`, validaciones, plataformas ausentes,
+  bloqueo moderno Codex y secuencia restante G2, G5 y G9.
+- Regla de lectura: una reanudacion ordinaria lee `AGENTS.md`, el checkpoint y
+  la skill aplicable. Este documento completo queda para reconstruir historia,
+  resolver contradicciones o delimitar una etapa nueva.
+- Seguridad: el resumen no contiene valores, hashes, IDs ni rutas privadas; no
+  concede autorizacion para repetir el inventario real, ejecutar otro dry-run,
+  aplicar la migracion ni lanzar Codex.
+- Validacion: `python3 scripts/validate-docs.py` y `git diff --check` correctos.
+- Siguiente gate: permanece sin cambios. Investigar y aprobar un G2 funcional
+  para la frontera de bases modernas y OAuth MCP antes de volver a operar sobre
+  `codex/luis` bajo un G5 nuevo.
+
+### 2026-08-23 — G2 de SQLite moderno y bloqueo explicito de OAuth MCP
+
+- Alcance aprobado: investigar el almacenamiento moderno de Codex con fuentes
+  primarias y homes sinteticos; alinear schema, validadores Bash/PowerShell,
+  runtime, migrador, adapter, pruebas y documentacion sin acceder de nuevo a
+  `codex/luis`, `~/.codex` ni credenciales reales. MultiCLI AI, Codexporter,
+  instalaciones, commits y publicaciones quedaron excluidos.
+- Evidencia primaria: la documentacion oficial de
+  [autenticacion](https://learn.chatgpt.com/docs/auth) mantiene `auth.json`
+  bajo `CODEX_HOME` o el credential store del sistema; la
+  [referencia de configuracion](https://learn.chatgpt.com/docs/config-file/config-reference)
+  declara `sqlite_home` para las bases de estado y un store separado para OAuth
+  MCP. No documenta `.credentials.json`, `mcp-oauth-locks/` ni
+  `CODEX_SQLITE_HOME` como contrato portable.
+- Evidencia sintetica: Codex local 0.147.0, ejecutado solo con homes bajo
+  `/tmp`, creo las familias `goals_1`, `logs_2`, `memories_1`, `queue_1` y
+  `state_5`; `doctor` reconocio tambien `thread_history_1`. Cada familia usa
+  `.sqlite`, `-shm` y `-wal`. `installation_id` pudo persistir mediante el link
+  normal existente. La CLI acepto `-c sqlite_home=...` tanto antes como despues
+  de un subcomando. Un intento sintetico de login OAuth no pudo demostrar el
+  formato de archivo ausente ni una semantica equivalente para hardlinks de
+  Windows; no se invento ese contrato.
+- Schema/runtime: `normalState.directPaths` es una clasificacion opcional que
+  debe ser subconjunto exacto de `sharedPaths` o `sessionPaths`. Se migra segun
+  esa clase, pero el runtime no crea source ni link para esa ruta. En
+  account-overlay file/process, `isolation.args` se expande y se agrega despues
+  de las opciones del usuario pero antes de un delimitador literal `--`,
+  permitiendo imponer el root directo sin convertir el flag en input posicional.
+  Bash y PowerShell implementan el mismo contrato.
+- Adapter Codex: `installation_id` es estado compartido; las seis familias
+  SQLite conocidas y sus sidecars son archivos de sesion directos. El launch
+  limpia un `CODEX_SQLITE_HOME` heredado y fuerza el `sqlite_home` documentado
+  al shared root. Los nombres son exactos y versionados; un nombre futuro queda
+  `unknown`, sin globs que puedan capturar secretos.
+- OAuth MCP: `.credentials.json` y `mcp-oauth-locks/` son `unsafePaths`. El
+  migrador Bash/PowerShell los distingue de `unknown` y rechaza antes de todo
+  write. No son `credentialFiles`, no generan placeholders, no se siguen ni se
+  materializan symlinks y no se presupone que puedan compartirse entre cuentas.
+- Ciclo rojo/verde: seis fallos focalizados iniciales demostraron schema,
+  adapter, runtime, SQLite y OAuth ausentes. Tras implementar, las pruebas
+  focalizadas de schema/overlay/migracion pasan 75/75; la suite Bash completa
+  pasa 275/275 y 17/17 adapters validan. Tambien pasan sintaxis Bash, JSON y la
+  comprobacion real-sintetica de posicion de argumentos. PowerShell/Pester,
+  Windows y macOS no estan disponibles en este host; la paridad esta escrita y
+  caracterizada, no ejecutada.
+- Seguridad: no se accedio al perfil real, no se leyo ni mostro contenido de
+  auth/OAuth, y no hubo logout, refresh, revoke, copia, move, borrado,
+  regeneracion ni escritura fuera de fixtures temporales. La compatibilidad
+  whole-root legacy sigue intacta y no se crearon perfiles schema v1.
+- Estado del end-to-end: G2 sintetico cerrado, pero `codex/luis` no es migrable
+  mientras conserve entradas OAuth `unsafe`. El siguiente gate es un G5 nuevo,
+  read-only y dry-run, para confirmar el rechazo explicito y descubrir residuos
+  `unknown`; no autoriza apply. Despues se debe elegir otro piloto sin OAuth o
+  aprobar otro G2 de ownership OAuth. G9 y un lanzamiento real siguen siendo
+  autorizaciones separadas.
+
+### 2026-08-23 — G2 de credencial MCP compartida y preservacion legacy inactiva
+
+- Alcance aprobado: sustituir el bloqueo sintetico de OAuth MCP por un contrato
+  schema v2 seguro, manteniendo `auth.json` por perfil y un unico store OAuth
+  MCP para todos los perfiles Codex administrados por Nini Agents. Incluyo
+  schema, validadores, runtime, migracion, transferencia, diagnostics,
+  adapters, pruebas y documentacion con paridad Bash/PowerShell. Excluyo
+  `codex/luis`, `codex/vivi`, `~/.codex`, stores o instalaciones activas,
+  MultiCLI AI, Codexporter, login/logout real, commits y publicaciones.
+- Evidencia usada: la documentacion oficial separa
+  `cli_auth_credentials_store` de `mcp_oauth_credentials_store`. Codex local
+  0.147.0, ejecutado solo con homes sinteticos, acepto el modo MCP `file`, creo
+  `mcp-oauth-locks/file-store.lock` y acepto `{}` como store inicial sin
+  producir una credencial real. Sus strings muestran `.credentials.json`, los
+  locks y una transaccion de refresh serializada. No se leyo ningun valor real.
+- Contrato nuevo: `sharedCredentialState` es opcional y exclusivo de adapters
+  schema v2 `fileOverlay`. Su `root` debe quedar bajo
+  `.shared/<adapter-id>/` dentro de `MULTICLI_HOME`; `entries` admite
+  `jsonObjectFile` y `directory`; `legacyMigration` solo admite
+  `preserveInactive`. Sus rutas deben ser seguras, unicas/no solapadas y
+  separadas de credenciales de perfil, estado normal, sesiones y `unsafe`.
+- Runtime: Codex usa `MULTICLI_HOME/.shared/codex/mcp/.credentials.json` y
+  `mcp-oauth-locks/` como un grupo. Cada `.runtime` enlaza ambos al mismo
+  backing store, mientras `auth.json` sigue enlazando a `profile/auth/` de cada
+  cuenta. La inicializacion entre perfiles se serializa; un archivo ausente se
+  crea como `{}` y los directorios POSIX con permisos privados. Se aborta ante
+  symlinks, tipos inesperados o hardlinks POSIX no esperados, sin fallback de
+  copia ni lectura del contenido existente. `doctor --deep` reconoce la fuente
+  compartida. El adapter fuerza `cli_auth_credentials_store="file"`,
+  `mcp_oauth_credentials_store="file"` y `sqlite_home` despues de opciones del
+  usuario y antes de `--`.
+- Migracion legacy: `.credentials.json` y `mcp-oauth-locks` dejan de ser
+  `unsafe` y se clasifican `shared-credential`. Nunca se importan al store
+  activo: el objeto legacy mismo —archivo, directorio o link— se mueve por
+  rename del mismo volumen a
+  `.inactive/migrations/<adapter>/<profile>/shared-credentials/`. El target de
+  un link no se sigue ni se imprime. Cada operacion se journaliza como
+  `preserve-shared-credential`; un fallo posterior la devuelve al layout
+  legacy y elimina solo los directorios de recuperacion creados por esa
+  transaccion. Tras exito, la recuperacion queda inactiva y no se elimina
+  automaticamente. La migracion no crea el store compartido ni autentica MCP.
+- Transferencia: el store compartido esta fuera del perfil y no viaja en
+  templates, export, import, clone o move. Ademas, toda ruta declarada y sus
+  descendientes se consideran credencial para rechazar payloads hostiles. La
+  recuperacion inactiva tambien queda fuera del perfil activo.
+- Semantica de dos procesos: `nini-agents launch codex/luis` y
+  `nini-agents launch codex/vivi` tendran `CODEX_HOME` runtime distintos y
+  `auth.json` fisicamente distintos, pero `.credentials.json` y
+  `mcp-oauth-locks/` apuntaran al mismo store. Una autenticacion MCP hecha desde
+  uno queda disponible al otro sin mezclar las cuentas Codex principales.
+- Pruebas sinteticas en este tramo: schema/adapter Bash 32/32, overlay 18/18,
+  migracion 36/36 y transferencia 19/19; 17/17 adapters validos. La suite Bash
+  completa pasa 287/287. Tambien pasan sintaxis Bash, parseo JSON, validacion de
+  documentacion y `git diff --check`. El runtime demuestra inicializacion
+  concurrente desde dos perfiles, identidad compartida de MCP, separacion de
+  auth y rechazo de links/hardlinks inesperados; migracion demuestra dry-run
+  sin writes, preservacion inactiva sin tocar targets y rollback completo;
+  transferencia demuestra exclusion de export y rechazo de import.
+- Paridad no ejecutada: se implementaron validadores, runtime, migracion,
+  transferencia, diagnostics y Pester equivalentes para Windows PowerShell
+  5.1, pero este host no tiene PowerShell/Windows. Tampoco se ejecuto macOS ni
+  un Codex real contra una cuenta. ShellCheck tampoco esta instalado. El gate
+  de cobertura Bash no pudo instrumentarse porque falta `bashcov`; no se
+  instalaron dependencias para ampliar el alcance.
+- Seguridad real: ningun perfil, token, ID, hash, target privado o archivo de
+  credenciales real fue abierto, modificado o mostrado. No hubo logout,
+  refresh, revoke, regeneracion, migracion o lanzamiento real. El preflight de
+  `codex/luis` no se repitio.
+- Siguiente gate: el G2 sintetico y su revision quedan cerrados. Un G5 separado
+  puede repetir solo el preflight estructural minimo y
+  `nini-agents migrate codex/luis --dry-run`; se espera preservacion inactiva de
+  los dos objetos MCP y todavia pueden quedar otras entradas `unknown`. Un
+  apply real, el primer lanzamiento y cualquier login MCP siguen siendo gates
+  independientes.
+
+### 2026-08-23 — segundo G5 real de `codex/luis` tras el contrato MCP compartido
+
+- Alcance aprobado: repetir una sola vez el preflight estructural minimo y
+  `nini-agents migrate codex/luis --dry-run` con el motor G2 actualizado;
+  comparar despues la estructura del perfil y registrar evidencia sanitizada.
+  Quedaron excluidos apply, `--prefer-profile`, launch, login/logout, refresh,
+  revoke, copia, rename, borrado, seguimiento de targets, otros perfiles,
+  consumidores, instalaciones y operaciones Git.
+- Preflight real: el perfil seguia legacy, regular e inactivo; `auth.json`
+  seguia siendo un archivo regular con link count uno; `auth/auth.json`,
+  metadata y artefactos de control seguian ausentes; el perfil y el shared root
+  estaban en el mismo volumen. El store MCP compartido y la recuperacion
+  inactiva aun no existian. Solo se fijaron huellas de metadata; no se abrio ni
+  parseo contenido de autenticacion y no se resolvieron ni mostraron targets.
+- Resultado del unico dry-run: termino con codigo 1 y rechazo fail-closed antes
+  de construir o imprimir el plan porque permanecen 14 entradas `unknown`:
+  `.credentials.json.before-shared-supabase-20260721T202703Z`,
+  `.personality_migration`, `.sandbox_migration`, `.tmp`, `cache`,
+  `config.toml.bak-20260704`, `config.toml.bak-20260705-516-workaround`,
+  `gpt-5.5-no-intermediary-updates.md`,
+  `mcp-oauth-locks.before-shared-supabase-20260721T202703Z`,
+  `models_cache.json`, `shell_snapshots`, `thread-writer-locks`, `tmp` y
+  `version.json`. No hubo overlaps ni entradas `unsafe` reportadas.
+- Evidencia del contrato nuevo: los objetos activos `.credentials.json` y
+  `mcp-oauth-locks` ya no aparecen como `unknown`, a diferencia del primer G5.
+  Esto confirma su clasificacion `shared-credential`; sin embargo, el rechazo
+  global ocurre antes de `migration_plan_ops`, por lo que este dry-run no llego
+  a imprimir las operaciones `preserve-shared-credential`. No debe afirmarse
+  todavia que el plan real completo esta limpio.
+- Postflight real: las huellas estructurales de `auth.json` y del top-level del
+  perfil fueron identicas; proceso, destinos y artefactos de control siguieron
+  ausentes; tampoco se crearon el store MCP compartido ni la recuperacion
+  inactiva. No hubo logout, refresh, revoke, regeneracion, copia, move, borrado
+  ni escritura sobre el perfil o credenciales reales.
+- Validacion de cierre: `python3 scripts/validate-docs.py` y
+  `git diff --check` pasaron. No se repitieron suites funcionales porque este
+  gate no cambio codigo, schema, adapter ni pruebas. PowerShell/Windows, macOS,
+  ShellCheck y cobertura Bash permanecen sin ejecutar en este host.
+- Bloqueo siguiente: decidir bajo un G2 separado la clasificacion contractual
+  de las 14 entradas restantes usando evidencia primaria y fixtures
+  sinteticos. Los dos objetos `*.before-shared-supabase-*` son backups OAuth
+  por nombre y deben permanecer fail-closed hasta definir preservacion o una
+  frontera explicita; esa inferencia no autoriza borrarlos ni declararlos estado
+  normal. Solo despues corresponde otro G5. G9, launch real y login MCP siguen
+  siendo autorizaciones independientes.
+
+### 2026-08-23 — G2 sintetico de residuos reconstruibles y backups MCP
+
+- Alcance aprobado: investigar las 14 entradas rechazadas por el segundo G5 y
+  clasificar solo las demostrables; alinear schema, validadores, migracion,
+  transferencia, `doctor`, adapter, pruebas y documentacion con paridad
+  Bash/PowerShell. Quedaron excluidos nuevos accesos a perfiles/home/credenciales
+  reales, apply, launch, login/logout, `--prefer-profile`, consumidores,
+  instalaciones y operaciones Git.
+- Evidencia primaria: la [referencia oficial de configuracion de
+  Codex](https://learn.chatgpt.com/docs/config-file/config-reference) documenta
+  `CODEX_HOME/config.toml`, `sqlite_home`, `log_dir` y el store OAuth MCP, pero
+  no declara los nombres de cache, snapshots, locks o marcadores observados. La
+  [documentacion oficial de autenticacion](https://learn.chatgpt.com/docs/auth)
+  mantiene `auth.json` como estado portador de tokens bajo `CODEX_HOME`; no se
+  reclasifico ningun residuo ambiguo como auth principal.
+- Evidencia local sintetica: strings del binario instalado Codex 0.147.0
+  vinculan `.sandbox_migration` al migrador de sandbox, `models_cache.json` al
+  manager/cache de modelos, `shell_snapshots` al snapshot de shell,
+  `thread-writer-locks` al lock local de escritura y `version.json` al cache de
+  actualizacion. Homes enteramente bajo `/tmp` demostraron que archivos vacios
+  o `{}` para `models_cache.json` y `version.json` son formatos invalidos; por
+  eso el motor no los inicializa. `.personality_migration` no obtuvo evidencia
+  suficiente y permanece desconocido.
+- Contrato nuevo: `normalState.runtimePaths` contiene rutas exactas de estado
+  reconstruible generado por la herramienta dentro de `.runtime`. No crea
+  source, placeholder, link ni entrada de `.runtime-manifest`; `doctor --deep`
+  reconoce la ruta y descendientes. Migracion preserva el objeto legacy por
+  rename del mismo volumen bajo
+  `.inactive/migrations/<adapter>/<profile>/runtime-state/`, journaliza
+  `preserve-runtime-state` y lo devuelve durante rollback.
+- Backups MCP: `sharedCredentialState.legacyBackupPattern: dotSuffix` reconoce
+  siblings `<entry>.<sufijo-no-vacio>`. Se clasifican como credenciales,
+  permanecen fuera de transferencias y se preservan por la misma operacion
+  `preserve-shared-credential` usada para objetos MCP activos. No se leen,
+  copian, fusionan ni activan. Los validadores rechazan cualquier solapamiento
+  de este namespace con otra declaracion.
+- Adapter Codex: `shell_snapshots/` y `thread-writer-locks/` pasan a sesion;
+  `.sandbox_migration`, `cache/`, `models_cache.json` y `version.json` pasan a
+  runtime reconstruible; los backups `.credentials.json.*` y
+  `mcp-oauth-locks.*` usan la frontera de credencial compartida. Permanecen
+  deliberadamente `unknown` `.personality_migration`, `.tmp`, `tmp`, los dos
+  `config.toml.bak-*` observados y `gpt-5.5-no-intermediary-updates.md`.
+- Pruebas sinteticas: el ciclo rojo expuso campos ausentes en schema/adapter.
+  Las pruebas focalizadas verdes cubren validacion y separacion de rutas,
+  dry-run sin writes, apply por rename, journal, rollback, exclusion/rechazo de
+  transferencia, reconocimiento de `doctor` y una fixture con las 14 rutas que
+  conserva exactamente las seis ambiguas como `unknown`.
+- Validacion de cierre: schema/adapter 34/34, overlay 18/18, migracion 38/38,
+  transferencia 19/19 y suite Bash completa 291/291; 17/17 adapters validos.
+  Tambien pasan sintaxis Bash, parseo JSON, documentacion y `git diff --check`.
+  El gate de cobertura termina antes de instrumentar porque falta `bashcov`.
+  PowerShell/Pester 5.1, Windows, macOS y ShellCheck no estan disponibles en
+  este host; no se instalaron dependencias y no se declaran ejecutados.
+- Seguridad y estado real: no se repitio el G5, no se accedio a
+  `codex/luis`, `codex/vivi`, `~/.codex` ni a ningun valor/target de credencial.
+  No hubo logout, refresh, revoke, autenticacion, copia, move, borrado o
+  regeneracion real. El siguiente gate es otro G5 explicitamente autorizado;
+  aun debe fallar cerrado si los seis residuos permanecen. G9 y launch/login
+  reales siguen separados.
+
+### 2026-08-23 — preservacion transaccional y dry-run de perfiles excepto `codex/tienda`
+
+- Alcance aprobado: con `codex/tienda` activo, corregir primero el riesgo
+  descubierto
+  en el plan real de Luis y despues ejecutar `migrate --dry-run` sobre Luis y
+  los otros perfiles Codex excepto `codex/tienda`. Quedaron excluidos apply,
+  launch, cierre o migracion de `codex/tienda`, `--prefer-profile`, lectura de
+  credenciales, login/logout/refresh/revoke, consumidores, instalaciones y
+  operaciones Git.
+- Riesgo corregido: el plan anterior podia omitir una base SQLite ya existente
+  en el root compartido y a la vez mover sidecars ausentes desde un perfil
+  legacy. Esa combinacion podia formar una familia transaccional inconsistente.
+  `thread-writer-locks/` tambien era estado volatil que no debia fusionarse con
+  otro escritor activo.
+- Contrato nuevo: `normalState.migrationPreservePaths` es una subclasificacion
+  opcional y exclusiva de migracion. Cada ruta debe ser segura y pertenecer
+  exactamente a `sharedPaths` o `sessionPaths`; no introduce estado ni cambia
+  el runtime. El objeto legacy se mueve completo por rename del mismo volumen a
+  `.inactive/migrations/<adapter>/<profile>/profile-state/`, queda journalizado
+  como `preserve-profile-state` y vuelve a su ubicacion original en rollback.
+- Adapter Codex: las seis familias SQLite exactas —archivo `.sqlite` y
+  sidecars `-shm`/`-wal`— y `thread-writer-locks/` conservan su declaracion de
+  estado de sesion para schema v2, pero sus instancias legacy se preservan
+  inactivas. No se comparan, deduplican, fusionan ni activan automaticamente.
+  Sesiones individuales, history, snapshots, configuracion, plugins y skills
+  conservan la politica ordinaria de merge.
+- Implementacion: schema y validadores Bash/PowerShell aceptan y restringen el
+  campo; ambos migradores clasifican, planean, reportan, ejecutan y revierten
+  `preserve-profile-state` con el mismo root inactivo y protecciones de volumen,
+  traversal, links y destinos preexistentes. Runtime, launchers, auth principal
+  y store MCP no cambiaron.
+- Pruebas sinteticas: schema/migracion focalizadas pasan 78/78. Cubren field
+  valido, traversal y rutas no declaradas; dry-run de una familia SQLite sin
+  writes; apply que conserva SQLite/sidecars/locks inactivos; journal y rollback
+  que los devuelve al legacy. La suite Bash completa pasa 297/297, los adapters
+  17/17 y la documentacion valida. Sintaxis Bash, JSON y `git diff --check`
+  pasan. Cobertura se intento y termino antes de instrumentar porque falta
+  `bashcov`; no se instalaron dependencias. PowerShell/Pester, Windows, macOS,
+  ShellCheck no estan disponibles y no se declaran ejecutados.
+- G5 real protegido: se ejecuto primero Luis y despues los otros catorce
+  perfiles Codex autorizados, siempre con `--dry-run --preserve-unknown`, sin
+  `--prefer-profile`; `codex/tienda` quedo excluido. Los quince comandos
+  terminaron con codigo cero y produjeron planes completos. Cada plan incluyo una credencial
+  principal por rename, preservacion transaccional, preservacion MCP/runtime
+  segun los objetos presentes y preservacion explicita de los residuos
+  desconocidos observados.
+- Postflight real: para los quince perfiles, un snapshot estructural completo y
+  la metadata de filesystem de `auth.json` coincidieron antes/despues. No se
+  abrio contenido de autenticacion ni se imprimieron nombres privados de
+  sesiones, targets, IDs o hashes. No se crearon `auth/`, `.profile.json`,
+  journal, lock, rollback, recuperacion inactiva ni store MCP. `~/.codex` y
+  `codex/tienda` no fueron modificados por el migrador. El contenedor previo y
+  vacio `.inactive/codex/` permanecio como estaba; no aparecio un subtree
+  `.inactive/migrations/`.
+- Estado en ese cierre: el gate read-only solicitado quedo cerrado. Se dejo
+  pendiente un preflight especifico de la sesion `codex/tienda` antes de aplicar
+  solamente Luis. Launch de Luis, migracion de los otros perfiles y
+  `codex/tienda` siguieron siendo decisiones posteriores.
+
+### 2026-08-23 — G9 real y launch controlado de `codex/luis`
+
+- Alcance aprobado: identificar expresamente la sesion activa como
+  `codex/tienda`, demostrar que no solapaba los destinos del apply, migrar solo
+  `codex/luis` con `--preserve-unknown` y sin `--prefer-profile`, verificar el
+  resultado, ejecutar un launch real controlado sin prompts y actualizar las
+  bitacoras. Quedaron fuera otros perfiles, consumidores, instalaciones y Git.
+- Preflight real: el primer sondeo dentro del sandbox no podia observar los
+  procesos Codex del host y se descarto como evidencia. El preflight repetido
+  fuera del sandbox confirmo que el `CODEX_HOME` efectivo correspondia a
+  `codex/tienda`, que era un perfil legacy regular distinto de Luis y que tres
+  procesos activos usaban esa raiz. No habia procesos con el environment de
+  Luis, overrides SQLite, enlaces, hardlinks, descriptores abiertos ni cwd de
+  tienda hacia Luis, `~/.codex` o la recuperacion inactiva. No se mostraron
+  rutas, argumentos, IDs ni contenido de archivos.
+- Apply: `nini-agents migrate codex/luis --preserve-unknown` se ejecuto fuera
+  del sandbox y termino con codigo cero. El journal completo registro 339
+  operaciones: una `move-credential`, cuatro
+  `preserve-shared-credential`, cuatro `preserve-runtime-state`, diecinueve
+  `preserve-profile-state`, seis `preserve-unknown`, 235 `merge-move`, sesenta
+  y cuatro `remove-duplicate`, cinco `skip-conflict` y una `write-metadata`.
+  Quedaron 334 operaciones `done` y cinco `skipped`, sin fallos ni pendientes.
+- Postflight previo al launch: `auth.json` desaparecio de la raiz legacy y el
+  mismo objeto de filesystem aparecio bajo `auth/auth.json`, conservando
+  dispositivo, inode, link count uno, modo, tamano y mtime. `.profile.json` es
+  schema v2 para Codex/accountOverlay; el journal quedo `completed`; no quedaron
+  lock, temporal ni rollback; y las recuperaciones `shared-credentials`,
+  `runtime-state`, `profile-state` y `unknown-state` quedaron regulares. El
+  migrador no creo `.runtime` ni inicializo el store MCP.
+- Launch: los smokes capturados de version y `login status` terminaron con
+  codigo cero. El motor construyo `.runtime`, enlazo su `auth.json` al archivo
+  del perfil e inicializo y enlazo el store MCP compartido. Despues se mantuvo
+  la interfaz real activa durante ocho segundos en un pseudo-terminal con la
+  pantalla suprimida, no se envio ningun prompt y se cerro normalmente con
+  `Ctrl-C` y codigo cero.
+- Efecto observado de upstream: hasta los smokes no interactivos la metadata de
+  filesystem de la credencial permanecio identica. Durante la interfaz Codex
+  escribio el mismo archivo: dispositivo, inode, link count y modo siguieron
+  iguales, mientras tamano y mtime cambiaron. No se leyo ni comparo contenido,
+  por lo que no se atribuye la escritura a refresh, normalizacion u otra causa.
+  No quedo ningun proceso Luis activo. `codex/tienda` permanecio legacy y la
+  metadata de filesystem de su credencial no cambio.
+- Estado: el canary Luis ya esta migrado a schema v2 y el launch con el motor
+  nuevo quedo demostrado en este host Linux. Los cinco conflictos omitidos
+  conservaron la version existente del root compartido; no se uso
+  `--prefer-profile`. Los otros catorce perfiles y `codex/tienda` siguen sin
+  apply. PowerShell, Windows y macOS no fueron probados en este gate.
+
+### 2026-08-23 — incidente durante el apply masivo de perfiles Codex
+
+- Alcance autorizado: continuar la migracion protegida de los perfiles Codex
+  restantes con `--preserve-unknown`, sin `--prefer-profile`, instalar sus
+  wrappers Nini y hacer smokes controlados. `codex/tienda` quedo expresamente
+  excluido por ser la sesion activa. La recuperacion de `codex/amigo` se separo
+  del resto: debe volver a layout legacy y recibir solo un dry-run, sin apply ni
+  cambio de wrapper.
+- Avance confirmado antes del incidente: `codex/abejita` completo apply,
+  postflight, wrapper y smokes. No se atribuye ese resultado a los otros
+  perfiles del lote.
+- Incidente de `codex/amigo`: `migration_journal_write` reconstruia todo el
+  arreglo de operaciones despues de cada paso mediante invocaciones repetidas
+  de `jq`. El costo era cuadratico y, con el plan grande de Amigo, la
+  serializacion termino excediendo `ARG_MAX`. La escritura no protegia el
+  journal anterior ante ese error y publico un journal vacio desde el temporal.
+  La interrupcion del comando supervisor tampoco termino el proceso real fuera
+  del sandbox; ese proceso siguio moviendo estado hasta que fue localizado y
+  detenido expresamente.
+- Evidencia congelada para recuperacion: sin abrir ni comparar valores de
+  credenciales, el postflight estructural registra la credencial y 32
+  preservaciones ya movidas, 285 `merge-move` ejecutados y 16 slots regulares
+  de rollback. Esos conteos sustituyen las estimaciones anteriores; no debe
+  intentarse launch, un nuevo apply ni una reconstruccion por intuicion mientras
+  el perfil permanezca parcial.
+- Fix local del journal: la serializacion completa usa un unico `jq` en modo
+  streaming por escritura, y el temporal solo reemplaza el journal vigente si
+  `jq` termina correctamente. Ante error se conserva el journal previo y se
+  elimina el temporal fallido. Se mantienen el journal por operacion y el
+  rollback; no se omite ni se difiere evidencia transaccional.
+- Estado al registrar este checkpoint: `codex/amigo` aun no esta recuperado ni
+  migrado; su siguiente operacion autorizada es la recuperacion fail-closed y,
+  si la verificacion estructural coincide, unicamente
+  `migrate --dry-run --preserve-unknown`. Los otros once perfiles del lote aun
+  estan pendientes de apply normal. `codex/tienda` permanece excluido. No se
+  afirma que ninguna de esas doce operaciones pendientes haya terminado.
+- Issue separada de rendimiento: el preflight de `launch` con el motor nuevo
+  tarda aproximadamente siete segundos en la validacion repetida del adapter,
+  incluso antes de entregar control a Codex. No bloqueo los smokes ya
+  completados, pero debe perfilarse y optimizarse despues de cerrar la migracion
+  sin debilitar la validacion fail-closed.
+
+### 2026-08-23 — recuperacion de Amigo y cierre del lote excepto Tienda
+
+- Recuperacion real de `codex/amigo`: con el proceso viejo ya detenido, se
+  restauraron en orden inverso y contra la evidencia congelada los 16 slots de
+  rollback, 285 `merge-move`, 32 preservaciones y la credencial principal. El
+  perfil volvio al layout legacy y la identidad de filesystem de la credencial
+  quedo preservada. No se abrio ni comparo su contenido.
+- Verificacion de Amigo: se ejecuto una sola vez
+  `migrate codex/amigo --dry-run --preserve-unknown`. Termino con codigo cero y
+  un plan de 500 operaciones. El arbol estructural y la metadata de la
+  credencial coincidieron antes y despues; el dry-run no creo metadata v2,
+  `auth/`, journal, lock, rollback ni recuperacion inactiva. Amigo queda legacy,
+  sin apply y con su wrapper anterior; no debe presentarse como migrado.
+- Apply secuencial restante: `codex/ari`, `codex/diego`, `codex/kitsune`,
+  `codex/magic`, `codex/mari`, `codex/nexo`, `codex/nico`, `codex/omega`,
+  `codex/pro`, `codex/sam` y `codex/willy` completaron migracion schema v2 con
+  `--preserve-unknown` y sin `--prefer-profile`. Sus journals terminaron
+  `completed` y registraron cero operaciones `failed`.
+- Totales de journal por perfil: Ari 317, Diego 560, Kitsune 77, Magic 432,
+  Mari 294, Nexo 319, Nico 1776, Omega 53, Pro 26, Sam 97 y Willy 65; en total,
+  4016 operaciones. Los conteos incluyen las operaciones `skipped` conservadas
+  por la politica de conflicto y no implican que se haya preferido el perfil.
+- Lanzamiento: los once perfiles recibieron su wrapper Nini, `login status`
+  confirmo estado autenticado y cada TUI completo el smoke controlado. Estos
+  smokes prueban el flujo observado en este host Linux; PowerShell, Windows y
+  macOS no se verificaron.
+- Exclusiones y estado final: `codex/tienda` permanecio activo, legacy e
+  intacto durante todo el lote. `codex/amigo` queda deliberadamente en estado
+  dry-run-only, legacy y sin wrapper Nini. El cierre no autoriza aplicar ninguno
+  de esos dos perfiles ni resolver los conflictos omitidos de Luis.
+- Rendimiento pendiente: el fix streaming del journal permitio conservar el
+  journal por operacion sin el comportamiento cuadratico del incidente. La
+  validacion previa de `launch`, observada en aproximadamente siete segundos,
+  permanece como issue separada para una etapa posterior.
+
+### 2026-08-23 — apply final de Amigo y handoff de Tienda
+
+- Alcance posterior autorizado: migrar solamente `codex/amigo`, instalar su
+  wrapper Nini conservando la seleccion de navegador y verificar login, runtime
+  y TUI. `codex/tienda`, los otros perfiles, `--prefer-profile`, codigo y
+  documentacion quedaron fuera de ese apply.
+- Preflight de Amigo: despues de consolidar los otros perfiles se repitio fuera
+  del sandbox el guard de procesos, la revision estructural metadata-only y el
+  dry-run. Amigo estaba legacy, inactivo, con credencial regular de un solo
+  enlace, wrapper legacy que exportaba Microsoft Edge y sin artefactos de
+  control o recuperacion. El dry-run fresco termino con codigo cero y no cambio
+  el arbol ni la metadata de la credencial.
+- Plan aplicado: 500 operaciones con `--preserve-unknown` y sin
+  `--prefer-profile`: 213 `merge-move`, 246 duplicados, seis conflictos
+  omitidos, una credencial, tres preservaciones de credencial compartida,
+  cuatro de runtime, 17 de estado de perfil, ocho unknown, un link omitido y
+  una escritura de metadata.
+- Resultado: el journal termino `completed`, con 493 operaciones `done`, siete
+  `skipped` y cero `failed`. La credencial paso a `auth/auth.json` conservando
+  su identidad de filesystem; no quedaron lock ni rollback. No se abrio ni se
+  imprimio contenido de autenticacion.
+- Wrapper y launch: `codex-amigo` ahora ejecuta
+  `~/.local/bin/nini-agents launch codex/amigo` y conserva
+  `BROWSER=/usr/bin/microsoft-edge`. `login status` confirmo autenticacion, el
+  runtime enlazo la credencial del perfil, el smoke TUI paso y no quedaron
+  procesos residuales ni cambios de metadata de la credencial.
+- Estado de continuidad: `codex/tienda` es el unico perfil Codex pendiente de
+  migracion. Otro agente debe ejecutarse desde un perfil schema v2 ya migrado,
+  esperar a que esta sesion Tienda y cualquier proceso con su `CODEX_HOME`
+  terminen, y repetir preflight y dry-run reales. No debe inferir el plan desde
+  otros perfiles ni aplicar sin una autorizacion explicita posterior.
+- Procedimiento Tienda: verificar metadata-only y ausencia de control/recovery;
+  ejecutar `migrate codex/tienda --dry-run --preserve-unknown`; informar el
+  plan exacto y obtener autorizacion; repetir el guard y aplicar sin
+  `--prefer-profile`; verificar journal, identidad de credencial, metadata v2 y
+  recuperacion; finalmente cambiar el wrapper conservando exactamente
+  `BROWSER=/usr/bin/brave-browser` y probar `login status`, runtime y TUI. No
+  ejecutar logout, refresh, revoke ni leer valores de autenticacion.
+
+### 2026-08-23 — G9 final de Tienda y cierre de migracion Codex
+
+- Alcance aprobado: desde un agente ejecutado con otro perfil schema v2,
+  realizar el G5 read-only y despues un G9 separado para migrar solamente
+  `codex/tienda`, cambiar su wrapper conservando Brave, validar version, login,
+  runtime y TUI, y actualizar las bitacoras. Quedaron fuera `--prefer-profile`,
+  otros perfiles, limpieza de conflictos o recuperaciones, logout, refresh,
+  revoke, codigo, consumidores y operaciones Git.
+- Preflight G5: la sesion del agente no pertenecia a Tienda. Un guard inicial
+  excesivamente amplio encontro un proceso del usuario cuyo entorno no era
+  legible, pero el diagnostico contractual mostro que no correspondia a ningun
+  binario Codex declarado; 97 procesos eran atribuibles y ninguno apuntaba al
+  `CODEX_HOME` de Tienda. El perfil era legacy regular, `auth.json` era regular
+  con link count uno y no existian metadata v2, destino de credencial, journal,
+  lock, rollback ni recuperacion previa.
+- Dry-run G5: termino con codigo cero y 1144 operaciones: una
+  `move-credential`, tres `preserve-shared-credential`, cuatro
+  `preserve-runtime-state`, 15 `preserve-profile-state`, ocho
+  `preserve-unknown`, 887 `merge-move`, 218 `remove-duplicate`, seis
+  `skip-conflict`, un `skip-link` y una `write-metadata`. No hubo reemplazos ni
+  `--prefer-profile`; el arbol estructural y la metadata de la credencial
+  coincidieron antes y despues, sin artefactos creados.
+- Apply G9: el guard y un dry-run frescos repitieron exactamente el plan antes
+  de escribir. El journal termino `completed` con 1137 operaciones `done`, siete
+  `skipped`, cero `failed` y cero pendientes. `auth.json` dejo la raiz legacy,
+  la operacion de credencial quedo `done` bajo la verificacion de identidad del
+  migrador y `auth/auth.json` quedo regular con link count uno. `.profile.json`
+  declara schema v2/accountOverlay; las recuperaciones `shared-credentials`,
+  `runtime-state`, `profile-state` y `unknown-state` estan presentes; no quedaron
+  lock, rollback, temporal ni runtime prematuro.
+- Anomalia de supervision: el proceso que encapsulaba el apply devolvio no cero
+  despues de que el journal ya estaba `completed`. El postflight inmediato e
+  independiente verifico todos los invariantes anteriores y una invocacion
+  posterior de `migrate` termino como no-op por schema v2. No se repitio el
+  apply y no se atribuye la causa del retorno al motor sin evidencia adicional.
+- Wrapper y smokes: `codex-tienda` ejecuta el launcher Nini y conserva
+  exactamente `BROWSER=/usr/bin/brave-browser`. `--version` y `login status`
+  terminaron con codigo cero; el runtime reconstruido enlaza `auth.json` al
+  archivo del perfil. Dos TUI se mantuvieron ocho segundos sin prompts y se
+  cerraron con `Ctrl-C`; el segundo registro codigo cero. La metadata de la
+  credencial fue identica antes y despues del smoke medido y no quedaron
+  procesos con el entorno de Tienda.
+- Seguridad y datos: no se abrio, parseo, imprimio ni comparo contenido de
+  autenticacion; no hubo logout, refresh, revoke ni reautenticacion solicitada.
+  El apply real modifico el perfil, el estado compartido y las recuperaciones
+  conforme al journal; el wrapper activo tambien cambio. No se borraron las
+  recuperaciones inactivas ni se resolvieron los seis conflictos omitidos.
+- Validacion documental: `python3 scripts/validate-docs.py` y
+  `git diff --check` pasaron. Las advertencias de normalizacion CRLF proceden de
+  archivos PowerShell ya modificados en el worktree y no cambiaron durante este
+  cierre.
+- Estado final: los quince perfiles Codex estan migrados a schema v2, usan
+  wrappers Nini y pasaron smokes en este host Linux. PowerShell, Windows y macOS
+  no fueron verificados. Permanecen como gates separados los cinco conflictos
+  historicos de Luis, la latencia previa a `launch`, el comando publico de
+  movimiento, las mutaciones JSON y las migraciones de MultiCLI AI y
+  Codexporter.
+
+### 2026-08-24 — launcher rapido y permisos Codex compartidos
+
+- Alcance aprobado: optimizar el launcher posterior a la migracion de todas las
+  cuentas y agregar un comando general de permisos para Codex. Quedaron fuera
+  accesos o cambios a perfiles y credenciales reales, instalaciones,
+  publicaciones, Git y migraciones adicionales.
+- Causa: el launch schema v2 ejecutaba el validador semantico completo y volvia
+  a consultar el mismo adapter mediante cientos de procesos `jq` antes de
+  entregar control a Codex. El fixture caliente reprodujo 388 invocaciones; en
+  uso real se habian observado aproximadamente 7--10 s de espera frente a
+  0.03--0.04 s del binario directo.
+- Cambio: Bash carga en una sola pasada NUL-delimitada el contrato consumido por
+  launch y runtime; PowerShell usa un unico `ConvertFrom-Json`. El overlay
+  vigente se comprueba antes del lock y se vuelve a comprobar dentro de el.
+  Los campos ya cargados se reutilizan durante descubrimiento, expansion,
+  manifest y dispatch.
+- Frontera de seguridad: launch sigue rechazando JSON ilegible, IDs,
+  estrategias y binarios basicos inconsistentes y valida traversal justo antes
+  de cada join de filesystem. La validacion semantica exhaustiva no se elimino:
+  permanece en creacion y mutaciones, `permissions`, `doctor` y los validadores
+  del repositorio. Una prueba muta una ruta usada y demuestra rechazo antes de
+  escapar del root; otra demuestra que `doctor` detecta una ruta invalida no
+  usada por launch.
+- Resultado medido: el mismo fixture Codex caliente paso de 388 a dos procesos
+  `jq` (99.5 % menos) y midio 0.08 s. La medicion no relanzo ninguna cuenta ni
+  proceso real.
+- Permisos: `nini-agents permissions show` y
+  `nini-agents permissions set <read-only|workspace|full-access>` operan sobre
+  el `config.toml` normal compartido por los perfiles Codex account-overlay no
+  aislados. Los presets
+  escriben `:read-only`/`on-request`, `:workspace`/`on-request` o
+  `:danger-full-access`/`never`; eliminan overrides sandbox legacy, preservan
+  configuracion no relacionada, rechazan links y claves top-level duplicadas,
+  validan un staging con Codex y publican por reemplazo atomico. En POSIX el
+  archivo queda `0600`.
+- Semantica de sesion: el archivo compartido puede guardarse mientras existen
+  sesiones abiertas, pero define el default de sesiones nuevas. Una seleccion
+  hecha dentro de una sesion Codex activa sigue siendo local a ese proceso
+  hasta reiniciarlo. El comando no abre ni modifica `auth.json`, tokens ni el
+  store MCP.
+- Validacion: suite Bash 310/310, pruebas focalizadas 74/74, 17/17 adapters,
+  sintaxis Bash, documentacion y `git diff --check`. Un home sintetico paso
+  `codex --strict-config --version` con Codex CLI 0.147.0. El runner completo
+  tambien ejercito builds y uninstalls hermeticos en temporales; no instalo,
+  desinstalo ni publico nada real. El gate de cobertura no inicio porque falta
+  `bashcov`. PowerShell/Pester, Windows y macOS no estan disponibles en este
+  host y permanecen sin ejecucion.

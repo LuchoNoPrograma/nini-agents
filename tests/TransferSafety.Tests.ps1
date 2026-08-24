@@ -447,6 +447,43 @@ Describe 'schema-v2 transfer safety' {
         } finally { Remove-TransferScratch $scratch }
     }
 
+    It 'keeps shared credential state outside exports and rejects it on import' {
+        $scratch = New-TransferScratch
+        try {
+            $adapter = New-TransferAdapter
+            $adapter | Add-Member -NotePropertyName sharedCredentialState -NotePropertyValue ([pscustomobject]@{
+                root = '.shared/fixture/oauth'
+                entries = @([pscustomobject]@{ path = 'oauth-store'; kind = 'directory' })
+                legacyMigration = 'preserveInactive'
+                legacyBackupPattern = 'dotSuffix'
+            })
+            $shared = Write-TransferSharedState $scratch
+            $profile = Initialize-TransferProfile -Scratch $scratch -Adapter $adapter -Name 'account-a' -SharedRoot $shared
+            $store = Join-Path $scratch.Profiles '.shared\fixture\oauth\oauth-store'
+            New-Item -ItemType Directory -Force -Path $store | Out-Null
+            Set-Content -LiteralPath (Join-Path $store 'token.cache') -Value 'synthetic-shared-credential' -Encoding ASCII
+            $archive = Join-Path $scratch.Root 'shared-credential-export.zip'
+
+            Export-MultiCliProfile -Adapter $adapter -ProfileDir $profile -OutPath $archive -ProfileName 'account-a'
+
+            $entries = Get-ZipEntryNames -Path $archive
+            @($entries | Where-Object { $_ -like '*oauth-store*' }).Count | Should Be 0
+
+            $hostile = Join-Path $scratch.Root 'shared-credential-import.zip'
+            New-HostileZip -Path $hostile -Entries @(
+                @{ Name = 'oauth-store.before-test/token.cache'; Content = 'forged' },
+                (Get-StagedManifestEntry -AdapterId 'fixture')
+            )
+            $destination = Join-Path $scratch.Profiles 'fixture\evil-shared-credential'
+
+            $message = Get-ThrownMessage { Import-MultiCliProfile -Adapter $adapter -ArchivePath $hostile -DestinationDir $destination }
+
+            $message | Should Not BeNullOrEmpty
+            $message.Contains('credential') | Should Be $true
+            (Test-Path -LiteralPath $destination) | Should Be $false
+        } finally { Remove-TransferScratch $scratch }
+    }
+
     It 'import refuses archives with a foreign or missing adapter manifest' {
         $scratch = New-TransferScratch
         try {

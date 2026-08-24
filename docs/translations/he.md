@@ -116,6 +116,7 @@ nini-agents claude-cli/work
 | `nini-agents auth set <tool>/<profile>` | שמירת סוד תהליך במאגר פרטי האימות של מערכת ההפעלה |
 | `nini-agents auth status <tool>/<profile>` | בדיקה אם הסוד קיים |
 | `nini-agents auth clear <tool>/<profile>` | הסרת הסוד |
+| `nini-agents permissions show \| set <read-only\|workspace\|full-access>` | הצגה או שמירה של הרשאות Codex משותפות לסשנים חדשים |
 | `nini-agents continue <tool> <src> <dest> [--dry-run] [--no-merge]` | העתקת מצב סשן נתמך, ללא פרטי אימות |
 | `nini-agents template save <tool>/<profile> <name>` | שמירת תבנית בסכמה v2 ללא פרטי אימות |
 | `nini-agents template list \| delete <name>` | הצגת תבניות או מחיקתן |
@@ -126,7 +127,7 @@ nini-agents claude-cli/work
 
 | פקודה | פעולה |
 |---|---|
-| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]` | העברת פרופיל ישן ל-schema v2 |
+| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile] [--preserve-unknown]` | העברת פרופיל ישן ל-schema v2 |
 | `nini-agents status` | הצגת פרופילים וגדלים |
 | `nini-agents stats` | הצגת נפח האחסון של הפרופילים |
 | `nini-agents doctor [--deep]` | אבחון ההגדרות ובדיקה אופציונלית של סביבות ההרצה |

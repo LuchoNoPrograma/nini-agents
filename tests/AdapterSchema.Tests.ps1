@@ -83,12 +83,36 @@ function Invoke-AdapterValidator {
 }
 
 Describe 'adapter schema validation' {
-    It 'declares Codex user-local POSIX discovery and shared rules state' {
+    It 'isolates main Codex auth and declares shared MCP OAuth state explicitly' {
         $codex = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'ai-tools\codex\adapter.json') -Raw | ConvertFrom-Json
 
         (@($codex.binary.macos) -contains '$HOME/.local/bin/codex') | Should Be $true
         (@($codex.binary.linux) -contains '$HOME/.local/bin/codex') | Should Be $true
         (@($codex.normalState.sharedPaths) -contains 'rules') | Should Be $true
+        (@($codex.normalState.sharedPaths) -contains 'AGENTS.md') | Should Be $true
+        (@($codex.normalState.sharedPaths) -contains 'log') | Should Be $true
+        (@($codex.normalState.filePaths) -contains 'AGENTS.md') | Should Be $true
+        (@($codex.isolation.args) -join "`n") | Should Be (@(
+            '-c', 'cli_auth_credentials_store="file"',
+            '-c', 'mcp_oauth_credentials_store="file"',
+            '-c', 'sqlite_home="{sharedStateRoot}"'
+        ) -join "`n")
+        (@($codex.normalState.sessionPaths) -contains 'state_5.sqlite') | Should Be $true
+        (@($codex.normalState.sessionPaths) -contains 'shell_snapshots') | Should Be $true
+        (@($codex.normalState.sessionPaths) -contains 'thread-writer-locks') | Should Be $true
+        (@($codex.normalState.runtimePaths) -join "`n") | Should Be (@('.sandbox_migration', 'cache', 'models_cache.json', 'version.json') -join "`n")
+        (@($codex.normalState.directPaths) -contains 'state_5.sqlite') | Should Be $true
+        $expectedMigrationPreservePaths = @($codex.normalState.directPaths) + @('thread-writer-locks')
+        (@($codex.normalState.migrationPreservePaths | Sort-Object) -join "`n") | Should Be (@($expectedMigrationPreservePaths | Sort-Object) -join "`n")
+        (@($codex.normalState.filePaths) -contains 'state_5.sqlite') | Should Be $true
+        (@($codex.normalState.sharedPaths) -contains 'installation_id') | Should Be $true
+        $codex.sharedCredentialState.root | Should Be '.shared/codex/mcp'
+        $codex.sharedCredentialState.legacyMigration | Should Be 'preserveInactive'
+        $codex.sharedCredentialState.legacyBackupPattern | Should Be 'dotSuffix'
+        (@($codex.sharedCredentialState.entries.path) -join "`n") | Should Be (@('.credentials.json', 'mcp-oauth-locks') -join "`n")
+        (@($codex.sharedCredentialState.entries.kind) -join "`n") | Should Be (@('jsonObjectFile', 'directory') -join "`n")
+        (@($codex.normalState.unsafePaths) -contains '.credentials.json') | Should Be $false
+        (@($codex.normalState.unsafePaths) -contains 'mcp-oauth-locks') | Should Be $false
         (@($codex.account.credentialFiles) -contains 'rules') | Should Be $false
         (@($codex.normalState.sessionPaths) -contains 'rules') | Should Be $false
     }
@@ -174,6 +198,162 @@ Describe 'adapter schema validation' {
 
             $result.ExitCode | Should Be 1
             $result.Output | Should Match "file path 'undeclared.json' must also be declared in sharedPaths or sessionPaths"
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'accepts shared credential state below the adapter-owned store' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter | Add-Member -NotePropertyName sharedCredentialState -NotePropertyValue ([pscustomobject]@{
+                root = '.shared/test-cli/mcp'
+                entries = @(
+                    [pscustomobject]@{ path = '.credentials.json'; kind = 'jsonObjectFile' },
+                    [pscustomobject]@{ path = 'mcp-oauth-locks'; kind = 'directory' }
+                )
+                legacyMigration = 'preserveInactive'
+            })
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 0
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'accepts reconstructible runtime paths and dot-suffix credential backups' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter.normalState | Add-Member -NotePropertyName runtimePaths -NotePropertyValue @('runtime-cache', 'models_cache.json')
+            $adapter | Add-Member -NotePropertyName sharedCredentialState -NotePropertyValue ([pscustomobject]@{
+                root = '.shared/test-cli/mcp'
+                entries = @([pscustomobject]@{ path = '.credentials.json'; kind = 'jsonObjectFile' })
+                legacyMigration = 'preserveInactive'
+                legacyBackupPattern = 'dotSuffix'
+            })
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 0
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects runtime paths overlapping state or credential backup namespaces' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter.normalState | Add-Member -NotePropertyName runtimePaths -NotePropertyValue @('sessions/cache', '.credentials.json.before-test')
+            $adapter | Add-Member -NotePropertyName sharedCredentialState -NotePropertyValue ([pscustomobject]@{
+                root = '.shared/test-cli/mcp'
+                entries = @([pscustomobject]@{ path = '.credentials.json'; kind = 'jsonObjectFile' })
+                legacyMigration = 'preserveInactive'
+                legacyBackupPattern = 'dotSuffix'
+            })
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 1
+            $result.Output | Should Match "session path 'sessions' overlaps runtime path 'sessions/cache'"
+            $result.Output | Should Match "shared credential path '.credentials.json' overlaps runtime path '.credentials.json.before-test'"
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects shared credential roots outside the adapter-owned store' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter | Add-Member -NotePropertyName sharedCredentialState -NotePropertyValue ([pscustomobject]@{
+                root = 'test-cli/mcp'
+                entries = @([pscustomobject]@{ path = 'oauth.json'; kind = 'jsonObjectFile' })
+                legacyMigration = 'preserveInactive'
+            })
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 1
+            $result.Output | Should Match "sharedCredentialState.root must be below '.shared/test-cli/'"
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects invalid and overlapping shared credential entries' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter | Add-Member -NotePropertyName sharedCredentialState -NotePropertyValue ([pscustomobject]@{
+                root = '.shared/test-cli/mcp'
+                entries = @(
+                    [pscustomobject]@{ path = 'oauth'; kind = 'secretFile' },
+                    [pscustomobject]@{ path = 'oauth/locks'; kind = 'directory' }
+                )
+                legacyMigration = 'copy'
+            })
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 1
+            $result.Output | Should Match "shared credential kind 'secretFile' is not supported"
+            $result.Output | Should Match "shared credential path 'oauth' overlaps shared credential path 'oauth/locks'"
+            $result.Output | Should Match "sharedCredentialState.legacyMigration must be 'preserveInactive'"
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects shared credential entries overlapping profile or normal state' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter | Add-Member -NotePropertyName sharedCredentialState -NotePropertyValue ([pscustomobject]@{
+                root = '.shared/test-cli/mcp'
+                entries = @(
+                    [pscustomobject]@{ path = 'auth.json'; kind = 'jsonObjectFile' },
+                    [pscustomobject]@{ path = 'sessions/oauth.json'; kind = 'jsonObjectFile' }
+                )
+                legacyMigration = 'preserveInactive'
+            })
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 1
+            $result.Output | Should Match "shared credential path 'auth.json' overlaps credential path 'auth.json'"
+            $result.Output | Should Match "shared credential path 'sessions/oauth.json' overlaps session path 'sessions'"
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects direct paths not declared as shared or session state' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter.normalState | Add-Member -NotePropertyName directPaths -NotePropertyValue @('undeclared.sqlite')
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 1
+            $result.Output | Should Match "direct path 'undeclared.sqlite' must also be declared in sharedPaths or sessionPaths"
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'accepts migration preserve paths only as declared shared or session state' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter.normalState | Add-Member -NotePropertyName migrationPreservePaths -NotePropertyValue @('history.jsonl', 'sessions')
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 0
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects unsafe or undeclared migration preserve paths' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter.normalState | Add-Member -NotePropertyName migrationPreservePaths -NotePropertyValue @('../outside', 'undeclared.sqlite')
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 1
+            $result.Output | Should Match "migration preserve path '../outside' must be a safe relative path"
+            $result.Output | Should Match "migration preserve path 'undeclared.sqlite' must also be declared in sharedPaths or sessionPaths"
         } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 

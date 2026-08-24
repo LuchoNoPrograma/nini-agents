@@ -20,14 +20,15 @@ jq -n \
   --arg runtime "${FIXTURE_HOME:-}" \
   --arg inherited "${GLOBAL_FIXTURE_TOKEN:-}" \
   --arg profile "${MULTICLI_PROFILE_ID:-}" \
-  '{runtime:$runtime,inherited:$inherited,profile:$profile}' > "$CAPTURE_OUTPUT"
+  '{runtime:$runtime,inherited:$inherited,profile:$profile,args:$ARGS.positional}' \
+  --args -- "$@" > "$CAPTURE_OUTPUT"
 PROBE
   chmod +x "$MULTICLI_OVERRIDE_BINARY"
   write_fixture_adapter
 }
 
 teardown() {
-  unset MULTICLI_TOOLS_DIR MULTICLI_OVERRIDE_BINARY CAPTURE_OUTPUT GLOBAL_FIXTURE_TOKEN
+  unset MULTICLI_TOOLS_DIR MULTICLI_OVERRIDE_BINARY CAPTURE_OUTPUT GLOBAL_FIXTURE_TOKEN MULTICLI_PROFILE_ID
   teardown_scratch
 }
 
@@ -155,10 +156,117 @@ JSON
   [ "$runtime_a" != "$runtime_b" ]
 }
 
-@test "Codex adapter links user rules as shared normal state" {
-  mkdir -p "$TOOLS_ROOT/codex" "$HOME/.codex/rules"
+@test "two profiles share one credential store while main auth remains profile-local" {
+  jq '.sharedCredentialState={
+    root:".shared/fixture/oauth",
+    entries:[
+      {path:".credentials.json",kind:"jsonObjectFile"},
+      {path:"oauth-locks",kind:"directory"}
+    ],
+    legacyMigration:"preserveInactive"
+  }' "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  run multicli new fixture/account-b --no-seed
+  [ "$status" -eq 0 ]
+
+  CAPTURE_OUTPUT="$MULTICLI_SCRATCH/account-a.json" multicli launch fixture/account-a &
+  local first_pid=$!
+  CAPTURE_OUTPUT="$MULTICLI_SCRATCH/account-b.json" multicli launch fixture/account-b &
+  local second_pid=$!
+  local first_status=0 second_status=0
+  wait "$first_pid" || first_status=$?
+  wait "$second_pid" || second_status=$?
+  [ "$first_status" -eq 0 ]
+  [ "$second_status" -eq 0 ]
+
+  local store="$MULTICLI_HOME/.shared/fixture/oauth"
+  local runtime_a="$MULTICLI_HOME/fixture/account-a/.runtime"
+  local runtime_b="$MULTICLI_HOME/fixture/account-b/.runtime"
+  [ -f "$store/.credentials.json" ]
+  run jq -e 'type == "object" and length == 0' "$store/.credentials.json"
+  [ "$status" -eq 0 ]
+  [ -d "$store/oauth-locks" ]
+  [ "$(stat -c '%a' "$store/.credentials.json" 2>/dev/null || stat -f '%Lp' "$store/.credentials.json")" = 600 ]
+  [ "$(stat -c '%a' "$store/oauth-locks" 2>/dev/null || stat -f '%Lp' "$store/oauth-locks")" = 700 ]
+  [ -L "$runtime_a/.credentials.json" ]
+  [ -L "$runtime_b/.credentials.json" ]
+  [ -L "$runtime_a/oauth-locks" ]
+  [ -L "$runtime_b/oauth-locks" ]
+  [ "$runtime_a/.credentials.json" -ef "$store/.credentials.json" ]
+  [ "$runtime_b/.credentials.json" -ef "$store/.credentials.json" ]
+  [ "$runtime_a/oauth-locks" -ef "$store/oauth-locks" ]
+  [ "$runtime_b/oauth-locks" -ef "$store/oauth-locks" ]
+  [ ! "$runtime_a/auth.json" -ef "$runtime_b/auth.json" ]
+
+  printf '{"synthetic":"shared"}\n' > "$runtime_a/.credentials.json"
+  run jq -er '.synthetic' "$runtime_b/.credentials.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = shared ]
+  printf 'account-a\n' > "$runtime_a/auth.json"
+  [ ! -s "$runtime_b/auth.json" ]
+  grep -qxF '.credentials.json' "$runtime_a/.runtime-manifest"
+  grep -qxF 'oauth-locks' "$runtime_a/.runtime-manifest"
+
+  run multicli doctor --deep
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"wrong target"* ]]
+}
+
+@test "shared credential initialization rejects an unexpected POSIX hardlink" {
+  case "$(uname -s 2>/dev/null || echo unknown)" in
+    MINGW*|MSYS*|CYGWIN*|Windows*) skip "Windows runtimes intentionally expose declared files through managed hardlinks" ;;
+  esac
+  jq '.sharedCredentialState={
+    root:".shared/fixture/oauth",
+    entries:[{path:".credentials.json",kind:"jsonObjectFile"}],
+    legacyMigration:"preserveInactive"
+  }' "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  mkdir -p "$MULTICLI_HOME/.shared/fixture/oauth"
+  printf '{}\n' > "$MULTICLI_HOME/.shared/fixture/oauth/.credentials.json"
+  ln "$MULTICLI_HOME/.shared/fixture/oauth/.credentials.json" "$MULTICLI_SCRATCH/unmanaged-alias"
+
+  run multicli launch fixture/account-a
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unexpected hardlinks detected"* ]]
+  [ ! -e "$MULTICLI_HOME/fixture/account-a/.runtime" ]
+}
+
+@test "shared credential initialization rejects a linked store component" {
+  jq '.sharedCredentialState={
+    root:".shared/fixture/oauth",
+    entries:[{path:".credentials.json",kind:"jsonObjectFile"}],
+    legacyMigration:"preserveInactive"
+  }' "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  mkdir -p "$MULTICLI_HOME/.shared" "$MULTICLI_SCRATCH/outside"
+  ln -s "$MULTICLI_SCRATCH/outside" "$MULTICLI_HOME/.shared/fixture"
+
+  run multicli launch fixture/account-a
+
+  [ "$status" -ne 0 ] || {
+    printf 'unexpected success: %s\n' "$output" >&3
+    find "$MULTICLI_HOME/.shared" -maxdepth 4 -printf '%y %p -> %l\n' >&3
+  }
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"shared credential store component"*"is a link"* ]]
+  [ -L "$MULTICLI_HOME/.shared/fixture" ]
+  [ ! -e "$MULTICLI_SCRATCH/outside/oauth/.credentials.json" ]
+}
+
+@test "Codex adapter links documented instructions rules and logs as shared normal state" {
+  mkdir -p "$TOOLS_ROOT/codex" "$HOME/.codex/rules" "$HOME/.codex/log"
   cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
+  printf 'global guidance\n' > "$HOME/.codex/AGENTS.md"
   printf 'prefix_rule(pattern=["git", "status"], decision="allow")\n' > "$HOME/.codex/rules/default.rules"
+  printf 'shared log\n' > "$HOME/.codex/log/codex.log"
 
   run multicli new codex/account-a --no-seed
   [ "$status" -eq 0 ]
@@ -166,9 +274,100 @@ JSON
   [ "$status" -eq 0 ]
 
   local runtime_rules="$MULTICLI_HOME/codex/account-a/.runtime/rules"
+  local runtime_agents="$MULTICLI_HOME/codex/account-a/.runtime/AGENTS.md"
+  local runtime_log="$MULTICLI_HOME/codex/account-a/.runtime/log"
   [ -L "$runtime_rules" ]
+  [ -L "$runtime_agents" ]
+  [ -L "$runtime_log" ]
+  [ "$(cat "$runtime_agents" | tr -d '\r')" = 'global guidance' ]
   [ "$(cat "$runtime_rules/default.rules" | tr -d '\r')" = 'prefix_rule(pattern=["git", "status"], decision="allow")' ]
+  [ "$(cat "$runtime_log/codex.log" | tr -d '\r')" = 'shared log' ]
+  run jq -e --arg root "$HOME/.codex" '.args == [
+    "-c", "cli_auth_credentials_store=\"file\"",
+    "-c", "mcp_oauth_credentials_store=\"file\"",
+    "-c", ("sqlite_home=\"" + $root + "\"")
+  ]' "$CAPTURE_OUTPUT"
+  [ "$status" -eq 0 ]
   [ ! -e "$MULTICLI_HOME/codex/account-a/auth/rules" ]
+  [ ! -e "$MULTICLI_HOME/codex/account-a/auth/AGENTS.md" ]
+  [ ! -e "$MULTICLI_HOME/codex/account-a/auth/log" ]
+}
+
+@test "Hyper without the title-lock opt-in emits no private title protocol" {
+  mkdir -p "$TOOLS_ROOT/codex" "$MULTICLI_HOME/codex/omega"
+  cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
+
+  run env TERM_PROGRAM=Hyper "$MULTICLI_BIN" launch codex/omega
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"__MULTICLI_TITLE_LOCK__"* ]]
+  [[ "$output" != *"__MULTICLI_TITLE_UNLOCK__"* ]]
+}
+
+@test "opted-in Hyper locks each schema-v2 Codex profile title to its alias" {
+  mkdir -p "$TOOLS_ROOT/codex"
+  cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
+  run multicli new codex/omega --no-seed
+  [ "$status" -eq 0 ]
+  run multicli new codex/nexo --no-seed
+  [ "$status" -eq 0 ]
+
+  local lock unlock
+  lock="$(printf '\033]0;__MULTICLI_TITLE_LOCK__:omega\007')"
+  unlock="$(printf '\033]0;__MULTICLI_TITLE_UNLOCK__\007')"
+  run env TERM_PROGRAM=Hyper NINI_AGENTS_HYPER_TITLE_LOCK=1 "$MULTICLI_BIN" launch codex/omega
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$lock"*"$unlock"* ]]
+
+  lock="$(printf '\033]0;__MULTICLI_TITLE_LOCK__:nexo\007')"
+  run env TERM_PROGRAM=Hyper NINI_AGENTS_HYPER_TITLE_LOCK=1 "$MULTICLI_BIN" launch codex/nexo
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$lock"*"$unlock"* ]]
+}
+
+@test "opted-in Hyper title locking also covers a legacy whole-root Codex profile" {
+  mkdir -p "$TOOLS_ROOT/codex" "$MULTICLI_HOME/codex/tienda"
+  cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
+
+  local lock unlock
+  lock="$(printf '\033]0;__MULTICLI_TITLE_LOCK__:tienda\007')"
+  unlock="$(printf '\033]0;__MULTICLI_TITLE_UNLOCK__\007')"
+  run env TERM_PROGRAM=Hyper NINI_AGENTS_HYPER_TITLE_LOCK=1 "$MULTICLI_BIN" launch codex/tienda
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$lock"*"$unlock"* ]]
+  [[ "$output" == *"legacy whole-root"* ]]
+}
+
+@test "account overlay keeps direct state outside runtime and appends expanded adapter args" {
+  jq '.isolation.args=["-c", "sqlite_home=\"{sharedStateRoot}\""]
+    | .normalState.sessionPaths += ["state_5.sqlite"]
+    | .normalState.filePaths += ["state_5.sqlite"]
+    | .normalState.directPaths=["state_5.sqlite"]' \
+    "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  run multicli launch fixture/account-a --user-value -- prompt
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [ "$status" -eq 0 ]
+  [ ! -e "$HOME/.fixture/state_5.sqlite" ]
+  [ ! -e "$MULTICLI_HOME/fixture/account-a/.runtime/state_5.sqlite" ]
+  run jq -e --arg root "$HOME/.fixture" \
+    '.args == ["--user-value", "prompt", "-c", ("sqlite_home=\"" + $root + "\"")]' "$CAPTURE_OUTPUT"
+  [ "$status" -eq 0 ]
+
+  # The top-level CLI consumes its own `--`; exercise the runtime boundary
+  # directly to prove enforced options stay before a tool-level delimiter.
+  set -- help
+  source "$MULTICLI_BIN" >/dev/null 2>&1
+  run runtime_launch_account_overlay fixture "$MULTICLI_HOME/fixture/account-a" "$MULTICLI_OVERRIDE_BINARY" --direct -- prompt
+  [ "$status" -eq 0 ]
+  run jq -e --arg root "$HOME/.fixture" \
+    '.args == ["--direct", "-c", ("sqlite_home=\"" + $root + "\""), "--", "prompt"]' "$CAPTURE_OUTPUT"
+  [ "$status" -eq 0 ]
 }
 
 @test "launch clears inherited account variables without mutating the parent shell" {
@@ -200,6 +399,13 @@ JSON
   [ "$status" -eq 0 ]
   run multicli launch fixture/account-a
   [ "$status" -eq 0 ]
+
+  jq '.normalState.runtimePaths=["cache", "version.json"]' \
+    "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+  mkdir -p "$MULTICLI_HOME/fixture/account-a/.runtime/cache/nested"
+  printf 'generated\n' > "$MULTICLI_HOME/fixture/account-a/.runtime/cache/nested/item"
+  printf 'generated\n' > "$MULTICLI_HOME/fixture/account-a/.runtime/version.json"
 
   run multicli doctor --deep
   [ "$status" -eq 0 ]
@@ -255,11 +461,48 @@ JSON
   [[ "$output" == *"runtime link state/agents has the wrong target"* ]]
 }
 
-@test "launch without schema-v2 metadata aborts with a clear message instead of dying silently" {
-  mkdir -p "$MULTICLI_HOME/fixture/legacy"
+@test "legacy file-overlay launch keeps the whole root and does not migrate credentials" {
+  local profile="$MULTICLI_HOME/fixture/legacy"
+  local expected_auth="$MULTICLI_SCRATCH/legacy-auth.expected"
+  mkdir -p "$profile"
+  printf '%s\n' '{"fixtureCredential":"unchanged"}' > "$profile/auth.json"
+  cp "$profile/auth.json" "$expected_auth"
+  export GLOBAL_FIXTURE_TOKEN='wrong-account-secret'
+  export MULTICLI_PROFILE_ID='stale-schema-v2-id'
+
   run multicli launch fixture/legacy
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"legacy whole-root"* ]]
+  [ "$(jq -r '.runtime' "$CAPTURE_OUTPUT")" = "$profile" ]
+  [ "$(jq -r '.inherited' "$CAPTURE_OUTPUT")" = "" ]
+  [ "$(jq -r '.profile' "$CAPTURE_OUTPUT")" = "" ]
+  cmp -s "$expected_auth" "$profile/auth.json"
+  [ ! -e "$profile/.profile.json" ]
+  [ ! -e "$profile/.runtime" ]
+  [ ! -e "$profile/auth" ]
+}
+
+@test "legacy whole-root compatibility stays closed for process-secret adapters" {
+  jq '.account = {
+    "mechanism": "processSecret",
+    "credentialFiles": [],
+    "credentialPrecedence": ["FIXTURE_TOKEN"],
+    "logoutScope": "process",
+    "secret": {"environmentVariable": "FIXTURE_TOKEN"}
+  }' "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+  local profile="$MULTICLI_HOME/fixture/legacy-secret"
+  mkdir -p "$profile"
+
+  run multicli launch fixture/legacy-secret
+
   [ "$status" -eq 1 ]
   [[ "$output" == *"missing schema-v2 metadata"* ]]
+  [ ! -e "$CAPTURE_OUTPUT" ]
+  [ ! -e "$profile/.profile.json" ]
+  [ ! -e "$profile/.runtime" ]
+  [ ! -e "$profile/auth" ]
 }
 
 @test "invalid adapters fail before profile creation" {

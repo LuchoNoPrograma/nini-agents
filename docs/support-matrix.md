@@ -7,7 +7,7 @@
 | [`agy-cli`](adapters/agy-cli.md) | Antigravity CLI (agy) | fixed OS credential, separate OS user required | settings/plugins/skills | supported (Windows OS-user isolation; elevated terminal) | unsupported: owned-user Keychain isolation is not proven | unsupported: owned-user Secret Service session is not implemented |
 | [`antigravity`](adapters/antigravity.md) | Google Antigravity IDE | fixed OS credential, separate OS user required | none | supported (Windows OS-user isolation; elevated terminal) | unsupported: owned-user GUI/Keychain session is not proven | unsupported: owned-user GUI/Secret Service session is not implemented |
 | [`claude-cli`](adapters/claude-cli.md) | Claude Code | profile-local `.credentials.json` | `.claude` configuration and conversations | supported (file overlay) | supported for API-key profiles only; subscription OAuth is unsupported because its fixed Keychain identity is not isolated | supported (file overlay) |
-| [`codex`](adapters/codex.md) | OpenAI Codex CLI | profile-local `auth.json`, file credential mode required | `.codex` configuration, rules, and conversations | supported (file overlay; file credential store mode) | supported | supported |
+| [`codex`](adapters/codex.md) | OpenAI Codex CLI | profile-local `auth.json`; one local MCP OAuth store shared across Nini Agents profiles; legacy MCP backups preserved inactive | documented `.codex` configuration, global guidance, logs, conversations, and direct SQLite state; legacy SQLite families and writer locks are preserved inactive during migration | supported (file overlay; Windows parity not executed in this environment) | supported (not executed in this environment) | supported (synthetic Linux execution) |
 | [`codex-gui`](adapters/codex-gui.md) | Codex Desktop App | owned Windows user | none | supported (Store AppX activation; first launch elevated) | unsupported; owned-user GUI/Keychain session is not proven | unsupported; no desktop Codex app on Linux |
 | [`commandcode`](adapters/commandcode.md) | Command Code | profile-local `.commandcode/auth.json` | `.commandcode` configuration and conversations | supported (file overlay; use `commandcode`, bare `cmd` collides with cmd.exe) | supported | supported |
 | [`copilot-cli`](adapters/copilot-cli.md) | GitHub Copilot CLI | per-process `COPILOT_GITHUB_TOKEN` | Copilot configuration and session state | supported (process token via `nini-agents auth set`; `GH_TOKEN`/`GITHUB_TOKEN` cleared) | supported | supported |
@@ -25,6 +25,11 @@
 ## Mode notes
 
 - **File overlay** adapters keep only the declared credential files profile-local; everything else links to the native shared root, so conversations and configuration are shared between profiles.
+- **Shared credential state** is an explicit schema-v2 exception for an
+  upstream credential group that must be common to all profiles of one
+  adapter. It lives under `MULTICLI_HOME/.shared/<adapter>/`, remains outside
+  profile transfer, and does not weaken the profile-local primary account
+  credential.
 - **Process token** adapters inject a per-profile, highest-precedence credential into the child process only. Store the secret first with `nini-agents auth set <tool>/<profile>`; launch stays fail-closed until then.
 - **OS-user isolation** provisions a nini-agents-owned user per profile. Windows requires an elevated terminal. macOS and Linux require `sudo`, and Linux also requires `acl`. Products that need an unimplemented desktop credential session remain unsupported on that platform. These adapters reject `--isolated` because folder redirection cannot isolate a fixed OS credential store.
 - **`--isolated` whole-root** redirects the product's entire home/config root into the profile dir. It separates filesystem-based products such as `opencode` and `cursor`. It does not isolate fixed OS credential identities, including Claude Code subscription OAuth in the macOS Keychain. Product availability still applies: `--isolated` cannot make an unavailable platform binary supported.

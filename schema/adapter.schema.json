@@ -200,8 +200,29 @@
             "$ref": "#/$defs/relativePath"
           }
         },
+        "runtimePaths": {
+          "type": "array",
+          "description": "Reconstructible tool-generated state allowed inside the runtime overlay. The launcher does not create, link, export, or import these paths.",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        },
         "filePaths": {
           "type": "array",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        },
+        "directPaths": {
+          "type": "array",
+          "description": "Declared normal-state paths accessed directly under normalState.root instead of linked into the runtime overlay.",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        },
+        "migrationPreservePaths": {
+          "type": "array",
+          "description": "Exact shared/session paths whose legacy objects are preserved inactive instead of merged during schema-v2 migration. Runtime behavior is unchanged.",
           "items": {
             "$ref": "#/$defs/relativePath"
           }
@@ -211,6 +232,51 @@
           "items": {
             "$ref": "#/$defs/relativePath"
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "sharedCredentialState": {
+      "type": "object",
+      "description": "Credential state intentionally shared by every profile of one adapter, stored below MULTICLI_HOME and linked into each runtime overlay.",
+      "required": [
+        "root",
+        "entries",
+        "legacyMigration"
+      ],
+      "properties": {
+        "root": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "kind"
+            ],
+            "properties": {
+              "path": {
+                "$ref": "#/$defs/relativePath"
+              },
+              "kind": {
+                "enum": [
+                  "jsonObjectFile",
+                  "directory"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "legacyMigration": {
+          "const": "preserveInactive"
+        },
+        "legacyBackupPattern": {
+          "description": "Optional legacy credential backup namespace recognized beside each declared entry.",
+          "const": "dotSuffix"
         }
       },
       "additionalProperties": false
@@ -407,6 +473,7 @@
         "properties": {
           "account": false,
           "normalState": false,
+          "sharedCredentialState": false,
           "concurrency": false,
           "support": false
         }

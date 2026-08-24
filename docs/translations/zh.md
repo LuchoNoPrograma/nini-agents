@@ -114,6 +114,7 @@ nini-agents claude-cli/work
 | `nini-agents auth set <tool>/<profile>` | 将进程密钥存入操作系统凭据存储 |
 | `nini-agents auth status <tool>/<profile>` | 检查该密钥是否存在 |
 | `nini-agents auth clear <tool>/<profile>` | 删除该密钥 |
+| `nini-agents permissions show \| set <read-only\|workspace\|full-access>` | 显示或保存新会话使用的共享 Codex 权限 |
 | `nini-agents continue <tool> <src> <dest> [--dry-run] [--no-merge]` | 复制受支持的会话状态，绝不复制凭据 |
 | `nini-agents template save <tool>/<profile> <name>` | 保存不含凭据的 schema v2 模板 |
 | `nini-agents template list \| delete <name>` | 列出或删除模板 |
@@ -124,7 +125,7 @@ nini-agents claude-cli/work
 
 | 命令 | 操作 |
 |---|---|
-| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]` | 将旧配置文件迁移到 schema v2 |
+| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile] [--preserve-unknown]` | 将旧配置文件迁移到 schema v2 |
 | `nini-agents status` | 显示配置文件及其大小 |
 | `nini-agents stats` | 显示配置文件的存储占用 |
 | `nini-agents doctor [--deep]` | 诊断环境，并可选择审查运行环境 |

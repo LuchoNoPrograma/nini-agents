@@ -114,6 +114,7 @@ Consulta los límites de cada plataforma en la [matriz de compatibilidad](../sup
 | `nini-agents auth set <tool>/<profile>` | Guardar un secreto de proceso en el almacén de credenciales del sistema |
 | `nini-agents auth status <tool>/<profile>` | Comprobar si existe el secreto |
 | `nini-agents auth clear <tool>/<profile>` | Eliminar el secreto |
+| `nini-agents permissions show \| set <read-only\|workspace\|full-access>` | Mostrar o guardar los permisos compartidos de Codex para sesiones nuevas |
 | `nini-agents continue <tool> <src> <dest> [--dry-run] [--no-merge]` | Copiar el estado de sesión compatible, nunca las credenciales |
 | `nini-agents template save <tool>/<profile> <name>` | Guardar una plantilla con esquema v2 sin credenciales |
 | `nini-agents template list \| delete <name>` | Enumerar o eliminar plantillas |
@@ -124,7 +125,7 @@ Consulta los límites de cada plataforma en la [matriz de compatibilidad](../sup
 
 | Comando | Acción |
 |---|---|
-| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]` | Migrar un perfil antiguo al esquema v2 |
+| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile] [--preserve-unknown]` | Migrar un perfil antiguo al esquema v2 |
 | `nini-agents status` | Mostrar perfiles y tamaños |
 | `nini-agents stats` | Mostrar el uso de almacenamiento de los perfiles |
 | `nini-agents doctor [--deep]` | Diagnosticar el entorno y, opcionalmente, auditar los entornos de ejecución |

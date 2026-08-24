@@ -26,14 +26,16 @@ load helpers/common
   [[ "$output" == *"complete -F _multi_cli_completions nini-agents multi-cli"* ]]
 }
 
-@test "help and shell completion expose the auth command" {
+@test "help and shell completion expose auth and permissions commands" {
   run "$MULTICLI_REPO_ROOT/nini-agents" help
   [ "$status" -eq 0 ]
   [[ "$output" == *"auth set|status|clear"* ]]
+  [[ "$output" == *"permissions show | set"* ]]
 
   run "$MULTICLI_REPO_ROOT/nini-agents" completion bash
   [ "$status" -eq 0 ]
   [[ "$output" == *" auth "* ]]
+  [[ "$output" == *" permissions "* ]]
 }
 
 @test "credential target namespace remains backward compatible" {

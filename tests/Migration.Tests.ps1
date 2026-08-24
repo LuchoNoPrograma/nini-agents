@@ -1,8 +1,8 @@
 # Real-execution tests for the legacy -> schema-v2 migration engine in
 # lib/MultiCli.Migration.psm1 (Windows PowerShell 5.1, Pester 3.4).
-# No mocks: every test builds a real legacy profile tree under a temp scratch
-# root and invokes the module directly (the `nini-agents migrate` dispatch is
-# wired into nini-agents.ps1 separately).
+# Every test builds a real legacy profile tree under a temp scratch root and
+# invokes the module directly. One rollback case injects only the metadata
+# failure boundary after real filesystem moves; credentials remain synthetic.
 
 $script:RepoRoot = Split-Path -Parent $PSScriptRoot
 $script:ModulePath = Join-Path $script:RepoRoot 'lib\MultiCli.Migration.psm1'
@@ -135,13 +135,16 @@ function Get-SortedExpected {
 # Invoke the engine with the scratch home as USERPROFILE (the shared root
 # resolves from it), restoring the process environment afterwards.
 function Invoke-Migration {
-    param($Scratch, $Adapter, [string]$ProfileDir, [switch]$DryRun, [switch]$PreferProfile)
+    param($Scratch, $Adapter, [string]$ProfileDir, [switch]$DryRun, [switch]$PreferProfile, [switch]$PreserveUnknown, [scriptblock]$ProcessProbe)
     $oldHome = $env:USERPROFILE
     $env:USERPROFILE = $Scratch.UserHome
     try {
-        if ($DryRun) { return Invoke-MultiCliMigration -Adapter $Adapter -ProfileDir $ProfileDir -DryRun }
-        if ($PreferProfile) { return Invoke-MultiCliMigration -Adapter $Adapter -ProfileDir $ProfileDir -PreferProfile }
-        return Invoke-MultiCliMigration -Adapter $Adapter -ProfileDir $ProfileDir
+        $parameters = @{ Adapter = $Adapter; ProfileDir = $ProfileDir }
+        if ($DryRun) { $parameters.DryRun = $true }
+        if ($PreferProfile) { $parameters.PreferProfile = $true }
+        if ($PreserveUnknown) { $parameters.PreserveUnknown = $true }
+        if ($ProcessProbe) { $parameters.ProcessProbe = $ProcessProbe }
+        return Invoke-MultiCliMigration @parameters
     } finally {
         $env:USERPROFILE = $oldHome
     }
@@ -262,6 +265,117 @@ Describe 'Invoke-MultiCliMigration dry run' {
     }
 }
 
+Describe 'Invoke-MultiCliMigration preserve unknown' {
+    It 'plans inactive recovery in dry-run without writing' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $pdir = Get-ProfileDirFor -Scratch $scratch -Name 'work'
+            New-Item -ItemType Directory -Force -Path (Join-Path $pdir 'keys'), (Join-Path $pdir 'tmp') | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'profile-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'keys\token.json') -Value 'nested-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'keys\rogue.txt') -Value 'rogue' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'tmp\item') -Value 'temporary' -Encoding ASCII
+            $auth = Get-Item -LiteralPath (Join-Path $pdir 'auth.json')
+            $authLength = $auth.Length
+            $authWriteTime = $auth.LastWriteTimeUtc
+
+            $result = Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -DryRun -PreserveUnknown
+
+            $result.Mode | Should Be 'dry-run'
+            $result.Lines | Should Contain '  preserve unknown state keys/rogue.txt in inactive recovery (--preserve-unknown)'
+            $result.Lines | Should Contain '  preserve unknown state tmp in inactive recovery (--preserve-unknown)'
+            $authAfter = Get-Item -LiteralPath (Join-Path $pdir 'auth.json')
+            $authAfter.Length | Should Be $authLength
+            $authAfter.LastWriteTimeUtc | Should Be $authWriteTime
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth\auth.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $scratch.Profiles '.inactive')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-journal.json')) | Should Be $false
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'renames unknown objects inactive and preserves the credential object' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $pdir = Get-ProfileDirFor -Scratch $scratch -Name 'work'
+            New-Item -ItemType Directory -Force -Path (Join-Path $pdir 'tmp') | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'profile-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'custom.txt') -Value 'artifact' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'tmp\item') -Value 'temporary' -Encoding ASCII
+            $auth = Get-Item -LiteralPath (Join-Path $pdir 'auth.json')
+            $unknown = Get-Item -LiteralPath (Join-Path $pdir 'custom.txt')
+            $inactive = Join-Path $scratch.Profiles '.inactive\migrations\fixture\work\unknown-state'
+
+            $result = Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -PreserveUnknown -ProcessProbe { param($Path) 'idle' }
+
+            $result.Migrated | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $false
+            $authAfter = Get-Item -LiteralPath (Join-Path $pdir 'auth\auth.json')
+            $authAfter.Length | Should Be $auth.Length
+            $authAfter.LastWriteTimeUtc | Should Be $auth.LastWriteTimeUtc
+            (Test-Path -LiteralPath (Join-Path $pdir 'custom.txt')) | Should Be $false
+            $unknownAfter = Get-Item -LiteralPath (Join-Path $inactive 'custom.txt')
+            $unknownAfter.Length | Should Be $unknown.Length
+            $unknownAfter.LastWriteTimeUtc | Should Be $unknown.LastWriteTimeUtc
+            (Test-Path -LiteralPath (Join-Path $inactive 'tmp\item')) | Should Be $true
+            $journal = Get-Content -LiteralPath (Join-Path $pdir '.migration-journal.json') -Raw | ConvertFrom-Json
+            $journal.preserveUnknown | Should Be $true
+            $journal.action | Should Match ([regex]::Escape('--preserve-unknown'))
+            @($journal.operations | Where-Object { $_.op -eq 'preserve-unknown' -and $_.status -eq 'done' }).Count | Should Be 2
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'restores unknown objects during automatic rollback' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $pdir = Get-ProfileDirFor -Scratch $scratch -Name 'work'
+            New-Item -ItemType Directory -Force -Path (Join-Path $pdir 'tmp') | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'profile-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'tmp\item') -Value 'temporary' -Encoding ASCII
+            Mock Write-MigrationProfileMetadata { throw 'synthetic metadata failure' } -ModuleName MultiCli.Migration
+
+            $message = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -PreserveUnknown -ProcessProbe { param($Path) 'idle' }
+            }
+
+            $message | Should Match 'Automatic rollback restored the legacy layout'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth\auth.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir 'tmp\item')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $scratch.Profiles '.inactive')) | Should Be $false
+            $journal = Get-Content -LiteralPath (Join-Path $pdir '.migration-journal.json') -Raw | ConvertFrom-Json
+            $journal.preserveUnknown | Should Be $true
+            $journal.action | Should Match ([regex]::Escape('--preserve-unknown'))
+            @($journal.operations | Where-Object { $_.op -eq 'preserve-unknown' -and $_.status -eq 'rolled-back' }).Count | Should Be 1
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'never overrides unsafe declarations' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $adapter.normalState.unsafePaths = @('forbidden')
+            $pdir = Get-ProfileDirFor -Scratch $scratch -Name 'work'
+            New-Item -ItemType Directory -Force -Path $pdir | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'profile-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'forbidden') -Value 'unsafe' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'mystery.txt') -Value 'unknown' -Encoding ASCII
+
+            $message = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -DryRun -PreserveUnknown
+            }
+
+            $message | Should Match ([regex]::Escape('  unsafe: forbidden'))
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'forbidden')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'mystery.txt')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $scratch.Profiles '.inactive')) | Should Be $false
+        } finally { Remove-MigrationScratch $scratch }
+    }
+}
+
 Describe 'Invoke-MultiCliMigration refusal' {
     It 'refuses unknown top-level and nested entries, listing them, without writing' {
         $scratch = New-MigrationScratch
@@ -285,6 +399,174 @@ Describe 'Invoke-MultiCliMigration refusal' {
             (Test-Path -LiteralPath (Join-Path $pdir '.profile.json')) | Should Be $false
             (Test-Path -LiteralPath (Join-Path $pdir '.migration-journal.json')) | Should Be $false
             (Test-Path -LiteralPath (Get-SharedRoot -Scratch $scratch)) | Should Be $false
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'preserves a modern Codex SQLite family inactive in a dry-run' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'ai-tools\codex\adapter.json') -Raw | ConvertFrom-Json
+            $pdir = Join-Path $scratch.Profiles 'codex\modern'
+            New-Item -ItemType Directory -Force -Path $pdir | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'synthetic-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'state_5.sqlite') -Value 'synthetic-state' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'state_5.sqlite-shm') -Value 'synthetic-shm' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'state_5.sqlite-wal') -Value 'synthetic-wal' -Encoding ASCII
+
+            $result = Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -DryRun
+
+            $result.Mode | Should Be 'dry-run'
+            $result.Lines | Should Contain '  preserve profile state state_5.sqlite in inactive recovery'
+            $result.Lines | Should Contain '  preserve profile state state_5.sqlite-shm in inactive recovery'
+            $result.Lines | Should Contain '  preserve profile state state_5.sqlite-wal in inactive recovery'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth\auth.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.profile.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-journal.json')) | Should Be $false
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'plans inactive preservation for modern Codex MCP OAuth state without writes' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'ai-tools\codex\adapter.json') -Raw | ConvertFrom-Json
+            $pdir = Join-Path $scratch.Profiles 'codex\modern'
+            New-Item -ItemType Directory -Force -Path (Join-Path $pdir 'mcp-oauth-locks'), (Join-Path $pdir 'mcp-oauth-locks.before-test'), (Join-Path $pdir 'cache'), (Join-Path $pdir 'shell_snapshots'), (Join-Path $pdir 'thread-writer-locks') | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'synthetic-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir '.credentials.json') -Value '{}' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir '.credentials.json.before-test') -Value '{}' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'cache\item') -Value 'generated' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'models_cache.json') -Value 'generated' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'shell_snapshots\shell') -Value 'session' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'thread-writer-locks\writer') -Value 'session' -Encoding ASCII
+            $credential = Get-Item -LiteralPath (Join-Path $pdir 'auth.json')
+            $credentialLength = $credential.Length
+            $credentialWriteTime = $credential.LastWriteTimeUtc
+
+            $result = Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -DryRun
+
+            $result.Mode | Should Be 'dry-run'
+            $result.Lines | Should Contain '  preserve shared credential .credentials.json in inactive recovery'
+            $result.Lines | Should Contain '  preserve shared credential mcp-oauth-locks in inactive recovery'
+            $result.Lines | Should Contain '  preserve shared credential .credentials.json.before-test in inactive recovery'
+            $result.Lines | Should Contain '  preserve shared credential mcp-oauth-locks.before-test in inactive recovery'
+            $result.Lines | Should Contain '  preserve runtime state cache in inactive recovery'
+            $result.Lines | Should Contain '  preserve runtime state models_cache.json in inactive recovery'
+            ($result.Lines -join "`n") | Should Match 'merge session shell_snapshots'
+            $result.Lines | Should Contain '  preserve profile state thread-writer-locks in inactive recovery'
+            $credentialAfter = Get-Item -LiteralPath (Join-Path $pdir 'auth.json')
+            $credentialAfter.Length | Should Be $credentialLength
+            $credentialAfter.LastWriteTimeUtc | Should Be $credentialWriteTime
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth\auth.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $scratch.Profiles '.inactive')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $scratch.Profiles '.shared\codex\mcp')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.profile.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-journal.json')) | Should Be $false
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'keeps only the six unproven Codex residue paths unknown' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'ai-tools\codex\adapter.json') -Raw | ConvertFrom-Json
+            $pdir = Join-Path $scratch.Profiles 'codex\modern'
+            New-Item -ItemType Directory -Force -Path $pdir, (Join-Path $pdir 'cache'), (Join-Path $pdir 'shell_snapshots'), (Join-Path $pdir 'thread-writer-locks'), (Join-Path $pdir 'mcp-oauth-locks.before-shared-supabase-20260721T202703Z'), (Join-Path $pdir '.tmp'), (Join-Path $pdir 'tmp') | Out-Null
+            foreach ($rel in @('auth.json', '.sandbox_migration', 'models_cache.json', 'version.json', '.credentials.json.before-shared-supabase-20260721T202703Z', '.personality_migration', 'config.toml.bak-20260704', 'config.toml.bak-20260705-516-workaround', 'gpt-5.5-no-intermediary-updates.md')) {
+                Set-Content -LiteralPath (Join-Path $pdir $rel) -Value 'synthetic' -Encoding ASCII
+            }
+
+            $message = Get-ThrownMessage { Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -DryRun }
+
+            foreach ($rel in @('.personality_migration', '.tmp', 'tmp', 'config.toml.bak-20260704', 'config.toml.bak-20260705-516-workaround', 'gpt-5.5-no-intermediary-updates.md')) {
+                $message | Should Match ([regex]::Escape("  unknown: $rel"))
+            }
+            foreach ($rel in @('.sandbox_migration', 'cache', 'models_cache.json', 'version.json', 'shell_snapshots', 'thread-writer-locks', '.credentials.json.before-shared-supabase-20260721T202703Z', 'mcp-oauth-locks.before-shared-supabase-20260721T202703Z')) {
+                $message | Should Not Match ([regex]::Escape("unknown: $rel"))
+            }
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-journal.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $scratch.Profiles '.inactive')) | Should Be $false
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'preserves legacy Codex MCP OAuth objects inactive during apply' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'ai-tools\codex\adapter.json') -Raw | ConvertFrom-Json
+            $pdir = Join-Path $scratch.Profiles 'codex\modern'
+            New-Item -ItemType Directory -Force -Path (Join-Path $pdir 'mcp-oauth-locks'), (Join-Path $pdir 'mcp-oauth-locks.before-test'), (Join-Path $pdir 'cache'), (Join-Path $pdir 'thread-writer-locks') | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'mcp-oauth-locks\owner') -Value 'synthetic-lock' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'synthetic-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir '.credentials.json') -Value '{"synthetic":"legacy"}' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir '.credentials.json.before-test') -Value '{}' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'cache\item') -Value 'generated' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'version.json') -Value 'generated' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'state_5.sqlite') -Value 'db' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'state_5.sqlite-shm') -Value 'shm' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'state_5.sqlite-wal') -Value 'wal' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'thread-writer-locks\writer') -Value 'lock' -Encoding ASCII
+            $inactive = Join-Path $scratch.Profiles '.inactive\migrations\codex\modern\shared-credentials'
+            $runtimeInactive = Join-Path $scratch.Profiles '.inactive\migrations\codex\modern\runtime-state'
+            $profileStateInactive = Join-Path $scratch.Profiles '.inactive\migrations\codex\modern\profile-state'
+
+            $result = Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -ProcessProbe { param($Path) 'idle' }
+
+            $result.Migrated | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $inactive '.credentials.json') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $inactive 'mcp-oauth-locks') -PathType Container) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $inactive '.credentials.json.before-test') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $inactive 'mcp-oauth-locks.before-test') -PathType Container) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $runtimeInactive 'cache\item') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $runtimeInactive 'version.json') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $profileStateInactive 'state_5.sqlite') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $profileStateInactive 'state_5.sqlite-shm') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $profileStateInactive 'state_5.sqlite-wal') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $profileStateInactive 'thread-writer-locks\writer') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir '.credentials.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir 'mcp-oauth-locks')) | Should Be $false
+            ((Get-Content -LiteralPath (Join-Path $inactive '.credentials.json') -Raw | ConvertFrom-Json).synthetic) | Should Be 'legacy'
+            ((Get-Content -LiteralPath (Join-Path $inactive 'mcp-oauth-locks\owner') -Raw).Trim()) | Should Be 'synthetic-lock'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth\auth.json') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $scratch.Profiles '.shared\codex\mcp')) | Should Be $false
+            $journal = Get-Content -LiteralPath (Join-Path $pdir '.migration-journal.json') -Raw | ConvertFrom-Json
+            @($journal.operations | Where-Object { $_.op -eq 'preserve-shared-credential' -and $_.status -eq 'done' }).Count | Should Be 4
+            @($journal.operations | Where-Object { $_.op -eq 'preserve-runtime-state' -and $_.status -eq 'done' }).Count | Should Be 2
+            @($journal.operations | Where-Object { $_.op -eq 'preserve-profile-state' -and $_.status -eq 'done' }).Count | Should Be 4
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'restores legacy Codex MCP OAuth objects when metadata fails' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'ai-tools\codex\adapter.json') -Raw | ConvertFrom-Json
+            $pdir = Join-Path $scratch.Profiles 'codex\modern'
+            New-Item -ItemType Directory -Force -Path (Join-Path $pdir 'mcp-oauth-locks'), (Join-Path $pdir 'cache'), (Join-Path $pdir 'thread-writer-locks') | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'synthetic-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir '.credentials.json') -Value '{}' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir '.credentials.json.before-test') -Value '{}' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'cache\item') -Value 'generated' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'state_5.sqlite') -Value 'db' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'state_5.sqlite-wal') -Value 'wal' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'thread-writer-locks\writer') -Value 'lock' -Encoding ASCII
+            Mock Write-MigrationProfileMetadata { throw 'synthetic metadata failure' } -ModuleName MultiCli.Migration
+
+            $message = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -ProcessProbe { param($Path) 'idle' }
+            }
+
+            $message | Should Match 'Automatic rollback restored the legacy layout'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth\auth.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.credentials.json') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'mcp-oauth-locks') -PathType Container) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir '.credentials.json.before-test') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'cache\item') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'state_5.sqlite') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'state_5.sqlite-wal') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'thread-writer-locks\writer') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $scratch.Profiles '.inactive')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.profile.json')) | Should Be $false
+            $journal = Get-Content -LiteralPath (Join-Path $pdir '.migration-journal.json') -Raw | ConvertFrom-Json
+            $journal.status | Should Be 'rolled_back'
         } finally { Remove-MigrationScratch $scratch }
     }
 
@@ -398,6 +680,10 @@ Describe 'Invoke-MultiCliMigration apply' {
             ($result.Lines -contains 'Migrated fixture/work to schema-v2 (accountOverlay).') | Should Be $true
 
             ((Get-Content -LiteralPath (Join-Path $pdir 'auth\auth.json') -Raw).Trim()) | Should Be 'profile-token'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $false
+            @(Get-ChildItem -LiteralPath $pdir -Recurse -Force -Filter 'auth.json').Count | Should Be 1
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration.lock')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-rollback')) | Should Be $false
             ((Get-Content -LiteralPath (Join-Path $pdir 'auth\keys\token.json') -Raw).Trim()) | Should Be 'nested-token'
             $metadata = Get-Content -LiteralPath (Join-Path $pdir '.profile.json') -Raw | ConvertFrom-Json
             $metadata.schemaVersion | Should Be 2
@@ -503,7 +789,8 @@ Describe 'Invoke-MultiCliMigration apply' {
             $result = Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir
 
             $result.Migrated | Should Be $true
-            ($result.Lines -contains '  keep shared link plugins (target: ' + (Join-Path $shared 'plugins') + ')') | Should Be $true
+            ($result.Lines -contains '  keep shared link plugins (existing link retained)') | Should Be $true
+            ($result.Lines | Where-Object { $_ -like '*target:*' } | Measure-Object).Count | Should Be 0
             ($result.Lines | Where-Object { $_ -like '  skip nested link agents/linkdir*' } | Measure-Object).Count | Should Be 1
             $pluginsItem = Get-Item -LiteralPath (Join-Path $pdir 'plugins') -Force
             (($pluginsItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) | Should Be $true
@@ -518,7 +805,7 @@ Describe 'Invoke-MultiCliMigration apply' {
         } finally { Remove-MigrationScratch $scratch }
     }
 
-    It 'writes a roll-forward journal on failure and a re-run rolls forward' {
+    It 'rolls a failed apply back to legacy and a re-run starts cleanly' {
         $scratch = New-MigrationScratch
         try {
             $adapter = Write-MigrationAdapter -Scratch $scratch
@@ -536,13 +823,16 @@ Describe 'Invoke-MultiCliMigration apply' {
             $message | Should Match ([regex]::Escape('.migration-journal.json'))
             (Test-Path -LiteralPath (Join-Path $pdir '.profile.json')) | Should Be $false
             $journal = Get-Content -LiteralPath (Join-Path $pdir '.migration-journal.json') -Raw | ConvertFrom-Json
-            $journal.status | Should Be 'failed'
-            (@($journal.operations | Where-Object { $_.op -eq 'move-credential' -and $_.status -eq 'done' })).Count | Should Be 1
+            $journal.status | Should Be 'rolled_back'
+            (@($journal.operations | Where-Object { $_.op -eq 'move-credential' -and $_.status -eq 'rolled-back' })).Count | Should Be 1
             (@($journal.operations | Where-Object { $_.op -eq 'merge-move' -and $_.status -eq 'failed' })).Count | Should Be 1
             (@($journal.operations | Where-Object { $_.status -eq 'pending' })).Count | Should BeGreaterThan 0
-            ((Get-Content -LiteralPath (Join-Path $pdir 'auth\auth.json') -Raw).Trim()) | Should Be 'profile-token'
+            ((Get-Content -LiteralPath (Join-Path $pdir 'auth.json') -Raw).Trim()) | Should Be 'profile-token'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth\auth.json')) | Should Be $false
             (Test-Path -LiteralPath (Join-Path $pdir 'agents\agent.md')) | Should Be $true
             (Test-Path -LiteralPath (Join-Path $shared 'agents')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration.lock')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-rollback')) | Should Be $false
 
             Unprotect-Directory -Path $shared
             $result = Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir
@@ -558,6 +848,289 @@ Describe 'Invoke-MultiCliMigration apply' {
             $expectedProfile = Get-SortedExpected @('.migration-journal.json', '.profile.json', 'auth', 'auth/auth.json', 'auth/keys', 'auth/keys/token.json')
             (Get-RelativeTree $pdir) | Should Be $expectedProfile
         } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'refuses active or indeterminate processes before writing' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $pdir = New-LegacyProfile -Scratch $scratch -Name 'work'
+
+            $active = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -ProcessProbe { param($Path) 'busy' }
+            }
+            $active | Should Match 'active process'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-journal.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration.lock')) | Should Be $false
+
+            $unknown = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -ProcessProbe { param($Path) 'unknown' }
+            }
+            $unknown | Should Match 'could not prove that tool processes are stopped'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-journal.json')) | Should Be $false
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'restores credentials and shared state when metadata fails after a PreferProfile replacement' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $shared = Get-SharedRoot -Scratch $scratch
+            New-Item -ItemType Directory -Force -Path $shared | Out-Null
+            $pdir = Get-ProfileDirFor -Scratch $scratch -Name 'work'
+            New-Item -ItemType Directory -Force -Path $pdir | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'profile-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'config.toml') -Value 'profile-config' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $shared 'config.toml') -Value 'shared-config' -Encoding ASCII
+            Mock Write-MigrationProfileMetadata { throw 'synthetic metadata failure' } -ModuleName MultiCli.Migration
+
+            $message = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -PreferProfile
+            }
+
+            $message | Should Match 'Automatic rollback restored the legacy layout'
+            ((Get-Content -LiteralPath (Join-Path $pdir 'auth.json') -Raw).Trim()) | Should Be 'profile-token'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth\auth.json')) | Should Be $false
+            ((Get-Content -LiteralPath (Join-Path $pdir 'config.toml') -Raw).Trim()) | Should Be 'profile-config'
+            ((Get-Content -LiteralPath (Join-Path $shared 'config.toml') -Raw).Trim()) | Should Be 'shared-config'
+            (Test-Path -LiteralPath (Join-Path $pdir '.profile.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration.lock')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-rollback')) | Should Be $false
+            $journal = Get-Content -LiteralPath (Join-Path $pdir '.migration-journal.json') -Raw | ConvertFrom-Json
+            $journal.status | Should Be 'rolled_back'
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'refuses a held lock and a process appearing after lock without moving credentials' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $pdir = New-LegacyProfile -Scratch $scratch -Name 'work'
+            New-Item -ItemType Directory -Path (Join-Path $pdir '.migration.lock') | Out-Null
+
+            $locked = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -ProcessProbe { param($Path) 'idle' }
+            }
+            $locked | Should Match 'migration is already locked'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth')) | Should Be $false
+
+            Remove-Item -LiteralPath (Join-Path $pdir '.migration.lock') -Force
+            $script:MigrationProbeCalls = 0
+            $appeared = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -ProcessProbe {
+                    param($Path)
+                    $script:MigrationProbeCalls += 1
+                    if ($script:MigrationProbeCalls -eq 1) { return 'idle' }
+                    return 'busy'
+                }
+            }
+            $appeared | Should Match 'process appeared while acquiring the migration lock'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-journal.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration.lock')) | Should Be $false
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'refuses a hardlinked credential during planning before any write' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $adapter.normalState.sharedPaths += 'auth-alias.json'
+            $adapter.normalState.filePaths += 'auth-alias.json'
+            $pdir = Get-ProfileDirFor -Scratch $scratch -Name 'work'
+            New-Item -ItemType Directory -Force -Path $pdir | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'profile-token' -Encoding ASCII
+            New-Item -ItemType HardLink -Path (Join-Path $pdir 'auth-alias.json') -Target (Join-Path $pdir 'auth.json') | Out-Null
+
+            $message = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir
+            }
+
+            $message | Should Match "credential 'auth.json' is a hardlink"
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth-alias.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-journal.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration.lock')) | Should Be $false
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'refuses linked or cross-volume credential destinations before any write' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $pdir = Get-ProfileDirFor -Scratch $scratch -Name 'work'
+            $outside = Join-Path $scratch.Root 'outside-auth'
+            New-Item -ItemType Directory -Force -Path $pdir, $outside | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'profile-token' -Encoding ASCII
+            New-Item -ItemType Junction -Path (Join-Path $pdir 'auth') -Target $outside | Out-Null
+
+            $linked = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -DryRun
+            }
+
+            $linked | Should Match "credential destination 'auth/auth.json' crosses a link"
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $outside 'auth.json')) | Should Be $false
+            Remove-Item -LiteralPath (Join-Path $pdir 'auth') -Force
+            New-Item -ItemType Directory -Path (Join-Path $pdir 'auth') | Out-Null
+            Mock Get-MigrationVolumeRoot {
+                param($Path)
+                if ($Path -like '*\auth\auth.json') { return 'Z:\' }
+                return 'C:\'
+            } -ModuleName MultiCli.Migration
+
+            $crossVolume = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -DryRun
+            }
+
+            $crossVolume | Should Match "credential 'auth.json' and its destination are on different volumes"
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth\auth.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-journal.json')) | Should Be $false
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'refuses linked shared destinations and stale control files even in dry-run' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $pdir = Get-ProfileDirFor -Scratch $scratch -Name 'work'
+            $shared = Get-SharedRoot -Scratch $scratch
+            $outside = Join-Path $scratch.Root 'outside-shared'
+            New-Item -ItemType Directory -Force -Path (Join-Path $pdir 'agents'), $shared, $outside | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'profile-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'agents\agent.md') -Value 'agent' -Encoding ASCII
+            New-Item -ItemType Junction -Path (Join-Path $shared 'agents') -Target $outside | Out-Null
+
+            $linked = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -DryRun
+            }
+
+            $linked | Should Match "shared-state destination 'agents' crosses a link"
+            (Test-Path -LiteralPath (Join-Path $outside 'agent.md')) | Should Be $false
+            Remove-Item -LiteralPath (Join-Path $shared 'agents') -Force
+            New-Item -ItemType File -Path (Join-Path $pdir '.migration-journal.json.tmp') | Out-Null
+
+            $stale = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -DryRun
+            }
+
+            $stale | Should Match "unfinished migration control artifact '.migration-journal.json.tmp'"
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth')) | Should Be $false
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'blocks dry-run when stale recovery artifacts require inspection' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $pdir = New-LegacyProfile -Scratch $scratch -Name 'work'
+            New-Item -ItemType Directory -Path (Join-Path $pdir '.migration-rollback') | Out-Null
+
+            $message = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -DryRun
+            }
+
+            $message | Should Match 'recovery artifacts already exist'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-journal.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration.lock')) | Should Be $false
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'removes a shared root created by a handled failed migration' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $shared = Get-SharedRoot -Scratch $scratch
+            $pdir = Get-ProfileDirFor -Scratch $scratch -Name 'work'
+            New-Item -ItemType Directory -Force -Path $pdir | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'profile-token' -Encoding ASCII
+            (Test-Path -LiteralPath $shared) | Should Be $false
+            Mock Write-MigrationProfileMetadata { throw 'synthetic metadata failure' } -ModuleName MultiCli.Migration
+
+            $message = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir
+            }
+
+            $message | Should Match 'Automatic rollback restored the legacy layout'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth')) | Should Be $false
+            (Test-Path -LiteralPath $shared) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-rollback')) | Should Be $false
+            $journal = Get-Content -LiteralPath (Join-Path $pdir '.migration-journal.json') -Raw | ConvertFrom-Json
+            $journal.status | Should Be 'rolled_back'
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'rolls credentials back when a state move would cross volumes' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $shared = Get-SharedRoot -Scratch $scratch
+            $pdir = Get-ProfileDirFor -Scratch $scratch -Name 'work'
+            New-Item -ItemType Directory -Force -Path $pdir, $shared | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'profile-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'config.toml') -Value 'profile-config' -Encoding ASCII
+            Mock Get-MigrationVolumeRoot {
+                param($Path)
+                if ($Path -like '*\profiles\fixture\work\config.toml') { return 'Z:\' }
+                return 'C:\'
+            } -ModuleName MultiCli.Migration
+
+            $message = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir
+            }
+
+            $message | Should Match 'Automatic rollback restored the legacy layout'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir 'config.toml')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $shared 'config.toml')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration-rollback')) | Should Be $false
+            $journal = Get-Content -LiteralPath (Join-Path $pdir '.migration-journal.json') -Raw | ConvertFrom-Json
+            $journal.status | Should Be 'rolled_back'
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'preserves artifacts and marks rollback_failed when recovery cannot be proven' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $shared = Get-SharedRoot -Scratch $scratch
+            New-Item -ItemType Directory -Force -Path $shared | Out-Null
+            $pdir = Get-ProfileDirFor -Scratch $scratch -Name 'work'
+            New-Item -ItemType Directory -Force -Path (Join-Path $pdir 'agents') | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'profile-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'agents\agent.md') -Value 'agent' -Encoding ASCII
+            Protect-DirectoryFromWrite -Path $shared
+            Mock Undo-MigrationOps { return $false } -ModuleName MultiCli.Migration
+
+            $message = Get-ThrownMessage {
+                Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir
+            }
+            Unprotect-Directory -Path $shared
+
+            $message | Should Match 'Automatic rollback could not prove'
+            $message | Should Match 'Do not launch this profile'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth\auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir '.migration.lock')) | Should Be $false
+            $journal = Get-Content -LiteralPath (Join-Path $pdir '.migration-journal.json') -Raw | ConvertFrom-Json
+            $journal.status | Should Be 'rollback_failed'
+        } finally {
+            Unprotect-Directory -Path (Get-SharedRoot -Scratch $scratch)
+            Remove-MigrationScratch $scratch
+        }
     }
 
     It 'is an idempotent no-op success on the second apply' {

@@ -116,6 +116,7 @@ nini-agents claude-cli/work
 | `nini-agents auth set <tool>/<profile>` | حفظ سر العملية في مخزن بيانات اعتماد نظام التشغيل |
 | `nini-agents auth status <tool>/<profile>` | التحقق من وجود السر |
 | `nini-agents auth clear <tool>/<profile>` | حذف السر |
+| `nini-agents permissions show \| set <read-only\|workspace\|full-access>` | عرض أو حفظ أذونات Codex المشتركة للجلسات الجديدة |
 | `nini-agents continue <tool> <src> <dest> [--dry-run] [--no-merge]` | نسخ حالة الجلسة المدعومة دون نسخ بيانات الاعتماد |
 | `nini-agents template save <tool>/<profile> <name>` | حفظ قالب بالمخطط v2 خالٍ من بيانات الاعتماد |
 | `nini-agents template list \| delete <name>` | عرض القوالب أو حذفها |
@@ -126,7 +127,7 @@ nini-agents claude-cli/work
 
 | الأمر | الإجراء |
 |---|---|
-| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]` | ترحيل ملف تعريف قديم إلى schema v2 |
+| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile] [--preserve-unknown]` | ترحيل ملف تعريف قديم إلى schema v2 |
 | `nini-agents status` | عرض ملفات التعريف وأحجامها |
 | `nini-agents stats` | عرض مساحة التخزين التي تستخدمها ملفات التعريف |
 | `nini-agents doctor [--deep]` | تشخيص الإعداد وتدقيق بيئات التشغيل اختياريًا |

@@ -100,7 +100,8 @@ function Get-Adapters {
 }
 
 # Parse one adapter by id; throws for unknown ids and invalid manifests.
-# Every command that touches adapter data goes through this first.
+# Mutation and audit commands use this exhaustive path; launch has a smaller
+# parser and enforces filesystem safety where declared paths are consumed.
 function Get-Adapter {
     param([string]$ToolId)
     Test-ToolId $ToolId
@@ -112,6 +113,34 @@ function Get-Adapter {
         throw "Invalid adapter '$ToolId': $($validationErrors -join '; ')"
     }
     return Get-Content $manifest -Raw | ConvertFrom-Json
+}
+
+function Import-PermissionsModule {
+    if (Get-Command Get-NiniCodexPermissions -ErrorAction SilentlyContinue) { return }
+    Import-Module (Resolve-MultiCliModulePath 'MultiCli.Permissions.psm1') -Force
+}
+
+# Launch is latency-sensitive. Parse the bundled adapter once and validate the
+# fields the dispatcher consumes; exhaustive semantic validation remains on
+# mutation, tools/doctor, and repository validation paths. Runtime joins still
+# enforce traversal safety at the point of filesystem use.
+function Get-AdapterForLaunch {
+    param([string]$ToolId)
+    Test-ToolId $ToolId
+    $manifest = Join-Path (Join-Path $ToolsDir $ToolId) 'adapter.json'
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw "Unknown tool '$ToolId'. Run: nini-agents tools" }
+    try {
+        $adapter = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+    } catch {
+        throw "Adapter '$ToolId' is not valid JSON. Run: nini-agents doctor"
+    }
+    if ($adapter.id -ne $ToolId) { throw "Adapter directory '$ToolId' does not match id '$($adapter.id)'. Run: nini-agents doctor" }
+    if (-not $adapter.displayName) { throw "Adapter '$ToolId' has no displayName. Run: nini-agents doctor" }
+    if (@('env', 'accountOverlay', 'userDataDir', 'redirectHome', 'appdata', 'sandboxUser') -notcontains $adapter.isolation.strategy) {
+        throw "Unknown isolation strategy '$($adapter.isolation.strategy)'"
+    }
+    if (@($adapter.binary.windows).Count -eq 0) { throw "Adapter '$ToolId' has no binary candidates for windows. Run: nini-agents doctor" }
+    return $adapter
 }
 
 # Expand the path tokens adapters use for per-OS roots: $HOME and %VARS%.
@@ -1176,7 +1205,7 @@ function Remove-StartMenuShortcut {
 function Invoke-Launch {
     param([string]$Spec, [string[]]$BinaryArgs = @())
     $p = Split-ProfileSpec $Spec
-    $adapter = Get-Adapter $p.Tool
+    $adapter = Get-AdapterForLaunch $p.Tool
     $profileDir = Get-ProfileDir $p.Tool $p.Name
     if (-not (Test-Path $profileDir)) { throw "Profile '$Spec' does not exist. Create with: nini-agents new $Spec" }
     if ($adapter.support.windows.level -eq 'unsupported') {
@@ -1190,6 +1219,21 @@ function Invoke-Launch {
     }
     if (Test-UriBinary -Binary $binary) {
         $BinaryArgs = @($adapter.isolation.args) + @($BinaryArgs)
+    }
+
+    # A pre-schema profile has no metadata and already stores the tool's
+    # complete home, including its file credential, at the profile root.
+    # Preserve that layout only for fileOverlay adapters, without creating
+    # metadata, auth\, or a runtime overlay. Other mechanisms remain on their
+    # schema-v2 fail-closed launch path.
+    $metadataPath = Join-Path $profileDir '.profile.json'
+    $metadataEntry = Get-Item -LiteralPath $metadataPath -Force -ErrorAction SilentlyContinue
+    if ($adapter.isolation.strategy -eq 'accountOverlay' -and
+        $adapter.account.mechanism -eq 'fileOverlay' -and
+        $null -eq $metadataEntry) {
+        Write-Host "Launching $($adapter.displayName) profile '$Spec' [$($adapter.isolation.strategy), legacy whole-root]"
+        Invoke-LaunchIsolated -Adapter $adapter -ProfileDir $profileDir -Binary $binary -BinaryArgs $BinaryArgs
+        return
     }
 
     # Isolated profiles share nothing: the profile dir is the tool's whole
@@ -1286,9 +1330,10 @@ function Invoke-LaunchAccountOverlay {
     Start-LaunchPlan -Plan $plan
 }
 
-# Isolated launch for schema-v2 profiles created with --isolated: the profile
-# dir is the tool's whole root. No runtime overlay, no shared links, nothing
-# read from or written to the native shared root. fileOverlay and
+# Whole-root launch for schema-v2 profiles created with --isolated and legacy
+# file-overlay profiles without metadata: the profile dir is the tool's whole
+# root. No runtime overlay, no shared links, nothing read from or written to the
+# native shared root. fileOverlay and
 # processSecret point the adapter's home env at the profile dir itself;
 # processSecret additionally injects the per-profile credential (fail-closed
 # until `nini-agents auth set`). osUserCredentialStore and inseparable get a
@@ -1353,7 +1398,9 @@ function Invoke-LaunchIsolated {
         Binary = $Binary
         Arguments = @($BinaryArgs)
         Environment = $environment
-        ClearEnvironment = @($Adapter.isolation.clearEnv)
+        # Schema-v2 immediately sets its metadata value again; legacy profiles
+        # must not inherit an unrelated id from the parent process.
+        ClearEnvironment = @($Adapter.isolation.clearEnv) + @('MULTICLI_PROFILE_ID')
         Mode = $Adapter.isolation.mode
     })
 }
@@ -1744,7 +1791,7 @@ function Show-Tools {
 
 # nini-agents doctor: writable storage, alias dir on PATH, per-tool binary
 # discovery and support caveats; --deep audits runtime overlays against their
-# manifests. Exit code stays 0; the summary line carries the verdict.
+# manifests. Adapter errors, and deep-audit warnings, return a nonzero exit.
 function Show-Doctor {
     param([string]$Deep)
     $errors = 0; $warnings = 0
@@ -1767,7 +1814,18 @@ function Show-Doctor {
 
     Write-Host ""
     Write-Host "Tools:"
-    foreach ($a in (Get-Adapters | Sort-Object id)) {
+    Import-AdapterValidationModule
+    foreach ($dir in @(Get-ChildItem -Directory -Path $ToolsDir -ErrorAction SilentlyContinue | Sort-Object Name)) {
+        $manifest = Join-Path $dir.FullName 'adapter.json'
+        if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { continue }
+        $validationErrors = @(Test-AdapterManifest -ManifestPath $manifest -ExpectedId $dir.Name)
+        if ($validationErrors.Count -gt 0) {
+            Write-Host "  [FAIL] $($dir.Name) adapter is invalid" -ForegroundColor Red
+            foreach ($validationError in $validationErrors) { Write-Host "         $validationError" }
+            $errors++
+            continue
+        }
+        $a = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
         $bin = Find-AdapterBinary $a
         $support = if ($a.support -and $a.support.windows) { $a.support.windows } else { $null }
         if ($bin) { Write-Host "  [OK]   $($a.id) -> $bin" -ForegroundColor Green }
@@ -1809,7 +1867,21 @@ function Show-Doctor {
             $normalState = Get-ObjectPropertySafe -Object $adapter -Name 'normalState'
             $runtimeSubdir = Get-ObjectPropertySafe -Object $normalState -Name 'runtimeSubdir'
             $runtimePrefix = if ($runtimeSubdir) { ($runtimeSubdir -replace '\\', '/').TrimEnd('/') + '/' } else { '' }
+            $runtimePaths = @(
+                foreach ($runtimePath in @(Get-ObjectPropertySafe -Object $normalState -Name 'runtimePaths')) {
+                    if (-not $runtimePath) { continue }
+                    $runtimePrefix + (([string]$runtimePath -replace '\\', '/').TrimStart('/'))
+                }
+            )
             $sharedRoot = Resolve-PathToken $normalState.root.windows
+            $sharedCredentialState = Get-ObjectPropertySafe -Object $adapter -Name 'sharedCredentialState'
+            $sharedCredentialRoot = $null
+            $sharedCredentialPaths = @()
+            if ($sharedCredentialState) {
+                $profileStore = Split-Path -Parent (Split-Path -Parent $profileDir)
+                $sharedCredentialRoot = Join-Path $profileStore ($sharedCredentialState.root -replace '/', '\')
+                $sharedCredentialPaths = @($sharedCredentialState.entries | ForEach-Object { $_.path })
+            }
             foreach ($entry in @($manifestEntries.Keys)) {
                 $runtimePath = Join-Path $runtimeDir ($entry -replace '/', '\')
                 if (-not (Test-Path -LiteralPath $runtimePath)) {
@@ -1823,6 +1895,8 @@ function Show-Doctor {
                 }
                 $expectedSource = if (@($adapter.account.credentialFiles) -contains $declaredPath) {
                     Join-Path (Join-Path $profileDir 'auth') ($declaredPath -replace '/', '\')
+                } elseif ($sharedCredentialRoot -and $sharedCredentialPaths -contains $declaredPath) {
+                    Join-Path $sharedCredentialRoot ($declaredPath -replace '/', '\')
                 } else {
                     Join-Path $sharedRoot ($declaredPath -replace '/', '\')
                 }
@@ -1835,6 +1909,15 @@ function Show-Doctor {
                 $relative = ($file.Substring($runtimeDir.Length).TrimStart('\', '/') -replace '\\', '/')
                 if ($relative -eq '.runtime-manifest') { continue }
                 if ($manifestEntries.ContainsKey($relative)) { continue }
+                $generated = $false
+                foreach ($runtimePath in $runtimePaths) {
+                    if ($relative.Equals($runtimePath, [StringComparison]::OrdinalIgnoreCase) -or
+                        $relative.StartsWith("$runtimePath/", [StringComparison]::OrdinalIgnoreCase)) {
+                        $generated = $true
+                        break
+                    }
+                }
+                if ($generated) { continue }
                 Write-Host "  [WARN] unexpected runtime file $relative in $profileDir -- adapter classification defect" -ForegroundColor Yellow
                 $warnings++
             }
@@ -1958,16 +2041,19 @@ function Invoke-Import {
 # Legacy -> schema-v2 migration
 # =============================================================================
 
-# nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]: legacy ->
+# nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]
+# [--preserve-unknown]: legacy ->
 # schema-v2 migration; the engine returns plan/output lines, the launcher
 # prints them.
 function Invoke-Migrate {
     param([string]$Spec, [string[]]$Tokens)
-    $dryRun = $false; $preferProfile = $false
+    $dryRun = $false; $preferProfile = $false; $preserveUnknown = $false
     foreach ($token in @($Tokens)) {
         switch ($token) {
             '--dry-run'        { $dryRun = $true }
             '--prefer-profile' { $preferProfile = $true }
+            '--preserve-unknown' { $preserveUnknown = $true }
+            default { throw "Unknown option '$token'. Usage: nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile] [--preserve-unknown]" }
         }
     }
     $p = Split-ProfileSpec $Spec
@@ -1976,9 +2062,32 @@ function Invoke-Migrate {
     $profileDir = Get-ProfileDir $p.Tool $p.Name
     if (-not (Test-Path -LiteralPath $profileDir -PathType Container)) { throw "Profile '$Spec' does not exist" }
     Import-Module (Resolve-MultiCliModulePath 'MultiCli.Migration.psm1') -Force
-    $result = Invoke-MultiCliMigration -Adapter $adapter -ProfileDir $profileDir -DryRun:$dryRun -PreferProfile:$preferProfile
+    $result = Invoke-MultiCliMigration -Adapter $adapter -ProfileDir $profileDir -DryRun:$dryRun -PreferProfile:$preferProfile -PreserveUnknown:$preserveUnknown
     foreach ($line in @($result.Lines)) { Write-Host $line }
     if ($result.Migrated) { Write-Host "Migrated $Spec to schema-v2 (accountOverlay)." }
+}
+
+function Invoke-Permissions {
+    param([string]$Subcommand = 'show', [string]$Mode, [string[]]$Extra = @())
+    if ($Extra.Count -gt 0) { throw 'Usage: nini-agents permissions show | set <read-only|workspace|full-access>' }
+    $adapter = Get-Adapter 'codex'
+    $configRoot = Resolve-PathToken $adapter.normalState.root.windows
+    if (-not $configRoot) { throw 'Codex adapter has no shared config root for Windows.' }
+    $configPath = Join-Path $configRoot 'config.toml'
+    Import-PermissionsModule
+    switch ($Subcommand) {
+        'show' {
+            if ($Mode) { throw 'Usage: nini-agents permissions show' }
+            Get-NiniCodexPermissions -ConfigPath $configPath
+        }
+        'set' {
+            if (-not $Mode) { throw 'Usage: nini-agents permissions set <read-only|workspace|full-access>' }
+            $binary = Find-AdapterBinary $adapter
+            if (-not $binary) { throw 'OpenAI Codex CLI binary not found.' }
+            Set-NiniCodexPermissions -ConfigPath $configPath -Mode $Mode -CodexBinary $binary
+        }
+        default { throw 'Usage: nini-agents permissions show | set <read-only|workspace|full-access>' }
+    }
 }
 
 # =============================================================================
@@ -1997,12 +2106,15 @@ COMMANDS
   new <tool>/<name> [--shared] [--isolated] [--cli] [--from <tpl>] [--no-seed]   Create a profile
   launch <tool>/<name> [-- args...]                     Launch the profile
   continue <tool> <src> <dest> [--no-merge] [--dry-run] Copy a chat session src->dest ('base' = real home)
-  migrate <tool>/<name> [--dry-run] [--prefer-profile]  Migrate a legacy profile to schema-v2
+  migrate <tool>/<name> [--dry-run] [--prefer-profile] [--preserve-unknown]
+                                                        Migrate a legacy profile to schema-v2
   list [<tool>]                                         List profiles
   status                                                Same as list
   rename <tool>/<old> <tool>/<new>                      Rename
   delete <tool>/<name>                                  Delete (confirms)
   auth set|status|clear <tool>/<name>                   Manage a process-secret credential
+  permissions show | set <read-only|workspace|full-access>
+                                                        Manage shared Codex defaults
   clone <tool>/<src> <tool>/<dest>                      Clone
   template save <tool>/<profile> <name>                 Save as template
   template list | delete <name>                         Manage templates
@@ -2047,7 +2159,7 @@ Register-ArgumentCompleter -Native -CommandName nini-agents,multi-cli -ScriptBlo
     param(`$wordToComplete, `$commandAst, `$cursorPosition)
     `$base = if (`$env:MULTICLI_HOME) { `$env:MULTICLI_HOME } else { Join-Path `$env:USERPROFILE 'MultiCliProfiles' }
     `$tools = (Get-ChildItem -Directory '$ToolsDir' -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path `$_.FullName 'adapter.json') }).Name
-    `$cmds = @('new','launch','continue','migrate','list','status','rename','delete','clone','auth','template','export','import','tools','doctor','stats','completion','help','version')
+    `$cmds = @('new','launch','continue','migrate','list','status','rename','delete','clone','auth','permissions','template','export','import','tools','doctor','stats','completion','help','version')
     `$specs = @()
     foreach (`$t in `$tools) {
         `$dir = Join-Path `$base `$t
@@ -2173,6 +2285,10 @@ try {
             $action = $Arg1
             $spec = $Arg2
             Invoke-Auth -Action $action -Spec $spec
+        }
+        'permissions' {
+            $subcommand = if ($Arg1) { $Arg1 } else { 'show' }
+            Invoke-Permissions -Subcommand $subcommand -Mode $Arg2 -Extra @($ForwardArgs)
         }
         'continue' {
             $tokens = @()

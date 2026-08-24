@@ -12,7 +12,12 @@
     "strategy": "accountOverlay",
     "mode": "foreground",
     "env": { "CODEX_HOME": "{runtimeRoot}" },
-    "clearEnv": []
+    "clearEnv": ["CODEX_SQLITE_HOME"],
+    "args": [
+      "-c", "cli_auth_credentials_store=\"file\"",
+      "-c", "mcp_oauth_credentials_store=\"file\"",
+      "-c", "sqlite_home=\"{sharedStateRoot}\""
+    ]
   },
   "account": {
     "mechanism": "fileOverlay",
@@ -27,11 +32,56 @@
       "linux": "$HOME/.codex"
     },
     "sharedPaths": [
-      "config.toml", "hooks.json", "skills", "agents", "prompts", "mcp-configs", "plugins", "rules"
+      "config.toml", "hooks.json", "AGENTS.md", "installation_id", "skills", "agents", "prompts", "mcp-configs", "plugins", "rules", "log"
     ],
-    "sessionPaths": ["sessions", "history.jsonl", "archived_sessions", "session_index.jsonl"],
-    "filePaths": ["config.toml", "hooks.json", "history.jsonl", "session_index.jsonl"],
+    "sessionPaths": [
+      "sessions", "history.jsonl", "archived_sessions", "shell_snapshots", "thread-writer-locks", "session_index.jsonl",
+      "goals_1.sqlite", "goals_1.sqlite-shm", "goals_1.sqlite-wal",
+      "logs_2.sqlite", "logs_2.sqlite-shm", "logs_2.sqlite-wal",
+      "memories_1.sqlite", "memories_1.sqlite-shm", "memories_1.sqlite-wal",
+      "queue_1.sqlite", "queue_1.sqlite-shm", "queue_1.sqlite-wal",
+      "state_5.sqlite", "state_5.sqlite-shm", "state_5.sqlite-wal",
+      "thread_history_1.sqlite", "thread_history_1.sqlite-shm", "thread_history_1.sqlite-wal"
+    ],
+    "runtimePaths": [
+      ".sandbox_migration", "cache", "models_cache.json", "version.json"
+    ],
+    "filePaths": [
+      "config.toml", "hooks.json", "AGENTS.md", "installation_id", "history.jsonl", "session_index.jsonl",
+      "goals_1.sqlite", "goals_1.sqlite-shm", "goals_1.sqlite-wal",
+      "logs_2.sqlite", "logs_2.sqlite-shm", "logs_2.sqlite-wal",
+      "memories_1.sqlite", "memories_1.sqlite-shm", "memories_1.sqlite-wal",
+      "queue_1.sqlite", "queue_1.sqlite-shm", "queue_1.sqlite-wal",
+      "state_5.sqlite", "state_5.sqlite-shm", "state_5.sqlite-wal",
+      "thread_history_1.sqlite", "thread_history_1.sqlite-shm", "thread_history_1.sqlite-wal"
+    ],
+    "directPaths": [
+      "goals_1.sqlite", "goals_1.sqlite-shm", "goals_1.sqlite-wal",
+      "logs_2.sqlite", "logs_2.sqlite-shm", "logs_2.sqlite-wal",
+      "memories_1.sqlite", "memories_1.sqlite-shm", "memories_1.sqlite-wal",
+      "queue_1.sqlite", "queue_1.sqlite-shm", "queue_1.sqlite-wal",
+      "state_5.sqlite", "state_5.sqlite-shm", "state_5.sqlite-wal",
+      "thread_history_1.sqlite", "thread_history_1.sqlite-shm", "thread_history_1.sqlite-wal"
+    ],
+    "migrationPreservePaths": [
+      "thread-writer-locks",
+      "goals_1.sqlite", "goals_1.sqlite-shm", "goals_1.sqlite-wal",
+      "logs_2.sqlite", "logs_2.sqlite-shm", "logs_2.sqlite-wal",
+      "memories_1.sqlite", "memories_1.sqlite-shm", "memories_1.sqlite-wal",
+      "queue_1.sqlite", "queue_1.sqlite-shm", "queue_1.sqlite-wal",
+      "state_5.sqlite", "state_5.sqlite-shm", "state_5.sqlite-wal",
+      "thread_history_1.sqlite", "thread_history_1.sqlite-shm", "thread_history_1.sqlite-wal"
+    ],
     "unsafePaths": []
+  },
+  "sharedCredentialState": {
+    "root": ".shared/codex/mcp",
+    "entries": [
+      { "path": ".credentials.json", "kind": "jsonObjectFile" },
+      { "path": "mcp-oauth-locks", "kind": "directory" }
+    ],
+    "legacyMigration": "preserveInactive",
+    "legacyBackupPattern": "dotSuffix"
   },
   "concurrency": { "level": "multiWriter", "singletonScope": "none" },
   "support": {

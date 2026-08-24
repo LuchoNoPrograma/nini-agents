@@ -51,6 +51,21 @@ function Test-TransferCredentialPath {
     $account = Get-TransferProperty -Object $Adapter -Name 'account'
     $declared = Get-TransferProperty -Object $account -Name 'credentialFiles'
     if (Test-TransferDeclaredPath -Values $declared -RelativePath $normalized) { return $true }
+    $sharedCredentialState = Get-TransferProperty -Object $Adapter -Name 'sharedCredentialState'
+    $backupPattern = Get-TransferProperty -Object $sharedCredentialState -Name 'legacyBackupPattern'
+    foreach ($entry in @(Get-TransferProperty -Object $sharedCredentialState -Name 'entries')) {
+        $declaredSharedCredential = [string](Get-TransferProperty -Object $entry -Name 'path')
+        if (-not $declaredSharedCredential) { continue }
+        $declaredSharedCredential = $declaredSharedCredential -replace '\\', '/'
+        if ($normalized -eq $declaredSharedCredential -or $normalized.StartsWith("$declaredSharedCredential/", [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+        if ($backupPattern -eq 'dotSuffix' -and
+            $normalized.StartsWith("$declaredSharedCredential.", [StringComparison]::OrdinalIgnoreCase) -and
+            $normalized.Length -gt ($declaredSharedCredential.Length + 1)) {
+            return $true
+        }
+    }
     $leaf = ($normalized -split '/')[-1]
     if (Test-TransferCredentialBasename -Name $leaf) { return $true }
     if ($normalized -eq 'auth' -or $normalized.StartsWith('auth/')) { return $true }

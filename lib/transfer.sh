@@ -42,11 +42,25 @@ transfer_is_declared_path() {
   return 1
 }
 
+transfer_is_shared_credential_path() {
+  local manifest="$1" rel="$2" declared backup_pattern
+  backup_pattern="$(runtime_json_str '.sharedCredentialState.legacyBackupPattern' "$manifest")"
+  while IFS= read -r declared; do
+    [ -n "$declared" ] || continue
+    case "$rel" in "$declared"|"$declared"/*) return 0 ;; esac
+    if [ "$backup_pattern" = dotSuffix ]; then
+      case "$rel" in "$declared".?*) return 0 ;; esac
+    fi
+  done < <(runtime_json_arr '.sharedCredentialState.entries // [] | map(.path)' "$manifest")
+  return 1
+}
+
 # Credential paths are the adapter-declared credential files, the legacy
 # hardcoded credential basenames at any depth, and the profile auth boundary.
 transfer_is_credential_path() {
   local manifest="$1" rel="$2"
   transfer_is_declared_path '.account.credentialFiles' "$rel" "$manifest" && return 0
+  transfer_is_shared_credential_path "$manifest" "$rel" && return 0
   transfer_is_credential_basename "$(basename "$rel")" && return 0
   case "$rel" in
     auth|auth/*) return 0 ;;

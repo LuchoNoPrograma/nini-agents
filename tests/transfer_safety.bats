@@ -451,6 +451,44 @@ PY
   [ ! -e "$dest2" ]
 }
 
+@test "shared credential state stays outside exports and is rejected on import" {
+  jq '.sharedCredentialState={
+    root:".shared/fixture/oauth",
+    entries:[{path:"oauth-store",kind:"directory"}],
+    legacyMigration:"preserveInactive",
+    legacyBackupPattern:"dotSuffix"
+  }' "$FIXTURE_MANIFEST" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$FIXTURE_MANIFEST"
+  seed_transfer_shared_root
+  make_overlay_profile account-a
+  local profile_dir="$TRANSFER_PROFILE_DIR"
+  local store="$MULTICLI_HOME/.shared/fixture/oauth/oauth-store"
+  local archive="$MULTICLI_SCRATCH/shared-credential-export.tar.gz"
+  printf 'synthetic-shared-credential\n' > "$store/token.cache"
+
+  run transfer_run transfer_export_profile "$FIXTURE_MANIFEST" "$profile_dir" "$archive" account-a
+
+  [ "$status" -eq 0 ]
+  local entries
+  entries="$(archive_entries "$archive")"
+  ! printf '%s\n' "$entries" | grep -q 'oauth-store'
+
+  local staging dest hostile
+  staging="$(mktemp -d "$MULTICLI_SCRATCH/staged.XXXXXX")"
+  mkdir -p "$staging/oauth-store.before-test"
+  printf 'forged\n' > "$staging/oauth-store.before-test/token.cache"
+  write_staged_manifest fixture "$staging"
+  hostile="$MULTICLI_SCRATCH/shared-credential-import.tar.gz"
+  pack_staged_archive "$staging" "$hostile"
+  dest="$MULTICLI_HOME/fixture/evil-shared-credential"
+
+  run transfer_run transfer_import_profile "$hostile" "$FIXTURE_MANIFEST" "$dest"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"credential"* ]]
+  [ ! -e "$dest" ]
+}
+
 @test "import refuses archives with a foreign or missing adapter manifest" {
   seed_transfer_shared_root
   local staging archive dest

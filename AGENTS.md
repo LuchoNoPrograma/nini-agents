@@ -6,7 +6,7 @@
 - La base vigente de esta branch es Multi-CLI `6efb0d2`; el ejecutable principal es `nini-agents` y `multi-cli` es un shim temporal. No presentar todavia la transferencia de Codexporter, la CLI JSON ni las migraciones consumidoras como funcionalidades implementadas.
 - El motor actual tiene dos implementaciones equivalentes: Bash 3.2 o superior y Windows PowerShell 5.1 o superior.
 - Los datos locales, perfiles y credenciales son reales aunque el producto no este en produccion empresarial. Priorizar siempre recuperabilidad y no revocacion.
-- El plan maestro y la bitacora de continuidad viven en `docs/plans/nini-agents-end-to-end.md`; describen direccion y gates, pero no conceden autorizacion para ejecutar etapas pendientes.
+- El plan maestro y la bitacora de continuidad viven en `docs/plans/nini-agents-end-to-end.md`; describen direccion y gates, pero no conceden autorizacion para ejecutar etapas pendientes. Para una reanudacion ordinaria, leer primero `docs/plans/nini-agents-resume.md` y consultar la bitacora completa solo si hace falta historia, evidencia detallada o cambiar una etapa.
 
 ## Alcance y autorizacion
 

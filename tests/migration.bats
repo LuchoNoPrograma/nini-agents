@@ -114,6 +114,12 @@ list_tree() {
   (cd "$1" && find . -mindepth 1 | sed 's|^\./||' | LC_ALL=C sort)
 }
 
+# Stable filesystem identity without reading file content. Credential moves
+# must preserve this value and keep a single hardlink.
+file_identity() {
+  stat -c '%d:%i' "$1" 2>/dev/null || stat -f '%d:%i' "$1"
+}
+
 # Directory link that works without admin privileges: POSIX symlink, Windows
 # directory junction via PowerShell (same mechanism the runtime uses).
 make_dir_link() {
@@ -154,6 +160,7 @@ make_dir_writable() {
 
   run cmd_migrate fixture/work --dry-run
 
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
   [ "$status" -eq 0 ]
   [[ "$output" == *"Migration plan for fixture/work (legacy-isolated -> accountOverlay):"* ]]
   [[ "$output" == *"  move credential auth.json -> auth/auth.json"* ]]
@@ -215,6 +222,326 @@ make_dir_writable() {
   [ ! -e "$SHARED_ROOT" ]
 }
 
+@test "preserve-unknown dry run plans inactive recovery and writes nothing" {
+  local pdir="$MULTICLI_HOME/fixture/work" auth_before unknown_before
+  mkdir -p "$pdir/keys" "$pdir/tmp"
+  printf 'profile-token\n' > "$pdir/auth.json"
+  printf 'nested-token\n' > "$pdir/keys/token.json"
+  printf 'rogue\n' > "$pdir/keys/rogue.txt"
+  printf 'temporary\n' > "$pdir/tmp/item"
+  auth_before="$(file_identity "$pdir/auth.json")"
+  unknown_before="$(file_identity "$pdir/keys/rogue.txt")"
+
+  run cmd_migrate fixture/work --dry-run --preserve-unknown
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [[ "$output" == *"  preserve unknown state keys/rogue.txt in inactive recovery (--preserve-unknown)"* ]]
+  [[ "$output" == *"  preserve unknown state tmp in inactive recovery (--preserve-unknown)"* ]]
+  [[ "$output" == *"Dry run -- no changes written."* ]]
+  [ "$(file_identity "$pdir/auth.json")" = "$auth_before" ]
+  [ "$(file_identity "$pdir/keys/rogue.txt")" = "$unknown_before" ]
+  [ ! -e "$pdir/auth/auth.json" ]
+  [ ! -e "$MULTICLI_HOME/.inactive" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+}
+
+@test "preserve-unknown apply renames objects inactive and keeps credential identity" {
+  local pdir="$MULTICLI_HOME/fixture/work"
+  local inactive="$MULTICLI_HOME/.inactive/migrations/fixture/work/unknown-state"
+  local auth_before unknown_before
+  mkdir -p "$pdir/tmp"
+  printf 'profile-token\n' > "$pdir/auth.json"
+  printf 'artifact\n' > "$pdir/custom.txt"
+  printf 'temporary\n' > "$pdir/tmp/item"
+  auth_before="$(file_identity "$pdir/auth.json")"
+  unknown_before="$(file_identity "$pdir/custom.txt")"
+
+  run cmd_migrate fixture/work --preserve-unknown
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [ ! -e "$pdir/auth.json" ]
+  [ "$(file_identity "$pdir/auth/auth.json")" = "$auth_before" ]
+  [ ! -e "$pdir/custom.txt" ]
+  [ "$(file_identity "$inactive/custom.txt")" = "$unknown_before" ]
+  [ -f "$inactive/tmp/item" ]
+  run jq -e '(.status == "completed") and .preserveUnknown == true and (.action | contains("--preserve-unknown")) and ([.operations[] | select(.op == "preserve-unknown" and .status == "done")] | length) == 2' "$pdir/.migration-journal.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "preserve-unknown participates in automatic rollback" {
+  local pdir="$MULTICLI_HOME/fixture/work" auth_before unknown_before
+  mkdir -p "$pdir/tmp"
+  printf 'profile-token\n' > "$pdir/auth.json"
+  printf 'temporary\n' > "$pdir/tmp/item"
+  auth_before="$(file_identity "$pdir/auth.json")"
+  unknown_before="$(file_identity "$pdir/tmp/item")"
+  runtime_write_profile_metadata() { return 9; }
+
+  run cmd_migrate fixture/work --preserve-unknown
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Automatic rollback restored the legacy layout"* ]]
+  [ "$(file_identity "$pdir/auth.json")" = "$auth_before" ]
+  [ "$(file_identity "$pdir/tmp/item")" = "$unknown_before" ]
+  [ ! -e "$pdir/auth/auth.json" ]
+  [ ! -e "$MULTICLI_HOME/.inactive" ]
+  run jq -e '.status == "rolled_back" and .preserveUnknown == true and (.action | contains("--preserve-unknown")) and ([.operations[] | select(.op == "preserve-unknown" and .status == "rolled-back")] | length) == 1' "$pdir/.migration-journal.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "preserve-unknown never overrides unsafe declarations" {
+  mutate_adapter '.normalState.unsafePaths = ["forbidden"]'
+  local pdir="$MULTICLI_HOME/fixture/work"
+  mkdir -p "$pdir"
+  printf 'profile-token\n' > "$pdir/auth.json"
+  printf 'unsafe\n' > "$pdir/forbidden"
+  printf 'unknown\n' > "$pdir/mystery.txt"
+
+  run cmd_migrate fixture/work --dry-run --preserve-unknown
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"  unsafe: forbidden"* ]]
+  [[ "$output" != *"Migration plan for"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ -f "$pdir/forbidden" ]
+  [ -f "$pdir/mystery.txt" ]
+  [ ! -e "$MULTICLI_HOME/.inactive" ]
+}
+
+# Current Codex SQLite databases remain declared direct session state for the
+# runtime, while migration preserves each legacy family member inactive.
+@test "modern Codex SQLite family is preserved inactive in a dry-run" {
+  local pdir="$MULTICLI_HOME/codex/modern"
+  mkdir -p "$TOOLS_ROOT/codex" "$pdir" "$HOME/.codex"
+  cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
+  printf 'synthetic-token\n' > "$pdir/auth.json"
+  printf 'synthetic-state\n' > "$pdir/state_5.sqlite"
+  printf 'synthetic-shm\n' > "$pdir/state_5.sqlite-shm"
+  printf 'synthetic-wal\n' > "$pdir/state_5.sqlite-wal"
+  printf 'default-state\n' > "$HOME/.codex/state_5.sqlite"
+
+  run cmd_migrate codex/modern --dry-run
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [[ "$output" == *"preserve profile state state_5.sqlite in inactive recovery"* ]]
+  [[ "$output" == *"preserve profile state state_5.sqlite-shm in inactive recovery"* ]]
+  [[ "$output" == *"preserve profile state state_5.sqlite-wal in inactive recovery"* ]]
+  [[ "$output" != *"merge session state_5.sqlite"* ]]
+  [ "$(cat "$HOME/.codex/state_5.sqlite" | tr -d '\r')" = default-state ]
+  [ -f "$pdir/auth.json" ]
+  [ -f "$pdir/state_5.sqlite-wal" ]
+  [ ! -e "$pdir/auth/auth.json" ]
+  [ ! -e "$MULTICLI_HOME/.inactive" ]
+  [ ! -e "$pdir/.profile.json" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+}
+
+# MCP OAuth is shared across schema-v2 profiles. Legacy entries are never
+# imported into the active shared store: dry-run plans same-volume preservation
+# under inactive recovery without following or printing link targets.
+@test "modern Codex MCP OAuth state plans inactive preservation without writes" {
+  local pdir="$MULTICLI_HOME/codex/modern"
+  local outside="$MULTICLI_SCRATCH/synthetic-mcp" auth_before
+  mkdir -p "$TOOLS_ROOT/codex" "$pdir" "$outside/locks"
+  cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
+  printf 'synthetic-token\n' > "$pdir/auth.json"
+  printf '{"synthetic":"legacy"}\n' > "$outside/credentials.json"
+  ln -s "$outside/credentials.json" "$pdir/.credentials.json"
+  ln -s "$outside/locks" "$pdir/mcp-oauth-locks"
+  auth_before="$(file_identity "$pdir/auth.json")"
+
+  run cmd_migrate codex/modern --dry-run
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [[ "$output" == *"preserve shared credential .credentials.json in inactive recovery"* ]]
+  [[ "$output" == *"preserve shared credential mcp-oauth-locks in inactive recovery"* ]]
+  [[ "$output" != *"$outside"* ]]
+  [[ "$output" == *"Dry run -- no changes written."* ]]
+  [ "$(file_identity "$pdir/auth.json")" = "$auth_before" ]
+  [ -L "$pdir/.credentials.json" ]
+  [ -L "$pdir/mcp-oauth-locks" ]
+  [ ! -e "$pdir/auth/auth.json" ]
+  [ ! -e "$MULTICLI_HOME/.inactive" ]
+  [ ! -e "$MULTICLI_HOME/.shared/codex/mcp" ]
+  [ ! -e "$pdir/.profile.json" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+}
+
+@test "modern Codex reconstructible runtime state and MCP backups are classified without writes" {
+  local pdir="$MULTICLI_HOME/codex/modern"
+  mkdir -p "$TOOLS_ROOT/codex" "$pdir/cache" "$pdir/shell_snapshots" "$pdir/thread-writer-locks"
+  cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
+  printf 'synthetic-token\n' > "$pdir/auth.json"
+  printf 'runtime-cache\n' > "$pdir/cache/item"
+  printf 'models\n' > "$pdir/models_cache.json"
+  printf 'version\n' > "$pdir/version.json"
+  : > "$pdir/.sandbox_migration"
+  printf 'snapshot\n' > "$pdir/shell_snapshots/shell"
+  printf 'lock\n' > "$pdir/thread-writer-locks/writer"
+  printf 'backup\n' > "$pdir/.credentials.json.before-test"
+  mkdir -p "$pdir/mcp-oauth-locks.before-test"
+
+  run cmd_migrate codex/modern --dry-run
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [[ "$output" == *"preserve runtime state .sandbox_migration in inactive recovery"* ]]
+  [[ "$output" == *"preserve runtime state cache in inactive recovery"* ]]
+  [[ "$output" == *"preserve runtime state models_cache.json in inactive recovery"* ]]
+  [[ "$output" == *"preserve runtime state version.json in inactive recovery"* ]]
+  [[ "$output" == *"merge session shell_snapshots"* ]]
+  [[ "$output" == *"preserve profile state thread-writer-locks in inactive recovery"* ]]
+  [[ "$output" == *"preserve shared credential .credentials.json.before-test in inactive recovery"* ]]
+  [[ "$output" == *"preserve shared credential mcp-oauth-locks.before-test in inactive recovery"* ]]
+  [ -f "$pdir/.credentials.json.before-test" ]
+  [ -d "$pdir/cache" ]
+  [ ! -e "$MULTICLI_HOME/.inactive" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+}
+
+@test "Codex residue classification keeps only the six unproven paths unknown" {
+  local pdir="$MULTICLI_HOME/codex/modern"
+  mkdir -p "$TOOLS_ROOT/codex" "$pdir/cache" "$pdir/shell_snapshots" "$pdir/thread-writer-locks" \
+    "$pdir/mcp-oauth-locks.before-shared-supabase-20260721T202703Z" "$pdir/.tmp" "$pdir/tmp"
+  cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
+  printf 'synthetic-token\n' > "$pdir/auth.json"
+  : > "$pdir/.sandbox_migration"
+  : > "$pdir/models_cache.json"
+  : > "$pdir/version.json"
+  : > "$pdir/.credentials.json.before-shared-supabase-20260721T202703Z"
+  : > "$pdir/.personality_migration"
+  : > "$pdir/config.toml.bak-20260704"
+  : > "$pdir/config.toml.bak-20260705-516-workaround"
+  : > "$pdir/gpt-5.5-no-intermediary-updates.md"
+
+  run cmd_migrate codex/modern --dry-run
+
+  [ "$status" -eq 1 ]
+  for rel in .personality_migration .tmp tmp config.toml.bak-20260704 \
+    config.toml.bak-20260705-516-workaround gpt-5.5-no-intermediary-updates.md; do
+    [[ "$output" == *"  unknown: $rel"* ]]
+  done
+  [[ "$output" != *"unknown: .sandbox_migration"* ]]
+  [[ "$output" != *"unknown: cache"* ]]
+  [[ "$output" != *"unknown: models_cache.json"* ]]
+  [[ "$output" != *"unknown: version.json"* ]]
+  [[ "$output" != *"unknown: shell_snapshots"* ]]
+  [[ "$output" != *"unknown: thread-writer-locks"* ]]
+  [[ "$output" != *"unknown: .credentials.json.before-shared-supabase-20260721T202703Z"* ]]
+  [[ "$output" != *"unknown: mcp-oauth-locks.before-shared-supabase-20260721T202703Z"* ]]
+  [ ! -e "$pdir/.migration-journal.json" ]
+  [ ! -e "$MULTICLI_HOME/.inactive" ]
+}
+
+@test "apply preserves legacy MCP OAuth link objects inactive and leaves targets untouched" {
+  local pdir="$MULTICLI_HOME/codex/modern"
+  local outside="$MULTICLI_SCRATCH/synthetic-mcp"
+  local inactive="$MULTICLI_HOME/.inactive/migrations/codex/modern/shared-credentials"
+  local runtime_inactive="$MULTICLI_HOME/.inactive/migrations/codex/modern/runtime-state"
+  local profile_state_inactive="$MULTICLI_HOME/.inactive/migrations/codex/modern/profile-state"
+  mkdir -p "$TOOLS_ROOT/codex" "$pdir" "$outside/locks" "$pdir/mcp-oauth-locks.before-test" "$pdir/cache" "$pdir/thread-writer-locks"
+  cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
+  printf 'synthetic-token\n' > "$pdir/auth.json"
+  printf '{"synthetic":"legacy"}\n' > "$outside/credentials.json"
+  printf 'lock-target\n' > "$outside/locks/owner"
+  ln -s "$outside/credentials.json" "$pdir/.credentials.json"
+  ln -s "$outside/locks" "$pdir/mcp-oauth-locks"
+  printf 'backup\n' > "$pdir/.credentials.json.before-test"
+  printf 'backup-lock\n' > "$pdir/mcp-oauth-locks.before-test/owner"
+  printf 'generated\n' > "$pdir/cache/item"
+  printf 'generated\n' > "$pdir/version.json"
+  printf 'db\n' > "$pdir/state_5.sqlite"
+  printf 'shm\n' > "$pdir/state_5.sqlite-shm"
+  printf 'wal\n' > "$pdir/state_5.sqlite-wal"
+  printf 'lock\n' > "$pdir/thread-writer-locks/writer"
+
+  run cmd_migrate codex/modern
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [ -L "$inactive/.credentials.json" ]
+  [ -L "$inactive/mcp-oauth-locks" ]
+  [ -f "$inactive/.credentials.json.before-test" ]
+  [ -d "$inactive/mcp-oauth-locks.before-test" ]
+  [ -f "$runtime_inactive/cache/item" ]
+  [ -f "$runtime_inactive/version.json" ]
+  [ -f "$profile_state_inactive/state_5.sqlite" ]
+  [ -f "$profile_state_inactive/state_5.sqlite-shm" ]
+  [ -f "$profile_state_inactive/state_5.sqlite-wal" ]
+  [ -f "$profile_state_inactive/thread-writer-locks/writer" ]
+  [ ! -e "$pdir/.credentials.json" ]
+  [ ! -e "$pdir/mcp-oauth-locks" ]
+  run jq -er '.synthetic' "$outside/credentials.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = legacy ]
+  [ "$(cat "$outside/locks/owner" | tr -d '\r')" = lock-target ]
+  [ -f "$pdir/auth/auth.json" ]
+  [ ! -e "$pdir/auth.json" ]
+  [ -f "$pdir/.profile.json" ]
+  [ ! -e "$MULTICLI_HOME/.shared/codex/mcp" ]
+  run jq -e '([.operations[] | select(.op == "preserve-shared-credential" and .status == "done")] | length) == 4 and ([.operations[] | select(.op == "preserve-runtime-state" and .status == "done")] | length) == 2 and ([.operations[] | select(.op == "preserve-profile-state" and .status == "done")] | length) == 4' "$pdir/.migration-journal.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "failed migration restores legacy MCP OAuth links from inactive recovery" {
+  local pdir="$MULTICLI_HOME/codex/modern"
+  local outside="$MULTICLI_SCRATCH/synthetic-mcp"
+  mkdir -p "$TOOLS_ROOT/codex" "$pdir" "$outside/locks" "$pdir/cache" "$pdir/thread-writer-locks"
+  cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
+  printf 'synthetic-token\n' > "$pdir/auth.json"
+  printf '{}\n' > "$outside/credentials.json"
+  ln -s "$outside/credentials.json" "$pdir/.credentials.json"
+  ln -s "$outside/locks" "$pdir/mcp-oauth-locks"
+  printf 'generated\n' > "$pdir/cache/item"
+  printf 'backup\n' > "$pdir/.credentials.json.before-test"
+  printf 'db\n' > "$pdir/state_5.sqlite"
+  printf 'wal\n' > "$pdir/state_5.sqlite-wal"
+  printf 'lock\n' > "$pdir/thread-writer-locks/writer"
+  runtime_write_profile_metadata() { return 9; }
+
+  run cmd_migrate codex/modern
+
+  [ "$status" -eq 1 ] || printf 'unexpected status %s: %s\n' "$status" "$output" >&3
+  [[ "$output" == *"Automatic rollback restored the legacy layout"* ]] || printf '%s\n' "$output" >&3
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Automatic rollback restored the legacy layout"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ ! -e "$pdir/auth/auth.json" ]
+  [ -L "$pdir/.credentials.json" ]
+  [ -L "$pdir/mcp-oauth-locks" ]
+  [ -f "$pdir/cache/item" ]
+  [ -f "$pdir/.credentials.json.before-test" ]
+  [ -f "$pdir/state_5.sqlite" ]
+  [ -f "$pdir/state_5.sqlite-wal" ]
+  [ -f "$pdir/thread-writer-locks/writer" ]
+  [ ! -e "$MULTICLI_HOME/.inactive" ]
+  [ ! -e "$pdir/.profile.json" ]
+  run jq -er '.status == "rolled_back"' "$pdir/.migration-journal.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "linked inactive recovery boundary refuses shared credential migration before writes" {
+  mutate_adapter '.sharedCredentialState={
+    root:".shared/fixture/oauth",
+    entries:[{path:"oauth-cache",kind:"jsonObjectFile"}],
+    legacyMigration:"preserveInactive"
+  }'
+  local pdir="$MULTICLI_HOME/fixture/work"
+  local outside="$MULTICLI_SCRATCH/outside-inactive"
+  mkdir -p "$pdir" "$outside"
+  printf 'profile-token\n' > "$pdir/auth.json"
+  printf '{}\n' > "$pdir/oauth-cache"
+  make_dir_link "$outside" "$MULTICLI_HOME/.inactive" || skip "directory links unavailable on this host"
+
+  run cmd_migrate fixture/work --dry-run
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"inactive shared-credential recovery root crosses a link"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ -f "$pdir/oauth-cache" ]
+  [ -z "$(find "$outside" -mindepth 1 -print -quit)" ]
+  [ ! -e "$pdir/auth" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+}
+
 # 4. An entry that matches both a credential and a shared-state declaration is
 #    ambiguous and refuses the migration.
 @test "entries overlapping credential and shared declarations refuse the migration" {
@@ -243,13 +570,21 @@ make_dir_writable() {
   make_legacy_profile work
   seed_shared_root
 
+  local pdir="$MULTICLI_HOME/fixture/work"
+  local auth_identity
+  auth_identity="$(file_identity "$pdir/auth.json")"
+
   run cmd_migrate fixture/work
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Migrated fixture/work to schema-v2 (accountOverlay)."* ]]
 
-  local pdir="$MULTICLI_HOME/fixture/work"
   [ "$(cat "$pdir/auth/auth.json" | tr -d '\r')" = "profile-token" ]
+  [ "$(file_identity "$pdir/auth/auth.json")" = "$auth_identity" ]
+  [ "$(file_nlink "$pdir/auth/auth.json")" -eq 1 ]
+  [ ! -e "$pdir/auth.json" ]
+  [ ! -e "$pdir/.migration.lock" ]
+  [ ! -e "$pdir/.migration-rollback" ]
   [ "$(cat "$pdir/auth/keys/token.json" | tr -d '\r')" = "nested-token" ]
   run jq -er '.schemaVersion == 2 and .adapterId == "fixture" and .mode == "accountOverlay" and (.profileId | test("^[a-f0-9-]{36}$"))' "$pdir/.profile.json"
   [ "$status" -eq 0 ]
@@ -353,7 +688,8 @@ make_dir_writable() {
   run cmd_migrate fixture/work
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"  keep shared link plugins"* ]]
+  [[ "$output" == *"  keep shared link plugins (existing link retained)"* ]]
+  [[ "$output" != *"target:"* ]]
   [[ "$output" == *"  skip nested link agents/linkdir"* ]]
   [ -L "$pdir/plugins" ]
   [ -L "$pdir/agents/linkdir" ]
@@ -370,10 +706,9 @@ make_dir_writable() {
     plugins)" ]
 }
 
-# 9. A failure mid-apply (read-only shared root) aborts the migration and
-#    leaves a roll-forward/rollback journal on disk. Repairing the cause and
-#    re-running rolls forward to completion.
-@test "failure leaves a journal on disk and a re-run rolls forward" {
+# 9. A failure mid-apply restores every completed move before returning. The
+#    journal remains as non-secret evidence and a clean re-run can start over.
+@test "failure rolls back to the legacy layout and a re-run starts cleanly" {
   mkdir -p "$SHARED_ROOT"
   local pdir="$MULTICLI_HOME/fixture/work"
   mkdir -p "$pdir/agents"
@@ -387,19 +722,23 @@ make_dir_writable() {
   [[ "$output" == *"Migration failed"* ]]
   [[ "$output" == *".migration-journal.json"* ]]
   [ ! -e "$pdir/.profile.json" ]
-  # the journal records what completed, what failed, and what is still pending
-  run jq -er '.status == "failed"' "$pdir/.migration-journal.json"
+  # the journal records the failed operation and the automatic rollback
+  run jq -er '.status == "rolled_back"' "$pdir/.migration-journal.json"
   [ "$status" -eq 0 ]
-  run jq -er '[.operations[] | select(.op == "move-credential") | .status] == ["done"]' "$pdir/.migration-journal.json"
+  run jq -er '[.operations[] | select(.op == "move-credential") | .status] == ["rolled-back"]' "$pdir/.migration-journal.json"
   [ "$status" -eq 0 ]
   run jq -er '[.operations[] | select(.op == "merge-move") | .status] == ["failed"]' "$pdir/.migration-journal.json"
   [ "$status" -eq 0 ]
   run jq -er '[.operations[] | select(.status == "pending")] | length > 0' "$pdir/.migration-journal.json"
   [ "$status" -eq 0 ]
-  # the credential move completed before the failure; the shared merge did not
-  [ "$(cat "$pdir/auth/auth.json" | tr -d '\r')" = "profile-token" ]
+  # the credential is back at its original path; no duplicate or staging
+  # credential remains after rollback.
+  [ "$(cat "$pdir/auth.json" | tr -d '\r')" = "profile-token" ]
+  [ ! -e "$pdir/auth/auth.json" ]
   [ -f "$pdir/agents/agent.md" ]
   [ ! -e "$SHARED_ROOT/agents" ]
+  [ ! -e "$pdir/.migration.lock" ]
+  [ ! -e "$pdir/.migration-rollback" ]
 
   make_dir_writable "$SHARED_ROOT"
   run cmd_migrate fixture/work
@@ -413,6 +752,261 @@ make_dir_writable() {
   [ "$(list_tree "$pdir")" = "$(printf '%s\n' \
     .migration-journal.json .profile.json \
     auth auth/auth.json auth/keys auth/keys/token.json)" ]
+}
+
+@test "active or indeterminate tool processes refuse apply before writing" {
+  local pdir="$MULTICLI_HOME/fixture/work"
+  make_legacy_profile work
+
+  migration_process_probe() { return 0; }
+  run cmd_migrate fixture/work
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"active process"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ ! -e "$pdir/auth" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+  [ ! -e "$pdir/.migration.lock" ]
+
+  migration_process_probe() { return 2; }
+  run cmd_migrate fixture/work
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not prove that tool processes are stopped"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ ! -e "$pdir/auth" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+  [ ! -e "$pdir/.migration.lock" ]
+}
+
+@test "exclusive migration lock and a process appearing after lock both refuse without moving credentials" {
+  local pdir="$MULTICLI_HOME/fixture/work"
+  make_legacy_profile work
+  mkdir "$pdir/.migration.lock"
+
+  run cmd_migrate fixture/work
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"migration is already locked"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ ! -e "$pdir/auth" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+
+  rmdir "$pdir/.migration.lock"
+  local probe_calls=0
+  migration_process_probe() {
+    probe_calls=$((probe_calls + 1))
+    [ "$probe_calls" -eq 1 ] && return 1
+    return 0
+  }
+  run cmd_migrate fixture/work
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"process appeared while acquiring the migration lock"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ ! -e "$pdir/auth" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+  [ ! -e "$pdir/.migration.lock" ]
+}
+
+@test "production process probe detects a synthetic process using the profile environment" {
+  local pdir="$MULTICLI_HOME/fixture/work"
+  make_legacy_profile work
+  env FIXTURE_HOME="$pdir" sleep 30 &
+  local fixture_pid=$!
+
+  run cmd_migrate fixture/work
+  kill "$fixture_pid" 2>/dev/null || true
+  wait "$fixture_pid" 2>/dev/null || true
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"active process"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ ! -e "$pdir/auth" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+}
+
+@test "failure after prefer-profile replacement restores credentials and shared state" {
+  local pdir="$MULTICLI_HOME/fixture/work"
+  mkdir -p "$pdir" "$SHARED_ROOT"
+  printf 'profile-token\n' > "$pdir/auth.json"
+  printf 'profile-config\n' > "$pdir/config.toml"
+  printf 'shared-config\n' > "$SHARED_ROOT/config.toml"
+  runtime_write_profile_metadata() { return 9; }
+
+  run cmd_migrate fixture/work --prefer-profile
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Automatic rollback restored the legacy layout"* ]]
+  [ "$(cat "$pdir/auth.json" | tr -d '\r')" = "profile-token" ]
+  [ ! -e "$pdir/auth/auth.json" ]
+  [ "$(cat "$pdir/config.toml" | tr -d '\r')" = "profile-config" ]
+  [ "$(cat "$SHARED_ROOT/config.toml" | tr -d '\r')" = "shared-config" ]
+  [ ! -e "$pdir/.profile.json" ]
+  [ ! -e "$pdir/.migration.lock" ]
+  [ ! -e "$pdir/.migration-rollback" ]
+  run jq -er '.status == "rolled_back"' "$pdir/.migration-journal.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "hardlinked credentials refuse during planning before any write" {
+  local pdir="$MULTICLI_HOME/fixture/work"
+  mkdir -p "$pdir"
+  printf 'profile-token\n' > "$pdir/auth.json"
+  make_hardlink "$pdir/auth.json" "$pdir/auth-alias.json" || skip "hardlinks unavailable on this host"
+  mutate_adapter '.normalState.sharedPaths += ["auth-alias.json"] | .normalState.filePaths += ["auth-alias.json"]'
+
+  run cmd_migrate fixture/work
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"credential 'auth.json' is a hardlink"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ -f "$pdir/auth-alias.json" ]
+  [ ! -e "$pdir/auth" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+  [ ! -e "$pdir/.migration.lock" ]
+}
+
+@test "linked or cross-volume credential destinations refuse before any write" {
+  local pdir="$MULTICLI_HOME/fixture/work"
+  local outside="$MULTICLI_SCRATCH/outside-auth"
+  mkdir -p "$pdir" "$outside"
+  printf 'profile-token\n' > "$pdir/auth.json"
+  make_dir_link "$outside" "$pdir/auth" || skip "directory links unavailable on this host"
+
+  run cmd_migrate fixture/work --dry-run
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"credential destination 'auth/auth.json' crosses a link"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ ! -e "$outside/auth.json" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+
+  rm "$pdir/auth"
+  mkdir "$pdir/auth"
+  migration_file_device() {
+    case "$1" in
+      "$pdir/auth") printf 'synthetic-other-volume\n' ;;
+      *) printf 'synthetic-profile-volume\n' ;;
+    esac
+  }
+
+  run cmd_migrate fixture/work --dry-run
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"credential 'auth.json' and its destination are on different volumes"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ ! -e "$pdir/auth/auth.json" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+}
+
+@test "linked shared destinations and stale control files refuse even dry-run" {
+  local pdir="$MULTICLI_HOME/fixture/work"
+  local outside="$MULTICLI_SCRATCH/outside-shared"
+  mkdir -p "$pdir/agents" "$SHARED_ROOT" "$outside"
+  printf 'profile-token\n' > "$pdir/auth.json"
+  printf 'agent\n' > "$pdir/agents/agent.md"
+  make_dir_link "$outside" "$SHARED_ROOT/agents" || skip "directory links unavailable on this host"
+
+  run cmd_migrate fixture/work --dry-run
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"shared-state destination 'agents' crosses a link"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ ! -e "$outside/agent.md" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+
+  rm "$SHARED_ROOT/agents"
+  : > "$pdir/.migration-journal.json.tmp"
+
+  run cmd_migrate fixture/work --dry-run
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unfinished migration control artifact '.migration-journal.json.tmp'"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ ! -e "$pdir/auth" ]
+}
+
+@test "stale recovery artifacts block even dry-run until explicitly inspected" {
+  local pdir="$MULTICLI_HOME/fixture/work"
+  make_legacy_profile work
+  mkdir "$pdir/.migration-rollback"
+
+  run cmd_migrate fixture/work --dry-run
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"recovery artifacts already exist"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ ! -e "$pdir/auth" ]
+  [ ! -e "$pdir/.migration-journal.json" ]
+  [ ! -e "$pdir/.migration.lock" ]
+}
+
+@test "handled failure removes a shared root created by the failed migration" {
+  local pdir="$MULTICLI_HOME/fixture/work"
+  mkdir -p "$pdir"
+  printf 'profile-token\n' > "$pdir/auth.json"
+  [ ! -e "$SHARED_ROOT" ]
+  runtime_write_profile_metadata() { return 9; }
+
+  run cmd_migrate fixture/work
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Automatic rollback restored the legacy layout"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ ! -e "$pdir/auth" ]
+  [ ! -e "$SHARED_ROOT" ]
+  [ ! -e "$pdir/.migration-rollback" ]
+  run jq -er '.status == "rolled_back"' "$pdir/.migration-journal.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "a cross-volume state move fails and rolls the credential back without copying" {
+  local pdir="$MULTICLI_HOME/fixture/work"
+  local real_device
+  mkdir -p "$pdir" "$SHARED_ROOT"
+  printf 'profile-token\n' > "$pdir/auth.json"
+  printf 'profile-config\n' > "$pdir/config.toml"
+  real_device="$(stat -c %d "$pdir" 2>/dev/null || stat -f %d "$pdir")"
+  migration_file_device() {
+    case "$1" in
+      "$pdir/config.toml") printf 'synthetic-state-volume\n' ;;
+      *) printf '%s\n' "$real_device" ;;
+    esac
+  }
+
+  run cmd_migrate fixture/work
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Automatic rollback restored the legacy layout"* ]]
+  [ -f "$pdir/auth.json" ]
+  [ ! -e "$pdir/auth" ]
+  [ -f "$pdir/config.toml" ]
+  [ ! -e "$SHARED_ROOT/config.toml" ]
+  [ ! -e "$pdir/.migration-rollback" ]
+  run jq -er '.status == "rolled_back"' "$pdir/.migration-journal.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "an unprovable rollback preserves artifacts and marks rollback_failed" {
+  local pdir="$MULTICLI_HOME/fixture/work"
+  mkdir -p "$pdir/agents" "$SHARED_ROOT"
+  printf 'profile-token\n' > "$pdir/auth.json"
+  printf 'agent\n' > "$pdir/agents/agent.md"
+  make_dir_readonly "$SHARED_ROOT"
+  migration_rollback_ops() { return 1; }
+
+  run cmd_migrate fixture/work
+  make_dir_writable "$SHARED_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Automatic rollback could not prove"* ]]
+  [[ "$output" == *"Do not launch this profile"* ]]
+  [ ! -e "$pdir/auth.json" ]
+  [ -f "$pdir/auth/auth.json" ]
+  [ ! -e "$pdir/.migration.lock" ]
+  run jq -er '.status == "rollback_failed"' "$pdir/.migration-journal.json"
+  [ "$status" -eq 0 ]
 }
 
 # 10. Applying an already-migrated profile is a no-op success and changes
@@ -655,4 +1249,58 @@ PROBE
   [ "$(cat "$runtime_root/history.jsonl" | tr -d '\r')" = "shared-history" ]
   [ "$(cat "$runtime_root/config.toml" | tr -d '\r')" = "shared-config" ]
   [ -f "$runtime_root/agents/reviewer/agent.md" ]
+}
+
+# 21. A journal update serializes the complete frozen plan in one jq process.
+#     Per-op jq loops made large real profiles increasingly slow after every op.
+@test "large migration journals use one jq serialization and remain complete" {
+  local journal="$MULTICLI_SCRATCH/journal.json"
+  local counter="$MULTICLI_SCRATCH/jq-calls"
+  local real_jq i
+  real_jq="$(command -v jq)"
+  : > "$counter"
+  MIGRATION_OPS=()
+  for ((i=0; i<600; i++)); do
+    migration_add_op preserve-unknown "unknown/$i" "/from/$i" "/to/$i" "note $i"
+  done
+  jq() {
+    printf x >> "$counter"
+    command "$real_jq" "$@"
+  }
+
+  run migration_journal_write "$journal" running fixture work "$SHARED_ROOT" false
+
+  [ "$status" -eq 0 ]
+  [ "$(wc -c < "$counter" | tr -d ' ')" -eq 1 ]
+  run "$real_jq" -e '
+    .status == "running"
+    and .preserveUnknown == true
+    and (.operations | length) == 600
+    and .operations[0] == {
+      op:"preserve-unknown", rel:"unknown/0", from:"/from/0", to:"/to/0",
+      status:"pending", note:"note 0"
+    }
+    and .operations[599].rel == "unknown/599"
+  ' "$journal"
+  [ "$status" -eq 0 ]
+}
+
+# 22. Atomic publication means a failed serializer cannot replace the last
+#     valid journal with an empty or partial temporary file.
+@test "journal serialization failure preserves the previous valid journal" {
+  local journal="$MULTICLI_SCRATCH/journal.json"
+  local before
+  printf '{"status":"before"}\n' > "$journal"
+  before="$(cat "$journal")"
+  MIGRATION_OPS=()
+  jq() {
+    printf '{"partial":'
+    return 42
+  }
+
+  run migration_journal_write "$journal" running fixture work "$SHARED_ROOT" false
+
+  [ "$status" -ne 0 ]
+  [ "$(cat "$journal")" = "$before" ]
+  [ ! -e "$journal.tmp" ]
 }

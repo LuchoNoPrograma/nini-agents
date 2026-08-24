@@ -112,6 +112,8 @@ See platform limits in the [support matrix](docs/support-matrix.md). Run `nini-a
 | `nini-agents auth set <tool>/<profile>` | Store a process secret in the OS credential store |
 | `nini-agents auth status <tool>/<profile>` | Check whether that secret exists |
 | `nini-agents auth clear <tool>/<profile>` | Remove that secret |
+| `nini-agents permissions show` | Show the shared Codex permission default |
+| `nini-agents permissions set <read-only\|workspace\|full-access>` | Save the shared Codex permission default for new sessions |
 | `nini-agents continue <tool> <src> <dest> [--dry-run] [--no-merge]` | Copy supported session state, never credentials |
 | `nini-agents template save <tool>/<profile> <name>` | Save a credential-free schema-v2 template |
 | `nini-agents template list \| delete <name>` | List or delete templates |
@@ -122,7 +124,7 @@ See platform limits in the [support matrix](docs/support-matrix.md). Run `nini-a
 
 | Command | Action |
 |---|---|
-| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile]` | Migrate a legacy profile to schema v2 |
+| `nini-agents migrate <tool>/<name> [--dry-run] [--prefer-profile] [--preserve-unknown]` | Migrate a legacy profile to schema v2 |
 | `nini-agents status` | Show profiles and sizes |
 | `nini-agents stats` | Show profile storage use |
 | `nini-agents doctor [--deep]` | Diagnose setup and optionally audit runtimes |
@@ -134,6 +136,32 @@ Add `--json` to `version`, `list/status`, `tools`, `doctor`, `stats`, or
 `template list` for the stable consumer interface. See the
 [JSON CLI contract](docs/json-cli.md). Mutation commands reject JSON mode
 before doing work.
+
+### Shared Codex permissions
+
+Standard account-overlay Codex profiles share `config.toml`, so one command
+sets the default across those Nini Agents-managed accounts:
+
+```bash
+nini-agents permissions show
+nini-agents permissions set read-only
+nini-agents permissions set workspace
+nini-agents permissions set full-access
+```
+
+The presets write Codex's built-in `:read-only`, `:workspace`, or
+`:danger-full-access` permission profile together with an approval policy of
+`on-request`, `on-request`, or `never`, respectively. `set` removes legacy
+top-level sandbox settings that would override the profile, validates a staged
+copy with the installed Codex CLI, and then replaces `config.toml` atomically;
+it does not read or modify `auth.json`.
+
+The saved default applies to new Codex sessions. A permission selected inside
+an already-running session remains session-local; restart that session to load
+the new shared default. See Codex's official
+[permissions](https://learn.chatgpt.com/docs/permissions) and
+[configuration](https://learn.chatgpt.com/docs/config-file/config-reference)
+documentation.
 
 ## How isolation works
 
@@ -159,6 +187,23 @@ Older profiles keep their original whole-root behavior. Preview migration with:
 ```bash
 nini-agents migrate codex/work --dry-run
 ```
+
+Migration fails closed when a legacy profile contains paths its adapter does
+not declare. After reviewing the dry-run refusal, `--preserve-unknown` can be
+used explicitly to rename those objects into
+`.inactive/migrations/<tool>/<profile>/unknown-state/` under the profile store.
+They are not read, merged, deleted, or activated in the schema-v2 runtime, and
+automatic rollback returns them to the legacy profile. Overlapping or
+adapter-declared unsafe paths remain hard failures. Use the flag only with a
+reviewed profile and preview the resulting preservation operations with
+`--dry-run` first.
+
+Adapters may also declare exact `normalState.migrationPreservePaths` for
+transactional or volatile normal state that must remain usable in schema v2
+but cannot be safely combined with an unrelated live state family during a
+legacy migration. Existing objects at those paths are renamed into
+`.inactive/migrations/<tool>/<profile>/profile-state/`; they are not merged or
+activated automatically, and rollback returns them to the legacy profile.
 
 Only schema-v2 profiles, templates, and archives are portable. Migrate legacy profiles first.
 

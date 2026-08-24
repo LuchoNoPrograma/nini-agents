@@ -29,6 +29,8 @@ source "$SCRIPT_DIR/lib/migration.sh"
 source "$SCRIPT_DIR/lib/multicli-osuser.sh"
 # shellcheck source=lib/cli-json.sh
 source "$SCRIPT_DIR/lib/cli-json.sh"
+# shellcheck source=lib/codex-permissions.sh
+source "$SCRIPT_DIR/lib/codex-permissions.sh"
 
 # Skip automatic session seeding when the base state exceeds this size.
 SEED_MAX_BYTES=$((500 * 1024 * 1024))
@@ -42,15 +44,24 @@ warn()  { echo "Warning: $1" >&2; }
 
 # Canonical platform name: macos, linux, or windows (Git Bash/MSYS/Cygwin).
 # MULTICLI_PLATFORM overrides detection (tests, cross-platform validation).
+NINI_PLATFORM_CACHE=""
 platform() {
-  local raw="${MULTICLI_PLATFORM:-$(uname -s)}"
-  raw="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+  local raw
+  if [ -n "${MULTICLI_PLATFORM:-}" ]; then
+    raw="$MULTICLI_PLATFORM"
+  elif [ -n "$NINI_PLATFORM_CACHE" ]; then
+    printf '%s\n' "$NINI_PLATFORM_CACHE"
+    return
+  else
+    raw="$(uname -s)"
+  fi
   case "$raw" in
-    darwin|macos|mac|osx) printf 'macos\n' ;;
-    linux)                printf 'linux\n' ;;
-    mingw*|msys*|cygwin*|windows*) printf 'windows\n' ;;
-    *)                    abort "unsupported platform '$raw'" ;;
+    Darwin|darwin|macOS|MacOS|macos|Mac|mac|OSX|osx) NINI_PLATFORM_CACHE=macos ;;
+    Linux|linux) NINI_PLATFORM_CACHE=linux ;;
+    MINGW*|mingw*|MSYS*|msys*|CYGWIN*|cygwin*|Windows*|windows*) NINI_PLATFORM_CACHE=windows ;;
+    *) abort "unsupported platform '$raw'" ;;
   esac
+  printf '%s\n' "$NINI_PLATFORM_CACHE"
 }
 
 need_jq() {
@@ -81,6 +92,136 @@ list_tool_ids() {
   done
 }
 
+# Launches parse one trusted, bundled adapter in a single jq process. Full
+# semantic validation stays on creation/mutation and doctor paths; the hot
+# path keeps only the fields it consumes and runtime path checks remain
+# fail-closed at the filesystem boundary.
+ADAPTER_LAUNCH_TOOL=""
+ADAPTER_LAUNCH_MANIFEST=""
+ADAPTER_LAUNCH_ID=""
+ADAPTER_LAUNCH_DISPLAY=""
+ADAPTER_LAUNCH_STRATEGY=""
+ADAPTER_LAUNCH_MODE=""
+ADAPTER_LAUNCH_MECHANISM=""
+ADAPTER_LAUNCH_SUPPORT=""
+ADAPTER_LAUNCH_SUPPORT_REASON=""
+ADAPTER_LAUNCH_INSTALL=""
+ADAPTER_LAUNCH_ROOT_RAW=""
+ADAPTER_LAUNCH_STATE_SUBDIR=""
+ADAPTER_LAUNCH_SHARED_CREDENTIAL_ROOT=""
+ADAPTER_LAUNCH_BINARIES=()
+ADAPTER_LAUNCH_ENV_KEYS=()
+ADAPTER_LAUNCH_ENV_VALUES=()
+ADAPTER_LAUNCH_CLEAR_ENV=()
+ADAPTER_LAUNCH_ARGS=()
+ADAPTER_LAUNCH_CREDENTIAL_PATHS=()
+ADAPTER_LAUNCH_SHARED_PATHS=()
+ADAPTER_LAUNCH_SESSION_PATHS=()
+ADAPTER_LAUNCH_FILE_PATHS=()
+ADAPTER_LAUNCH_DIRECT_PATHS=()
+ADAPTER_LAUNCH_SHARED_CREDENTIAL_PATHS=()
+ADAPTER_LAUNCH_SHARED_CREDENTIAL_KINDS=()
+
+load_adapter_launch_contract() {
+  local tool_id="$1" manifest plat record name value complete=false
+  validate_tool_id "$tool_id"
+  manifest="$(adapter_path "$tool_id")"
+  [ -f "$manifest" ] || abort "Unknown tool '$tool_id'. Run: nini-agents tools"
+  plat="$(platform)"
+
+  ADAPTER_LAUNCH_TOOL="$tool_id"
+  ADAPTER_LAUNCH_MANIFEST="$manifest"
+  ADAPTER_LAUNCH_ID=""
+  ADAPTER_LAUNCH_DISPLAY=""
+  ADAPTER_LAUNCH_STRATEGY=""
+  ADAPTER_LAUNCH_MODE=""
+  ADAPTER_LAUNCH_MECHANISM=""
+  ADAPTER_LAUNCH_SUPPORT=""
+  ADAPTER_LAUNCH_SUPPORT_REASON=""
+  ADAPTER_LAUNCH_INSTALL=""
+  ADAPTER_LAUNCH_ROOT_RAW=""
+  ADAPTER_LAUNCH_STATE_SUBDIR=""
+  ADAPTER_LAUNCH_SHARED_CREDENTIAL_ROOT=""
+  ADAPTER_LAUNCH_BINARIES=()
+  ADAPTER_LAUNCH_ENV_KEYS=()
+  ADAPTER_LAUNCH_ENV_VALUES=()
+  ADAPTER_LAUNCH_CLEAR_ENV=()
+  ADAPTER_LAUNCH_ARGS=()
+  ADAPTER_LAUNCH_CREDENTIAL_PATHS=()
+  ADAPTER_LAUNCH_SHARED_PATHS=()
+  ADAPTER_LAUNCH_SESSION_PATHS=()
+  ADAPTER_LAUNCH_FILE_PATHS=()
+  ADAPTER_LAUNCH_DIRECT_PATHS=()
+  ADAPTER_LAUNCH_SHARED_CREDENTIAL_PATHS=()
+  ADAPTER_LAUNCH_SHARED_CREDENTIAL_KINDS=()
+
+  while IFS= read -r -d '' record && \
+        IFS= read -r -d '' name && \
+        IFS= read -r -d '' value; do
+    case "$record:$name" in
+      scalar:id) ADAPTER_LAUNCH_ID="$value" ;;
+      scalar:display) ADAPTER_LAUNCH_DISPLAY="$value" ;;
+      scalar:strategy) ADAPTER_LAUNCH_STRATEGY="$value" ;;
+      scalar:mode) ADAPTER_LAUNCH_MODE="$value" ;;
+      scalar:mechanism) ADAPTER_LAUNCH_MECHANISM="$value" ;;
+      scalar:support) ADAPTER_LAUNCH_SUPPORT="$value" ;;
+      scalar:support-reason) ADAPTER_LAUNCH_SUPPORT_REASON="$value" ;;
+      scalar:install) ADAPTER_LAUNCH_INSTALL="$value" ;;
+      scalar:root) ADAPTER_LAUNCH_ROOT_RAW="$value" ;;
+      scalar:state-subdir) ADAPTER_LAUNCH_STATE_SUBDIR="$value" ;;
+      scalar:shared-credential-root) ADAPTER_LAUNCH_SHARED_CREDENTIAL_ROOT="$value" ;;
+      binary:*) ADAPTER_LAUNCH_BINARIES+=("$name") ;;
+      env:*) ADAPTER_LAUNCH_ENV_KEYS+=("$name"); ADAPTER_LAUNCH_ENV_VALUES+=("$value") ;;
+      clear:*) ADAPTER_LAUNCH_CLEAR_ENV+=("$name") ;;
+      arg:*) ADAPTER_LAUNCH_ARGS+=("$name") ;;
+      credential:*) ADAPTER_LAUNCH_CREDENTIAL_PATHS+=("$name") ;;
+      shared:*) ADAPTER_LAUNCH_SHARED_PATHS+=("$name") ;;
+      session:*) ADAPTER_LAUNCH_SESSION_PATHS+=("$name") ;;
+      file:*) ADAPTER_LAUNCH_FILE_PATHS+=("$name") ;;
+      direct:*) ADAPTER_LAUNCH_DIRECT_PATHS+=("$name") ;;
+      shared-credential:*) ADAPTER_LAUNCH_SHARED_CREDENTIAL_PATHS+=("$name"); ADAPTER_LAUNCH_SHARED_CREDENTIAL_KINDS+=("$value") ;;
+      complete:yes) complete=true ;;
+    esac
+  done < <(jq -j --arg platform "$plat" '
+    def row($record; $name; $value):
+      $record, "\u0000", (($name // "") | tostring), "\u0000", (($value // "") | tostring), "\u0000";
+    if any(.. | strings; contains("\u0000")) then error("adapter strings may not contain NUL")
+    else
+      row("scalar"; "id"; .id),
+      row("scalar"; "display"; .displayName),
+      row("scalar"; "strategy"; .isolation.strategy),
+      row("scalar"; "mode"; .isolation.mode),
+      row("scalar"; "mechanism"; .account.mechanism),
+      row("scalar"; "support"; .support[$platform].level),
+      row("scalar"; "support-reason"; .support[$platform].reason),
+      row("scalar"; "install"; .install),
+      row("scalar"; "root"; .normalState.root[$platform]),
+      row("scalar"; "state-subdir"; .normalState.runtimeSubdir),
+      row("scalar"; "shared-credential-root"; .sharedCredentialState.root),
+      ((.binary[$platform] // [])[] | row("binary"; .; "")),
+      ((.isolation.env // {} | to_entries[]) | row("env"; .key; .value)),
+      ((.isolation.clearEnv // [])[] | row("clear"; .; "")),
+      ((.isolation.args // [])[] | row("arg"; .; "")),
+      ((.account.credentialFiles // [])[] | row("credential"; .; "")),
+      ((.normalState.sharedPaths // [])[] | row("shared"; .; "")),
+      ((.normalState.sessionPaths // [])[] | row("session"; .; "")),
+      ((.normalState.filePaths // [])[] | row("file"; .; "")),
+      ((.normalState.directPaths // [])[] | row("direct"; .; "")),
+      ((.sharedCredentialState.entries // [])[] | row("shared-credential"; .path; .kind)),
+      row("complete"; "yes"; "")
+    end
+  ' "$manifest" 2>/dev/null)
+
+  [ "$complete" = true ] || abort "Adapter '$tool_id' is not valid JSON or has an unreadable launch contract. Run: nini-agents doctor"
+  [ "$ADAPTER_LAUNCH_ID" = "$tool_id" ] || abort "Adapter directory '$tool_id' does not match id '$ADAPTER_LAUNCH_ID'. Run: nini-agents doctor"
+  [ -n "$ADAPTER_LAUNCH_DISPLAY" ] || abort "Adapter '$tool_id' has no displayName. Run: nini-agents doctor"
+  [ "${#ADAPTER_LAUNCH_BINARIES[@]}" -gt 0 ] || abort "Adapter '$tool_id' has no binary candidates for $plat. Run: nini-agents doctor"
+  case "$ADAPTER_LAUNCH_STRATEGY" in
+    env|accountOverlay|userDataDir|redirectHome|appdata|sandboxUser) ;;
+    *) abort "Unknown isolation strategy '$ADAPTER_LAUNCH_STRATEGY'" ;;
+  esac
+}
+
 # Expand the path tokens adapters use for per-OS roots: $HOME/~ everywhere,
 # %USERPROFILE%/%APPDATA%/%LOCALAPPDATA% on Windows only.
 resolve_path_token() {
@@ -95,8 +236,9 @@ resolve_path_token() {
   printf '%s\n' "$p"
 }
 
-# Abort unless the tool's adapter exists and passes semantic validation;
-# every command that touches adapter data goes through this first.
+# Abort unless the tool's adapter exists and passes semantic validation.
+# Mutation and audit commands use this exhaustive path; launch uses the
+# single-pass contract loader plus at-use runtime path guards.
 assert_adapter_valid() {
   local tool_id="$1" manifest
   validate_tool_id "$tool_id"
@@ -137,13 +279,18 @@ find_adapter_binary() {
   local tool_id="$1"
   [ -n "${MULTICLI_OVERRIDE_BINARY:-}" ] && { printf '%s\n' "$MULTICLI_OVERRIDE_BINARY"; return 0; }
 
-  local apath plat key candidates c resolved
+  local apath plat key c resolved
+  local candidates=()
   apath="$(adapter_path "$tool_id")"
   plat="$(platform)"
   key=".binary.$plat"
-  candidates="$(jq -r "$key // [] | .[]" "$apath" 2>/dev/null || true)"
+  if [ "$ADAPTER_LAUNCH_TOOL" = "$tool_id" ] && [ "$ADAPTER_LAUNCH_MANIFEST" = "$apath" ]; then
+    candidates=("${ADAPTER_LAUNCH_BINARIES[@]}")
+  else
+    while IFS= read -r c; do [ -n "$c" ] && candidates+=("$c"); done < <(jq -r "$key // [] | .[]" "$apath" 2>/dev/null || true)
+  fi
 
-  while IFS= read -r c; do
+  for c in "${candidates[@]}"; do
     [ -z "$c" ] && continue
     case "$c" in
       appx:*)
@@ -160,7 +307,7 @@ find_adapter_binary() {
     resolved="$(resolve_path_token "$c")"
     [ -x "$resolved" ] && { printf '%s\n' "$resolved"; return 0; }
     command -v "$resolved" >/dev/null 2>&1 && { command -v "$resolved"; return 0; }
-  done <<< "$candidates"
+  done
 
   return 1
 }
@@ -1145,30 +1292,52 @@ cmd_launch() {
 
   split_profile_spec "$spec"
   local apath="$(adapter_path "$TOOL")"
-  assert_adapter_valid "$TOOL"
+  load_adapter_launch_contract "$TOOL"
 
   local pdir="$(profile_dir "$TOOL" "$NAME")"
   [ -d "$pdir" ] || abort "Profile '$spec' does not exist. Create with: nini-agents new $spec"
-  if [ "$(json_str ".support.$(platform).level" "$apath")" = unsupported ]; then
-    abort "$(json_str '.displayName' "$apath") is unsupported on $(platform): $(json_str ".support.$(platform).reason" "$apath")"
+  if [ "$ADAPTER_LAUNCH_SUPPORT" = unsupported ]; then
+    abort "$ADAPTER_LAUNCH_DISPLAY is unsupported on $(platform): $ADAPTER_LAUNCH_SUPPORT_REASON"
   fi
 
   local binary
   binary="$(find_adapter_binary "$TOOL")" || {
     local hint
-    hint="$(json_str '.install' "$apath")"
+    hint="$ADAPTER_LAUNCH_INSTALL"
     [ -n "$hint" ] && hint=" ($hint)"
-    abort "$(json_str '.displayName' "$apath") binary not found.$hint"
+    abort "$ADAPTER_LAUNCH_DISPLAY binary not found.$hint"
   }
 
   local strategy display
-  strategy="$(json_str '.isolation.strategy' "$apath")"
-  display="$(json_str '.displayName' "$apath")"
+  strategy="$ADAPTER_LAUNCH_STRATEGY"
+  display="$ADAPTER_LAUNCH_DISPLAY"
+
+  # The local Hyper integration treats these legacy-compatible markers as a
+  # per-tab title lock. Keep this at the common Codex launch boundary so every
+  # current or future profile alias is covered, including whole-root profiles.
+  if [ "$TOOL" = codex ] && [ "${TERM_PROGRAM:-}" = Hyper ] && \
+     [ "${NINI_AGENTS_HYPER_TITLE_LOCK:-}" = 1 ]; then
+    printf '\033]0;__MULTICLI_TITLE_LOCK__:%s\007' "$NAME"
+    trap 'printf "\033]0;__MULTICLI_TITLE_UNLOCK__\007"' EXIT
+  fi
+
+  # A pre-schema profile has no metadata and already stores the tool's complete
+  # home, including its file credential, at the profile root. Preserve that
+  # layout only for fileOverlay adapters: point the tool at the existing root
+  # without creating metadata, auth/, or a runtime overlay. Other account
+  # mechanisms keep their schema-v2 fail-closed launch path.
+  if [ "$strategy" = "accountOverlay" ] && \
+     [ "$ADAPTER_LAUNCH_MECHANISM" = fileOverlay ] && \
+     [ ! -e "$pdir/.profile.json" ] && [ ! -L "$pdir/.profile.json" ]; then
+    echo "Launching $display profile '$spec' [$strategy, legacy whole-root]"
+    launch_isolated "$TOOL" "$pdir" "$binary" "${binary_args[@]+"${binary_args[@]}"}"
+    return
+  fi
 
   # Isolated profiles share nothing: the profile dir is the tool's whole root,
   # so the account-overlay runtime (shared links, overlay) is bypassed.
   if [ "$strategy" = "accountOverlay" ] && [ -f "$pdir/.isolated" ]; then
-    if [ "$(json_str '.account.mechanism' "$apath")" = osUserCredentialStore ]; then
+    if [ "$ADAPTER_LAUNCH_MECHANISM" = osUserCredentialStore ]; then
       abort "Profile '$spec' cannot use --isolated because folder redirection does not isolate the OS credential store."
     fi
     echo "Launching $display profile '$spec' [$strategy, isolated]"
@@ -1195,9 +1364,10 @@ expand_placeholder() {
   printf '%s\n' "${val//\{profileDir\}/$pdir}"
 }
 
-# Isolated launch for schema-v2 profiles created with --isolated: the profile
-# dir is the tool's whole root. No runtime overlay, no shared links, nothing
-# read from or written to the native shared root. fileOverlay and
+# Whole-root launch for schema-v2 profiles created with --isolated and legacy
+# file-overlay profiles without metadata: the profile dir is the tool's whole
+# root. No runtime overlay, no shared links, nothing read from or written to the
+# native shared root. fileOverlay and
 # processSecret point the adapter's home env at the profile dir itself;
 # processSecret additionally injects the per-profile credential (fail-closed
 # until `nini-agents auth set`). osUserCredentialStore and inseparable get a
@@ -1221,7 +1391,9 @@ launch_isolated() {
   # Both {runtimeRoot} and {sharedStateRoot} resolve to the profile dir: in
   # isolated mode the profile is the root, so no placeholder can leak a path
   # into the native shared root.
-  local env_args=() unset_args=() key value
+  # A whole-root launch either replaces the profile id with metadata's value or
+  # clears a stale inherited value for a legacy profile.
+  local env_args=() unset_args=("-u" "MULTICLI_PROFILE_ID") key value
   while IFS= read -r key; do
     [ -z "$key" ] && continue
     value="$(json_obj_val '.isolation.env' "$key" "$apath")"
@@ -1723,6 +1895,15 @@ cmd_doctor() {
   echo "Tools:"
   local tid
   for tid in $(list_tool_ids | sort); do
+    if ! validate_adapter_manifest "$(adapter_path "$tid")" "$tid"; then
+      printf '  \033[31m[FAIL] %s adapter is invalid\033[0m\n' "$tid"
+      local validation_error
+      for validation_error in "${ADAPTER_VALIDATION_ERRORS[@]}"; do
+        printf '         %s\n' "$validation_error"
+      done
+      errors=$((errors + 1))
+      continue
+    fi
     local bin
     if bin="$(find_adapter_binary "$tid")"; then
       printf '  \033[32m[OK]   %s -> %s\033[0m\n' "$tid" "$bin"
@@ -1759,9 +1940,10 @@ cmd_doctor() {
           warnings=$((warnings + 1))
           continue
         fi
-        local apath expected item expected_target state_subdir declared credential_path credential
+        local apath expected item expected_target state_subdir declared credential_path credential shared_credential_root runtime_path runtime_generated
         apath="$(adapter_path "$(basename "$(dirname "$pdir")")")"
         state_subdir="$(runtime_json_str '.normalState.runtimeSubdir' "$apath")"
+        shared_credential_root="$(runtime_shared_credential_root "$apath" "$pdir" 2>/dev/null || true)"
         while IFS= read -r rel; do
           [ -n "$rel" ] || continue
           item="$runtime/$rel"
@@ -1778,6 +1960,8 @@ cmd_doctor() {
           done < <(runtime_json_arr '.account.credentialFiles' "$apath")
           if [ "$credential" = true ]; then
             expected_target="$pdir/auth/$declared"
+          elif [ -n "$shared_credential_root" ] && runtime_is_shared_credential_path "$apath" "$declared"; then
+            expected_target="$shared_credential_root/$declared"
           else
             expected_target="$(runtime_platform_root "$apath")/$declared"
           fi
@@ -1790,6 +1974,13 @@ cmd_doctor() {
           rel="${f#"$runtime"/}"
           [ "$rel" = ".runtime-manifest" ] && continue
           if ! grep -qxF "$rel" "$runtime/.runtime-manifest"; then
+            runtime_generated=false
+            while IFS= read -r runtime_path; do
+              [ -n "$runtime_path" ] || continue
+              expected="${state_subdir:+$state_subdir/}$runtime_path"
+              case "$rel" in "$expected"|"$expected"/*) runtime_generated=true; break ;; esac
+            done < <(runtime_json_arr '.normalState.runtimePaths' "$apath")
+            [ "$runtime_generated" = true ] && continue
             printf '  \033[33m[WARN] unexpected runtime file %s in %s -- adapter classification defect\033[0m\n' "$rel" "$pdir"
             warnings=$((warnings + 1))
           fi
@@ -1911,6 +2102,32 @@ cmd_import() {
   echo "Imported '$spec'"
 }
 
+# Read or update the user-level Codex defaults shared by every Nini Agents
+# Codex profile. An active Codex process keeps its current session policy;
+# persisted values apply when a new session starts.
+cmd_permissions() {
+  local sub="${1:-show}" mode="${2:-}" extra="${3:-}"
+  [ -z "$extra" ] || abort "Usage: nini-agents permissions show | set <read-only|workspace|full-access>"
+  assert_adapter_valid codex
+  load_adapter_launch_contract codex
+  local config_root config binary
+  config_root="$(resolve_path_token "$ADAPTER_LAUNCH_ROOT_RAW")"
+  [ -n "$config_root" ] || abort "Codex adapter has no shared config root for $(platform)."
+  config="$config_root/config.toml"
+  case "$sub" in
+    show)
+      [ -z "$mode" ] || abort "Usage: nini-agents permissions show"
+      codex_permissions_show "$config"
+      ;;
+    set)
+      [ -n "$mode" ] || abort "Usage: nini-agents permissions set <read-only|workspace|full-access>"
+      binary="$(find_adapter_binary codex)" || abort "OpenAI Codex CLI binary not found."
+      codex_permissions_set "$config" "$mode" "$binary"
+      ;;
+    *) abort "Usage: nini-agents permissions show | set <read-only|workspace|full-access>" ;;
+  esac
+}
+
 # =============================================================================
 # Help / completion
 # =============================================================================
@@ -1931,9 +2148,12 @@ COMMANDS
   rename <tool>/<old> <tool>/<new>                      Rename
   delete <tool>/<name>                                  Delete (confirms)
   clone <tool>/<src> <tool>/<dest>                      Clone
-  migrate <tool>/<name> [--dry-run] [--prefer-profile]  Migrate a legacy profile to schema-v2
+  migrate <tool>/<name> [--dry-run] [--prefer-profile] [--preserve-unknown]
+                                                        Migrate a legacy profile to schema-v2
   continue <tool> <src> <dest> [--no-merge] [--dry-run] Copy session state (src/dest may be 'base')
   auth set|status|clear <tool>/<profile>                Manage process-secret credentials (OS store)
+  permissions show | set <read-only|workspace|full-access>
+                                                        Manage shared Codex defaults
   template save <tool>/<profile> <name>                 Save as template
   template list | delete <name>                         Manage templates
   export <tool>/<name> [path]                           Export to .tar.gz
@@ -1976,7 +2196,7 @@ _multi_cli_completions() {
   local base="${MULTICLI_HOME:-$HOME/MultiCliProfiles}"
   local script_dir="$(cd "$(dirname "$(command -v nini-agents 2>/dev/null || echo .)")" && pwd)"
   local tools_dir="${MULTICLI_TOOLS_DIR:-$script_dir/ai-tools}"
-  local cmds="new launch list status rename delete clone migrate continue auth template export import tools doctor stats completion help version"
+  local cmds="new launch list status rename delete clone migrate continue auth permissions template export import tools doctor stats completion help version"
   local tools="" specs=""
   if [ -d "$tools_dir" ]; then
     for d in "$tools_dir"/*/; do [ -f "$d/adapter.json" ] && tools="$tools $(basename "$d")"; done
@@ -1999,7 +2219,7 @@ COMP
 #compdef nini-agents multi-cli
 _multi_cli() {
   local -a cmds tools specs
-  cmds=(new launch list status rename delete clone migrate continue auth template export import tools doctor stats completion help version)
+  cmds=(new launch list status rename delete clone migrate continue auth permissions template export import tools doctor stats completion help version)
   local base="${MULTICLI_HOME:-$HOME/MultiCliProfiles}"
   local script_dir="$(cd "$(dirname "$(command -v nini-agents 2>/dev/null || echo .)")" && pwd)"
   local tools_dir="${MULTICLI_TOOLS_DIR:-$script_dir/ai-tools}"
@@ -2076,6 +2296,7 @@ shift || true
 case "$cmd" in
   new)        cmd_new "$@" ;;
   auth)       cmd_auth "$@" ;;
+  permissions) cmd_permissions "$@" ;;
   launch)
     spec="${1:-}"; shift || true
     launch_args=()

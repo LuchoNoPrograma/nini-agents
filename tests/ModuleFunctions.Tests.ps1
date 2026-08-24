@@ -224,11 +224,12 @@ Describe 'Test-AdapterManifest schema-v2 structure and mechanisms in-process' {
 
 Describe 'Test-AdapterManifest schema-v2 paths and separation in-process' {
     Add-ManifestCases @(
-        @{ Name = 'flags unsafe paths in all five v2 path lists'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.account.credentialFiles = @('C:/abs/cred.json'); $a.normalState.sharedPaths = @('/abs'); $a.normalState.sessionPaths = @('a/../b'); $a.normalState.filePaths = @('..'); $a.normalState.unsafePaths = @('C:/x') }; Count = 5; Messages = @("credential path 'C:/abs/cred.json' must be a safe relative path", "shared path '/abs' must be a safe relative path", "session path 'a/../b' must be a safe relative path", "file path '..' must be a safe relative path", "unsafe path 'C:/x' must be a safe relative path") },
+        @{ Name = 'flags unsafe paths in all six v2 path lists'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.account.credentialFiles = @('C:/abs/cred.json'); $a.normalState.sharedPaths = @('/abs'); $a.normalState.sessionPaths = @('a/../b'); $a.normalState.filePaths = @('..'); $a.normalState | Add-Member -NotePropertyName directPaths -NotePropertyValue @('../direct'); $a.normalState.unsafePaths = @('C:/x') }; Count = 6; Messages = @("credential path 'C:/abs/cred.json' must be a safe relative path", "shared path '/abs' must be a safe relative path", "session path 'a/../b' must be a safe relative path", "file path '..' must be a safe relative path", "direct path '../direct' must be a safe relative path", "unsafe path 'C:/x' must be a safe relative path") },
         @{ Name = 'flags credential paths overlapping shared paths'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.account.credentialFiles = @('data/auth.json'); $a.normalState.sharedPaths = @('data'); $a.normalState.filePaths = @() }; Count = 1; Messages = @("credential path 'data/auth.json' overlaps shared path 'data'") },
         @{ Name = 'flags credential paths overlapping session paths'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.account.credentialFiles = @('sessions/auth.json'); $a.normalState.sessionPaths = @('sessions'); $a.normalState.filePaths = @() }; Count = 1; Messages = @("credential path 'sessions/auth.json' overlaps session path 'sessions'") },
         @{ Name = 'flags shared paths overlapping session paths'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.normalState.sharedPaths = @('state'); $a.normalState.sessionPaths = @('state/sessions'); $a.normalState.filePaths = @() }; Count = 1; Messages = @("shared path 'state' overlaps session path 'state/sessions'") },
         @{ Name = 'flags file paths not declared as shared or session state'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.normalState.filePaths = @('undeclared.json') }; Count = 1; Messages = @("file path 'undeclared.json' must also be declared in sharedPaths or sessionPaths") },
+        @{ Name = 'flags direct paths not declared as shared or session state'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.normalState | Add-Member -NotePropertyName directPaths -NotePropertyValue @('undeclared.sqlite') }; Count = 1; Messages = @("direct path 'undeclared.sqlite' must also be declared in sharedPaths or sessionPaths") },
         @{ Name = 'flags credential paths overlapping unsafe paths'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.account.credentialFiles = @('cache/c.json'); $a.normalState.unsafePaths = @('cache') }; Count = 1; Messages = @("credential path 'cache/c.json' overlaps unsafe path 'cache'") },
         @{ Name = 'flags shared paths overlapping unsafe paths'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.normalState.sharedPaths = @('cache/x'); $a.normalState.unsafePaths = @('cache'); $a.normalState.filePaths = @() }; Count = 1; Messages = @("shared path 'cache/x' overlaps unsafe path 'cache'") },
         @{ Name = 'flags session paths overlapping unsafe paths'; Base = 'v2'; Id = 'fixture'; Mutate = { param($a) $a.normalState.sessionPaths = @('cache/s'); $a.normalState.unsafePaths = @('cache'); $a.normalState.filePaths = @() }; Count = 1; Messages = @("session path 'cache/s' overlaps unsafe path 'cache'") },
@@ -794,13 +795,18 @@ Describe 'Get-AccountOverlayLaunchPlan in-process' {
         try {
             $env:USERPROFILE = $scratch.Home
             $adapter = Get-ValidV2Adapter
+            $adapter.isolation | Add-Member -NotePropertyName args -NotePropertyValue @('-c', 'sqlite_home="{sharedStateRoot}"')
+            $adapter.normalState.sessionPaths = @($adapter.normalState.sessionPaths) + @('state_5.sqlite')
+            $adapter.normalState.filePaths = @($adapter.normalState.filePaths) + @('state_5.sqlite')
+            $adapter.normalState | Add-Member -NotePropertyName directPaths -NotePropertyValue @('state_5.sqlite')
             Initialize-RuntimeProfile -Adapter $adapter -ProfileDir $scratch.ProfileDir
             $metadata = Get-Content -LiteralPath (Join-Path $scratch.ProfileDir '.profile.json') -Raw | ConvertFrom-Json
 
-            $plan = Get-AccountOverlayLaunchPlan -Adapter $adapter -ProfileDir $scratch.ProfileDir -Binary 'C:\fixtures\fixture.exe' -BinaryArgs @('--verbose', 'two words')
+            $plan = Get-AccountOverlayLaunchPlan -Adapter $adapter -ProfileDir $scratch.ProfileDir -Binary 'C:\fixtures\fixture.exe' -BinaryArgs @('--verbose', '--', 'two words')
 
             $plan.Binary | Should Be 'C:\fixtures\fixture.exe'
-            ($plan.Arguments -join '|') | Should Be '--verbose|two words'
+            $sharedRoot = [System.IO.Path]::GetFullPath((Join-Path $scratch.Home '.fixture'))
+            ($plan.Arguments -join '|') | Should Be ("--verbose|-c|sqlite_home=`"$sharedRoot`"|--|two words")
             $plan.Mode | Should Be 'foreground'
             ($plan.ClearEnvironment -join '|') | Should Be 'GLOBAL_FIXTURE_TOKEN'
 
@@ -808,9 +814,11 @@ Describe 'Get-AccountOverlayLaunchPlan in-process' {
             $plan.Environment['FIXTURE_RUNTIME'] | Should Be $runtimeRoot
             (Test-Path -LiteralPath $runtimeRoot -PathType Container) | Should Be $true
             (Test-Path -LiteralPath (Join-Path $runtimeRoot 'config.toml') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $runtimeRoot 'state_5.sqlite')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $sharedRoot 'state_5.sqlite')) | Should Be $false
             $plan.Environment['FIXTURE_PROFILE'] | Should Be $scratch.ProfileDir
             $plan.Environment['FIXTURE_AUTH'] | Should Be (Join-Path $scratch.ProfileDir 'auth')
-            $plan.Environment['FIXTURE_SHARED'] | Should Be ([System.IO.Path]::GetFullPath((Join-Path $scratch.Home '.fixture')))
+            $plan.Environment['FIXTURE_SHARED'] | Should Be $sharedRoot
             $plan.Environment['FIXTURE_PID'] | Should Be $metadata.profileId
             $plan.Environment['FIXTURE_REALHOME'] | Should Be $scratch.Home
             $plan.Environment['MULTICLI_PROFILE_ID'] | Should Be $metadata.profileId
@@ -1187,10 +1195,10 @@ Describe 'Invoke-MultiCliMigration guard rails in-process' {
 
             Assert-ThrownContains {
                 Invoke-ModuleInternal 'MultiCli.Migration' { param($a, $p, $j, $c, $o, $l) Invoke-MigrationOps -Adapter $a -ProfileDir $p -JournalPath $j -Context $c -Ops $o -Lines $l } @($adapter, $scratch.ProfileDir, $journal, $context, $ops, $lines)
-            } @("Migration failed: unknown operation 'bogus-op'", 'Roll-forward/rollback journal')
+            } @("Migration failed: unknown operation 'bogus-op'", 'Automatic rollback restored the legacy layout')
 
             $payload = Get-Content -LiteralPath $journal -Raw | ConvertFrom-Json
-            $payload.status | Should Be 'failed'
+            $payload.status | Should Be 'rolled_back'
             $payload.operations[0].status | Should Be 'failed'
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }

@@ -35,6 +35,14 @@ function Test-AdapterPathsOverlap {
     return ($leftPath -eq $rightPath -or $leftPath.StartsWith("$rightPath/") -or $rightPath.StartsWith("$leftPath/"))
 }
 
+function Test-AdapterDotSuffixBackup {
+    param([string]$Base, [string]$Candidate)
+    $normalizedBase = (($Base -replace '\\', '/').TrimEnd('/')).ToLowerInvariant()
+    $normalizedCandidate = (($Candidate -replace '\\', '/').TrimEnd('/')).ToLowerInvariant()
+    return $normalizedCandidate -ne "$normalizedBase." -and
+        $normalizedCandidate.StartsWith("$normalizedBase.", [StringComparison]::Ordinal)
+}
+
 function Get-ObjectProperty {
     param($Object, [string]$Name)
     if ($null -eq $Object) { return $null }
@@ -80,24 +88,26 @@ function Test-AdapterPathSeparation {
     }
 }
 
-# filePaths classifies entries that already belong to sharedPaths or
-# sessionPaths; it must never introduce an otherwise undeclared state path.
-function Test-AdapterFilePathMembership {
+# filePaths, directPaths, and migrationPreservePaths classify entries that
+# already belong to sharedPaths or sessionPaths; none may introduce
+# undeclared state.
+function Test-AdapterStatePathMembership {
     param(
         [System.Collections.Generic.List[string]]$Errors,
-        $FilePaths,
+        $Paths,
+        [string]$Label,
         $SharedPaths,
         $SessionPaths
     )
     $declared = @($SharedPaths) + @($SessionPaths) | Where-Object { $null -ne $_ -and $_ -ne '' } | ForEach-Object {
         ([string]$_ -replace '\\', '/').ToLowerInvariant()
     }
-    foreach ($filePath in @($FilePaths)) {
-        if ($null -eq $filePath -or $filePath -eq '') { continue }
-        if (-not (Test-SafeAdapterPath -Path ([string]$filePath))) { continue }
-        $normalized = ([string]$filePath -replace '\\', '/').ToLowerInvariant()
+    foreach ($path in @($Paths)) {
+        if ($null -eq $path -or $path -eq '') { continue }
+        if (-not (Test-SafeAdapterPath -Path ([string]$path))) { continue }
+        $normalized = ([string]$path -replace '\\', '/').ToLowerInvariant()
         if ($declared -notcontains $normalized) {
-            Add-AdapterValidationError -Errors $Errors -Message "file path '$filePath' must also be declared in sharedPaths or sessionPaths"
+            Add-AdapterValidationError -Errors $Errors -Message "$Label '$path' must also be declared in sharedPaths or sessionPaths"
         }
     }
 }
@@ -134,7 +144,7 @@ function Test-AdapterFields {
     param([System.Collections.Generic.List[string]]$Errors, $Adapter, [int]$SchemaVersion)
     $allowedTopLevel = @('schemaVersion', 'id', 'displayName', 'kind', 'binary', 'isolation', 'install', 'versionCommand')
     if ($SchemaVersion -eq 1) { $allowedTopLevel += @('share', 'session', 'status') }
-    if ($SchemaVersion -eq 2) { $allowedTopLevel += @('account', 'normalState', 'concurrency', 'support') }
+    if ($SchemaVersion -eq 2) { $allowedTopLevel += @('account', 'normalState', 'sharedCredentialState', 'concurrency', 'support') }
     Test-AdapterObjectFields -Errors $Errors -Object $Adapter -Allowed $allowedTopLevel -Label ''
     $isolation = Get-ObjectProperty -Object $Adapter -Name 'isolation'
     Test-AdapterObjectFields -Errors $Errors -Object $isolation -Allowed @('strategy', 'mode', 'env', 'clearEnv', 'args', 'shareFromRealHome') -Label 'isolation'
@@ -147,13 +157,104 @@ function Test-AdapterFields {
     Test-AdapterObjectFields -Errors $Errors -Object $account -Allowed @('mechanism', 'credentialFiles', 'credentialPrecedence', 'logoutScope', 'reason', 'secret') -Label 'account'
     Test-AdapterObjectFields -Errors $Errors -Object (Get-ObjectProperty -Object $account -Name 'secret') -Allowed @('environmentVariable') -Label 'account.secret'
     $normalState = Get-ObjectProperty -Object $Adapter -Name 'normalState'
-    Test-AdapterObjectFields -Errors $Errors -Object $normalState -Allowed @('root', 'runtimeSubdir', 'sharedPaths', 'sessionPaths', 'filePaths', 'unsafePaths') -Label 'normalState'
+    Test-AdapterObjectFields -Errors $Errors -Object $normalState -Allowed @('root', 'runtimeSubdir', 'sharedPaths', 'sessionPaths', 'runtimePaths', 'filePaths', 'directPaths', 'migrationPreservePaths', 'unsafePaths') -Label 'normalState'
     Test-AdapterObjectFields -Errors $Errors -Object (Get-ObjectProperty -Object $normalState -Name 'root') -Allowed @('windows', 'macos', 'linux') -Label 'normalState.root'
+    $sharedCredentialState = Get-ObjectProperty -Object $Adapter -Name 'sharedCredentialState'
+    Test-AdapterObjectFields -Errors $Errors -Object $sharedCredentialState -Allowed @('root', 'entries', 'legacyMigration', 'legacyBackupPattern') -Label 'sharedCredentialState'
+    foreach ($entry in @(Get-ObjectProperty -Object $sharedCredentialState -Name 'entries')) {
+        Test-AdapterObjectFields -Errors $Errors -Object $entry -Allowed @('path', 'kind') -Label 'sharedCredentialState.entries'
+    }
     Test-AdapterObjectFields -Errors $Errors -Object (Get-ObjectProperty -Object $Adapter -Name 'concurrency') -Allowed @('level', 'singletonScope') -Label 'concurrency'
     $support = Get-ObjectProperty -Object $Adapter -Name 'support'
     Test-AdapterObjectFields -Errors $Errors -Object $support -Allowed @('windows', 'macos', 'linux') -Label 'support'
     foreach ($platform in @('windows', 'macos', 'linux')) {
         Test-AdapterObjectFields -Errors $Errors -Object (Get-ObjectProperty -Object $support -Name $platform) -Allowed @('level', 'reason') -Label "support.$platform"
+    }
+}
+
+# Validate credential state that is shared intentionally across profiles. Its
+# backing root must be adapter-owned below MULTICLI_HOME\.shared, while the
+# paths exposed inside a runtime remain disjoint from every other state class.
+function Test-AdapterSharedCredentialState {
+    param([System.Collections.Generic.List[string]]$Errors, $Adapter)
+    $sharedCredentialState = Get-ObjectProperty -Object $Adapter -Name 'sharedCredentialState'
+    if ($null -eq $sharedCredentialState) { return }
+
+    $account = Get-ObjectProperty -Object $Adapter -Name 'account'
+    if ((Get-ObjectProperty -Object $account -Name 'mechanism') -ne 'fileOverlay') {
+        Add-AdapterValidationError -Errors $Errors -Message "sharedCredentialState requires account.mechanism 'fileOverlay'"
+    }
+
+    $root = [string](Get-ObjectProperty -Object $sharedCredentialState -Name 'root')
+    if (-not (Test-SafeAdapterPath -Path $root)) {
+        Add-AdapterValidationError -Errors $Errors -Message "sharedCredentialState.root '$root' must be a safe relative path"
+    } else {
+        $normalizedRoot = ($root -replace '\\', '/').ToLowerInvariant()
+        $expectedPrefix = ".shared/$(([string]$Adapter.id).ToLowerInvariant())/"
+        if (-not $normalizedRoot.StartsWith($expectedPrefix, [StringComparison]::Ordinal)) {
+            Add-AdapterValidationError -Errors $Errors -Message "sharedCredentialState.root must be below '.shared/$($Adapter.id)/'"
+        }
+    }
+
+    if ((Get-ObjectProperty -Object $sharedCredentialState -Name 'legacyMigration') -ne 'preserveInactive') {
+        Add-AdapterValidationError -Errors $Errors -Message "sharedCredentialState.legacyMigration must be 'preserveInactive'"
+    }
+
+    $backupPattern = Get-ObjectProperty -Object $sharedCredentialState -Name 'legacyBackupPattern'
+    if ($backupPattern -and $backupPattern -ne 'dotSuffix') {
+        Add-AdapterValidationError -Errors $Errors -Message "sharedCredentialState.legacyBackupPattern must be 'dotSuffix' when present"
+    }
+
+    $entriesValue = Get-ObjectProperty -Object $sharedCredentialState -Name 'entries'
+    $entries = @($entriesValue)
+    if ($null -eq $entriesValue -or $entries.Count -eq 0) {
+        Add-AdapterValidationError -Errors $Errors -Message 'sharedCredentialState.entries must be a non-empty array'
+        return
+    }
+
+    $paths = @()
+    foreach ($entry in $entries) {
+        $path = [string](Get-ObjectProperty -Object $entry -Name 'path')
+        $kind = [string](Get-ObjectProperty -Object $entry -Name 'kind')
+        if (-not $path) {
+            Add-AdapterValidationError -Errors $Errors -Message 'shared credential entry path is required'
+            continue
+        }
+        if (-not (Test-SafeAdapterPath -Path $path)) {
+            Add-AdapterValidationError -Errors $Errors -Message "shared credential path '$path' must be a safe relative path"
+        }
+        if (@('jsonObjectFile', 'directory') -notcontains $kind) {
+            Add-AdapterValidationError -Errors $Errors -Message "shared credential kind '$kind' is not supported"
+        }
+        $paths += $path
+    }
+
+    for ($leftIndex = 0; $leftIndex -lt $paths.Count; $leftIndex++) {
+        $path = $paths[$leftIndex]
+        for ($rightIndex = $leftIndex + 1; $rightIndex -lt $paths.Count; $rightIndex++) {
+            $otherPath = $paths[$rightIndex]
+            if ((Test-AdapterPathsOverlap -Left $path -Right $otherPath) -or
+                ($backupPattern -eq 'dotSuffix' -and (Test-AdapterDotSuffixBackup -Base $path -Candidate $otherPath)) -or
+                ($backupPattern -eq 'dotSuffix' -and (Test-AdapterDotSuffixBackup -Base $otherPath -Candidate $path))) {
+                Add-AdapterValidationError -Errors $Errors -Message "shared credential path '$path' overlaps shared credential path '$otherPath'"
+            }
+        }
+        $normalState = Get-ObjectProperty -Object $Adapter -Name 'normalState'
+        foreach ($declaration in @(
+            [pscustomobject]@{ Values = (Get-ObjectProperty -Object $account -Name 'credentialFiles'); Label = 'credential' },
+            [pscustomobject]@{ Values = (Get-ObjectProperty -Object $normalState -Name 'sharedPaths'); Label = 'shared' },
+            [pscustomobject]@{ Values = (Get-ObjectProperty -Object $normalState -Name 'sessionPaths'); Label = 'session' },
+            [pscustomobject]@{ Values = (Get-ObjectProperty -Object $normalState -Name 'runtimePaths'); Label = 'runtime' },
+            [pscustomobject]@{ Values = (Get-ObjectProperty -Object $normalState -Name 'unsafePaths'); Label = 'unsafe' }
+        )) {
+            foreach ($normalPath in @($declaration.Values)) {
+                if (-not $normalPath) { continue }
+                if ((Test-AdapterPathsOverlap -Left $path -Right ([string]$normalPath)) -or
+                    ($backupPattern -eq 'dotSuffix' -and (Test-AdapterDotSuffixBackup -Base $path -Candidate ([string]$normalPath)))) {
+                    Add-AdapterValidationError -Errors $Errors -Message "shared credential path '$path' overlaps $($declaration.Label) path '$normalPath'"
+                }
+            }
+        }
     }
 }
 
@@ -294,20 +395,33 @@ function Test-AdapterV2 {
     $credentials = Get-ObjectProperty -Object $account -Name 'credentialFiles'
     $sharedPaths = Get-ObjectProperty -Object $normalState -Name 'sharedPaths'
     $sessionPaths = Get-ObjectProperty -Object $normalState -Name 'sessionPaths'
+    $runtimePaths = Get-ObjectProperty -Object $normalState -Name 'runtimePaths'
     $filePaths = Get-ObjectProperty -Object $normalState -Name 'filePaths'
+    $directPaths = Get-ObjectProperty -Object $normalState -Name 'directPaths'
+    $migrationPreservePaths = Get-ObjectProperty -Object $normalState -Name 'migrationPreservePaths'
     $unsafePaths = Get-ObjectProperty -Object $normalState -Name 'unsafePaths'
     Test-AdapterPathList -Errors $Errors -Values $credentials -Label 'credential path'
     Test-AdapterPathList -Errors $Errors -Values $sharedPaths -Label 'shared path'
     Test-AdapterPathList -Errors $Errors -Values $sessionPaths -Label 'session path'
+    Test-AdapterPathList -Errors $Errors -Values $runtimePaths -Label 'runtime path'
     Test-AdapterPathList -Errors $Errors -Values $filePaths -Label 'file path'
+    Test-AdapterPathList -Errors $Errors -Values $directPaths -Label 'direct path'
+    Test-AdapterPathList -Errors $Errors -Values $migrationPreservePaths -Label 'migration preserve path'
     Test-AdapterPathList -Errors $Errors -Values $unsafePaths -Label 'unsafe path'
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $credentials -LeftLabel 'credential path' -RightValues $sharedPaths -RightLabel 'shared path'
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $credentials -LeftLabel 'credential path' -RightValues $sessionPaths -RightLabel 'session path'
+    Test-AdapterPathSeparation -Errors $Errors -LeftValues $credentials -LeftLabel 'credential path' -RightValues $runtimePaths -RightLabel 'runtime path'
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $credentials -LeftLabel 'credential path' -RightValues $unsafePaths -RightLabel 'unsafe path'
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $sharedPaths -LeftLabel 'shared path' -RightValues $sessionPaths -RightLabel 'session path'
+    Test-AdapterPathSeparation -Errors $Errors -LeftValues $sharedPaths -LeftLabel 'shared path' -RightValues $runtimePaths -RightLabel 'runtime path'
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $sharedPaths -LeftLabel 'shared path' -RightValues $unsafePaths -RightLabel 'unsafe path'
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $sessionPaths -LeftLabel 'session path' -RightValues $unsafePaths -RightLabel 'unsafe path'
-    Test-AdapterFilePathMembership -Errors $Errors -FilePaths $filePaths -SharedPaths $sharedPaths -SessionPaths $sessionPaths
+    Test-AdapterPathSeparation -Errors $Errors -LeftValues $sessionPaths -LeftLabel 'session path' -RightValues $runtimePaths -RightLabel 'runtime path'
+    Test-AdapterPathSeparation -Errors $Errors -LeftValues $runtimePaths -LeftLabel 'runtime path' -RightValues $unsafePaths -RightLabel 'unsafe path'
+    Test-AdapterStatePathMembership -Errors $Errors -Paths $filePaths -Label 'file path' -SharedPaths $sharedPaths -SessionPaths $sessionPaths
+    Test-AdapterStatePathMembership -Errors $Errors -Paths $directPaths -Label 'direct path' -SharedPaths $sharedPaths -SessionPaths $sessionPaths
+    Test-AdapterStatePathMembership -Errors $Errors -Paths $migrationPreservePaths -Label 'migration preserve path' -SharedPaths $sharedPaths -SessionPaths $sessionPaths
+    Test-AdapterSharedCredentialState -Errors $Errors -Adapter $Adapter
 
     $concurrency = Get-ObjectProperty -Object $Adapter -Name 'concurrency'
     if (@('multiWriter', 'singleWriter', 'unsupported') -notcontains (Get-ObjectProperty -Object $concurrency -Name 'level')) {
