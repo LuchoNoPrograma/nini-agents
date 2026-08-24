@@ -2,6 +2,55 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/LuchoNoPrograma/nini-agents/blob/main/schema/cli-output.schema.json",
   "title": "Nini Agents CLI JSON envelope v1",
+  "$defs": {
+    "profileAddress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "name"],
+      "properties": {
+        "tool": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9-]*$" },
+        "name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9-]*$" }
+      }
+    },
+    "profileMutationSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "name", "type", "schemaVersion"],
+      "properties": {
+        "tool": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9-]*$" },
+        "name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9-]*$" },
+        "type": { "enum": ["full", "cli", "shared", "isolated"] },
+        "schemaVersion": { "type": "integer", "enum": [1, 2] }
+      }
+    },
+    "newMutationData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "profile"],
+      "properties": {
+        "state": { "const": "applied" },
+        "profile": { "$ref": "#/$defs/profileMutationSummary" }
+      }
+    },
+    "renameMutationData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "from", "profile"],
+      "properties": {
+        "state": { "const": "applied" },
+        "from": { "$ref": "#/$defs/profileAddress" },
+        "profile": { "$ref": "#/$defs/profileMutationSummary" }
+      }
+    },
+    "mutationFailureDetails": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["not_applied", "partially_applied"] }
+      }
+    }
+  },
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "command", "ok", "data", "error"],
@@ -50,6 +99,64 @@
       },
       "else": {
         "properties": { "data": { "type": "null" }, "error": { "type": "object" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "command": { "const": "new" } },
+        "required": ["command"]
+      },
+      "then": {
+        "if": {
+          "properties": { "ok": { "const": true } },
+          "required": ["ok"]
+        },
+        "then": {
+          "properties": { "data": { "$ref": "#/$defs/newMutationData" } }
+        },
+        "else": {
+          "properties": {
+            "error": {
+              "type": "object",
+              "required": ["details"],
+              "properties": {
+                "code": {
+                  "enum": ["invalid_arguments", "invalid_identifier", "profile_exists", "operation_failed"]
+                },
+                "details": { "$ref": "#/$defs/mutationFailureDetails" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "command": { "const": "rename" } },
+        "required": ["command"]
+      },
+      "then": {
+        "if": {
+          "properties": { "ok": { "const": true } },
+          "required": ["ok"]
+        },
+        "then": {
+          "properties": { "data": { "$ref": "#/$defs/renameMutationData" } }
+        },
+        "else": {
+          "properties": {
+            "error": {
+              "type": "object",
+              "required": ["details"],
+              "properties": {
+                "code": {
+                  "enum": ["invalid_arguments", "invalid_identifier", "profile_not_found", "profile_exists", "cross_tool_rename", "operation_failed"]
+                },
+                "details": { "$ref": "#/$defs/mutationFailureDetails" }
+              }
+            }
+          }
+        }
       }
     }
   ]

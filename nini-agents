@@ -1210,6 +1210,7 @@ remove_shortcut() {
       [ -f "$dp" ] && rm -f "$dp"
       ;;
   esac
+  return 0
 }
 
 create_shortcut_macos() {
@@ -1732,6 +1733,141 @@ json_tools_array() {
   } | jq -sc '.'
 }
 
+# Parse a public profile address without invoking abort(), so JSON mutations can
+# return one deterministic envelope even for malformed input.
+json_mutation_parse_spec() {
+  local spec="$1"
+  JSON_MUTATION_TOOL=""
+  JSON_MUTATION_NAME=""
+  if [[ "$spec" =~ ^([a-zA-Z0-9][a-zA-Z0-9-]*)/([a-zA-Z0-9][a-zA-Z0-9-]*)$ ]]; then
+    JSON_MUTATION_TOOL="${BASH_REMATCH[1]}"
+    JSON_MUTATION_NAME="${BASH_REMATCH[2]}"
+    return 0
+  fi
+  return 1
+}
+
+json_new_flags_valid() {
+  local shared=false isolated=false
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --shared) shared=true ;;
+      --isolated|--isolate|-i) isolated=true ;;
+      --cli|--no-seed) ;;
+      --from)
+        shift
+        [ $# -gt 0 ] && [ -n "$1" ] || return 1
+        ;;
+      *) return 1 ;;
+    esac
+    shift
+  done
+  [ "$shared" != true ] || [ "$isolated" != true ]
+}
+
+json_profile_mutation_summary() {
+  local tool="$1" name="$2" pdir="$3" profile_type=full schema_version=1
+  [ -f "$pdir/.cli" ] && profile_type=cli
+  [ -f "$pdir/.shared" ] && profile_type=shared
+  [ -f "$pdir/.isolated" ] && profile_type=isolated
+  [ -f "$pdir/.profile.json" ] && schema_version=2
+  jq -cn --arg tool "$tool" --arg name "$name" --arg type "$profile_type" \
+    --argjson schemaVersion "$schema_version" \
+    '{tool:$tool,name:$name,type:$type,schemaVersion:$schemaVersion}'
+}
+
+cmd_json_new() {
+  local spec="${1:-}" tool name pdir status state profile data
+  [ $# -gt 0 ] || {
+    cli_json_mutation_error new invalid_identifier 'A valid profile address is required.' not_applied
+    return 2
+  }
+  shift
+  json_mutation_parse_spec "$spec" || {
+    cli_json_mutation_error new invalid_identifier 'A valid profile address is required.' not_applied
+    return 2
+  }
+  tool="$JSON_MUTATION_TOOL"
+  name="$JSON_MUTATION_NAME"
+  json_new_flags_valid "$@" || {
+    cli_json_mutation_error new invalid_arguments 'The new command received invalid arguments.' not_applied
+    return 2
+  }
+  pdir="$BASE/$tool/$name"
+  if [ -e "$pdir" ] || [ -L "$pdir" ]; then
+    cli_json_mutation_error new profile_exists 'The destination profile already exists.' not_applied
+    return 2
+  fi
+
+  set +e
+  ( set -e; cmd_new "$spec" "$@" ) >/dev/null 2>/dev/null
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    state=not_applied
+    if [ -e "$pdir" ] || [ -L "$pdir" ]; then state=partially_applied; fi
+    cli_json_mutation_error new operation_failed 'The profile could not be created.' "$state"
+    return 6
+  fi
+
+  profile="$(json_profile_mutation_summary "$tool" "$name" "$pdir")"
+  data="$(jq -cn --argjson profile "$profile" '{state:"applied",profile:$profile}')"
+  cli_json_success new "$data"
+}
+
+cmd_json_rename() {
+  local old="${1:-}" new="${2:-}" old_tool old_name new_tool new_name
+  local old_dir new_dir status state profile data
+  [ $# -eq 2 ] || {
+    cli_json_mutation_error rename invalid_arguments 'The rename command requires exactly two profile addresses.' not_applied
+    return 2
+  }
+  json_mutation_parse_spec "$old" || {
+    cli_json_mutation_error rename invalid_identifier 'The source profile address is invalid.' not_applied
+    return 2
+  }
+  old_tool="$JSON_MUTATION_TOOL"
+  old_name="$JSON_MUTATION_NAME"
+  json_mutation_parse_spec "$new" || {
+    cli_json_mutation_error rename invalid_identifier 'The destination profile address is invalid.' not_applied
+    return 2
+  }
+  new_tool="$JSON_MUTATION_TOOL"
+  new_name="$JSON_MUTATION_NAME"
+  if [ "$old_tool" != "$new_tool" ]; then
+    cli_json_mutation_error rename cross_tool_rename 'Profiles cannot be renamed across tools.' not_applied
+    return 2
+  fi
+
+  old_dir="$BASE/$old_tool/$old_name"
+  new_dir="$BASE/$new_tool/$new_name"
+  if [ ! -d "$old_dir" ]; then
+    cli_json_mutation_error rename profile_not_found 'The source profile does not exist.' not_applied
+    return 2
+  fi
+  if [ -e "$new_dir" ] || [ -L "$new_dir" ]; then
+    cli_json_mutation_error rename profile_exists 'The destination profile already exists.' not_applied
+    return 2
+  fi
+
+  set +e
+  ( set -e; cmd_rename "$old" "$new" ) >/dev/null 2>/dev/null
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    state=not_applied
+    if [ ! -d "$old_dir" ] && [ -d "$new_dir" ]; then state=partially_applied; fi
+    cli_json_mutation_error rename operation_failed 'The profile could not be renamed.' "$state"
+    return 6
+  fi
+
+  profile="$(json_profile_mutation_summary "$new_tool" "$new_name" "$new_dir")"
+  data="$(jq -cn \
+    --arg oldTool "$old_tool" --arg oldName "$old_name" --argjson profile "$profile" \
+    '{state:"applied",from:{tool:$oldTool,name:$oldName},profile:$profile}')"
+  cli_json_success rename "$data"
+}
+
 cmd_json_query() {
   local command="$1" arg1="${2:-}" arg2="${3:-}" data tools storage_exists storage_writable total
   case "$command" in
@@ -2165,7 +2301,8 @@ COMMANDS
   help | version                                        This / version
 
 JSON QUERIES
-  --json supports version, list/status, tools, doctor, stats, and template list.
+  --json supports version, list/status, tools, doctor, stats, template list,
+  new, and rename.
   See docs/json-cli.md for the versioned envelope and exit codes.
 
 PROFILE SHORTHAND
@@ -2274,6 +2411,20 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 if [ "$CLI_JSON" = true ]; then
+  if [ "${1:-}" = new ]; then
+    set +e
+    cmd_json_new "${@:2}"
+    cli_json_status=$?
+    set -e
+    exit "$cli_json_status"
+  fi
+  if [ "${1:-}" = rename ]; then
+    set +e
+    cmd_json_rename "${@:2}"
+    cli_json_status=$?
+    set -e
+    exit "$cli_json_status"
+  fi
   set +e
   cli_json_output="$(cmd_json_query "${1:-}" "${2:-}" "${3:-}" 2>/dev/null)"
   cli_json_status=$?

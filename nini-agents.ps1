@@ -1614,6 +1614,134 @@ function Get-ProfileJsonData {
     return [ordered]@{ profiles = @($profiles); count = $profiles.Count }
 }
 
+function Get-ProfileMutationSummary {
+    param([string]$Tool, [string]$Name, [string]$ProfileDir)
+    $type = if (Test-Path -LiteralPath (Join-Path $ProfileDir '.isolated') -PathType Leaf) { 'isolated' }
+        elseif (Test-Path -LiteralPath (Join-Path $ProfileDir '.shared') -PathType Leaf) { 'shared' }
+        elseif (Test-Path -LiteralPath (Join-Path $ProfileDir '.cli') -PathType Leaf) { 'cli' }
+        else { 'full' }
+    return [ordered]@{
+        tool = $Tool
+        name = $Name
+        type = $type
+        schemaVersion = $(if (Test-Path -LiteralPath (Join-Path $ProfileDir '.profile.json') -PathType Leaf) { 2 } else { 1 })
+    }
+}
+
+function Write-JsonMutationError {
+    param([string]$Command, [string]$Code, [string]$Message, [string]$State, [int]$ExitCode)
+    Write-Output (ConvertTo-NiniMutationJsonError -Command $Command -Code $Code -Message $Message -State $State)
+    $script:NiniJsonExitCode = $ExitCode
+}
+
+function Invoke-JsonNewMutation {
+    param([string]$Spec, [string[]]$Tokens)
+    try {
+        $profile = Split-ProfileSpec $Spec
+        Test-ProfileName $profile.Name
+    } catch {
+        Write-JsonMutationError -Command 'new' -Code 'invalid_identifier' `
+            -Message 'A valid profile address is required.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        $flags = Read-NewFlags $Tokens
+    } catch {
+        Write-JsonMutationError -Command 'new' -Code 'invalid_arguments' `
+            -Message 'The new command received invalid arguments.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    if ($flags.Shared -and $flags.Isolated) {
+        Write-JsonMutationError -Command 'new' -Code 'invalid_arguments' `
+            -Message 'The new command received invalid arguments.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        $profileDir = Get-ProfileDir $profile.Tool $profile.Name
+    } catch {
+        Write-JsonMutationError -Command 'new' -Code 'operation_failed' `
+            -Message 'The profile could not be created.' -State 'not_applied' -ExitCode 6
+        return
+    }
+    if (Test-Path -LiteralPath $profileDir) {
+        Write-JsonMutationError -Command 'new' -Code 'profile_exists' `
+            -Message 'The destination profile already exists.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        New-Profile -Spec $Spec -Shared $flags.Shared -Cli $flags.Cli `
+            -FromTemplate $flags.FromTemplate -NoSeed $flags.NoSeed `
+            -Isolated ($flags.Isolated -or $WholeRoot) *> $null
+    } catch {
+        $state = if (Test-Path -LiteralPath $profileDir) { 'partially_applied' } else { 'not_applied' }
+        Write-JsonMutationError -Command 'new' -Code 'operation_failed' `
+            -Message 'The profile could not be created.' -State $state -ExitCode 6
+        return
+    }
+    $data = [ordered]@{
+        state = 'applied'
+        profile = (Get-ProfileMutationSummary -Tool $profile.Tool -Name $profile.Name -ProfileDir $profileDir)
+    }
+    Write-Output (ConvertTo-NiniJsonSuccess -Command 'new' -Data $data)
+}
+
+function Invoke-JsonRenameMutation {
+    param([string]$OldSpec, [string]$NewSpec, [string[]]$ExtraTokens = @())
+    if (@($ExtraTokens).Count -gt 0) {
+        Write-JsonMutationError -Command 'rename' -Code 'invalid_arguments' `
+            -Message 'The rename command requires exactly two profile addresses.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        $source = Split-ProfileSpec $OldSpec
+        Test-ProfileName $source.Name
+        $destination = Split-ProfileSpec $NewSpec
+        Test-ProfileName $destination.Name
+    } catch {
+        Write-JsonMutationError -Command 'rename' -Code 'invalid_identifier' `
+            -Message 'Both profile addresses must be valid.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    if ($source.Tool -ne $destination.Tool) {
+        Write-JsonMutationError -Command 'rename' -Code 'cross_tool_rename' `
+            -Message 'Profiles cannot be renamed across tools.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        $sourceDir = Get-ProfileDir $source.Tool $source.Name
+        $destinationDir = Get-ProfileDir $destination.Tool $destination.Name
+    } catch {
+        Write-JsonMutationError -Command 'rename' -Code 'operation_failed' `
+            -Message 'The profile could not be renamed.' -State 'not_applied' -ExitCode 6
+        return
+    }
+    if (-not (Test-Path -LiteralPath $sourceDir -PathType Container)) {
+        Write-JsonMutationError -Command 'rename' -Code 'profile_not_found' `
+            -Message 'The source profile does not exist.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    if (Test-Path -LiteralPath $destinationDir) {
+        Write-JsonMutationError -Command 'rename' -Code 'profile_exists' `
+            -Message 'The destination profile already exists.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        Rename-Profile $OldSpec $NewSpec *> $null
+    } catch {
+        $state = if (-not (Test-Path -LiteralPath $sourceDir -PathType Container) -and
+            (Test-Path -LiteralPath $destinationDir -PathType Container)) { 'partially_applied' } else { 'not_applied' }
+        Write-JsonMutationError -Command 'rename' -Code 'operation_failed' `
+            -Message 'The profile could not be renamed.' -State $state -ExitCode 6
+        return
+    }
+    $data = [ordered]@{
+        state = 'applied'
+        from = [ordered]@{ tool = $source.Tool; name = $source.Name }
+        profile = (Get-ProfileMutationSummary -Tool $destination.Tool -Name $destination.Name -ProfileDir $destinationDir)
+    }
+    Write-Output (ConvertTo-NiniJsonSuccess -Command 'rename' -Data $data)
+}
+
 function Get-ToolsJsonArray {
     $tools = @()
     foreach ($adapter in @(Get-Adapters 3>$null | Sort-Object id)) {
@@ -1632,10 +1760,21 @@ function Get-ToolsJsonArray {
 }
 
 function Invoke-JsonQuery {
-    param([string]$Command, [string]$First, [string]$Second)
+    param([string]$Command, [string]$First, [string]$Second, [string[]]$Remaining = @())
     Import-JsonModule
     $script:NiniJsonExitCode = 0
     switch ($Command) {
+        'new' {
+            $tokens = @()
+            if ($Second) { $tokens += $Second }
+            if ($Remaining) { $tokens += $Remaining }
+            Invoke-JsonNewMutation -Spec $First -Tokens $tokens
+            return
+        }
+        'rename' {
+            Invoke-JsonRenameMutation -OldSpec $First -NewSpec $Second -ExtraTokens $Remaining
+            return
+        }
         { $_ -in @('version', '--version', '-v') } {
             if ($First) { Write-Output (ConvertTo-NiniJsonError -Command 'version' -Code 'invalid_arguments' -Message 'This JSON command received unsupported arguments.'); $script:NiniJsonExitCode = 2; return }
             Write-Output (ConvertTo-NiniJsonSuccess -Command 'version' -Data ([ordered]@{ product = 'nini-agents'; version = $VERSION }))
@@ -2127,7 +2266,8 @@ COMMANDS
   help | version                                        This / version
 
 JSON QUERIES
-  --json supports version, list/status, tools, doctor, stats, and template list.
+  --json supports version, list/status, tools, doctor, stats, template list,
+  new, and rename.
   See docs/json-cli.md for the versioned envelope and exit codes.
 
 PROFILE SHORTHAND
@@ -2262,7 +2402,7 @@ $ForwardArgs = if ($normalizedTokens.Count -gt 3) { @($normalizedTokens[3..($nor
 
 if ($jsonOutput) {
     try {
-        Invoke-JsonQuery -Command $Cmd -First $Arg1 -Second $Arg2
+        Invoke-JsonQuery -Command $Cmd -First $Arg1 -Second $Arg2 -Remaining $ForwardArgs
         exit $script:NiniJsonExitCode
     } catch {
         Import-JsonModule
