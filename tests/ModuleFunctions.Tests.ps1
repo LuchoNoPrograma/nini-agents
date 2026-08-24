@@ -33,6 +33,7 @@ function global:Resolve-PathToken {
 }
 
 Import-Module (Join-Path $script:LibDir 'MultiCli.AdapterValidation.psm1') -Force
+Import-Module (Join-Path $script:LibDir 'MultiCli.Json.psm1') -Force
 # Transfer before Runtime on purpose: the first import in a fresh runspace
 # exercises the transfer module's self-bootstrap of the runtime module.
 Import-Module (Join-Path $script:LibDir 'MultiCli.Transfer.psm1') -Force
@@ -181,6 +182,24 @@ function Add-ManifestCases {
     param([hashtable[]]$Cases)
     foreach ($case in $Cases) {
         It $case.Name { Invoke-ManifestCase -Case $case }
+    }
+}
+
+Describe 'JSON helper functions in-process' {
+    It 'ConvertTo-NiniMutationJsonError preserves the stable mutation state' {
+        $envelope = ConvertTo-NiniMutationJsonError `
+            -Command 'new' `
+            -Code 'invalid_identifier' `
+            -Message 'The profile identifier is invalid.' `
+            -State 'not_applied' | ConvertFrom-Json
+
+        $envelope.schemaVersion | Should Be 1
+        $envelope.command | Should Be 'new'
+        $envelope.ok | Should Be $false
+        $envelope.data | Should Be $null
+        $envelope.error.code | Should Be 'invalid_identifier'
+        $envelope.error.message | Should Be 'The profile identifier is invalid.'
+        $envelope.error.details.state | Should Be 'not_applied'
     }
 }
 
