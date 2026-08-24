@@ -107,10 +107,10 @@ Describe 'stable JSON CLI v1' {
     }
 
     It 'rejects mutation commands before changing a profile' {
-        $result = Invoke-Launcher -Scratch $scratch -Arguments @('delete', 'codex/work', '--json')
+        $result = Invoke-Launcher -Scratch $scratch -Arguments @('clone', 'codex/work', 'codex/copy', '--json')
         $result.ExitCode | Should Be 2
         $json = Convert-LauncherJson $result
-        Assert-JsonEnvelope $json 'delete'
+        Assert-JsonEnvelope $json 'clone'
         $json.ok | Should Be $false
         $json.error.code | Should Be 'json_unsupported'
         (Test-Path -LiteralPath (Join-Path $scratch.MultiCliHome 'codex\work')) | Should Be $true

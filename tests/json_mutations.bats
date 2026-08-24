@@ -173,3 +173,99 @@ assert_no_private_data() {
   [ -d "$MULTICLI_HOME/codex/new" ]
   assert_no_private_data
 }
+
+@test "delete JSON requires an exact confirmation before writing" {
+  run multicli new codex/work --no-seed --json
+  [ "$status" -eq 0 ]
+
+  run multicli delete --json
+  [ "$status" -eq 2 ]
+  assert_envelope delete
+  printf '%s' "$output" | jq -e '
+    .error.code == "invalid_identifier" and
+    .error.details.state == "not_applied"
+  ' >/dev/null
+
+  run multicli delete ../outside --confirm ../outside --json
+  [ "$status" -eq 2 ]
+  assert_envelope delete
+  printf '%s' "$output" | jq -e '
+    .error.code == "invalid_identifier" and
+    .error.details.state == "not_applied"
+  ' >/dev/null
+  [ ! -e "$MULTICLI_SCRATCH/outside" ]
+
+  run multicli delete codex/work --json
+  [ "$status" -eq 2 ]
+  assert_envelope delete
+  printf '%s' "$output" | jq -e '
+    (.ok | not) and .data == null and
+    .error.code == "confirmation_required" and
+    .error.details.state == "not_applied"
+  ' >/dev/null
+  [ -d "$MULTICLI_HOME/codex/work" ]
+
+  run multicli delete codex/work --confirm codex/other --json
+  [ "$status" -eq 2 ]
+  assert_envelope delete
+  printf '%s' "$output" | jq -e '
+    .error.code == "confirmation_required" and
+    .error.details.state == "not_applied"
+  ' >/dev/null
+  [ -d "$MULTICLI_HOME/codex/work" ]
+  assert_no_private_data
+}
+
+@test "delete JSON removes a profile and returns only its public address" {
+  run multicli new codex/work --no-seed --json
+  [ "$status" -eq 0 ]
+
+  run multicli --json delete codex/work --confirm codex/work
+
+  [ "$status" -eq 0 ]
+  assert_envelope delete
+  printf '%s' "$output" | jq -e '
+    .ok and .error == null and
+    .data == {state:"applied",profile:{tool:"codex",name:"work"}}
+  ' >/dev/null
+  [ ! -e "$MULTICLI_HOME/codex/work" ]
+  assert_no_private_data
+}
+
+@test "delete JSON rejects a missing profile before mutation" {
+  run multicli delete codex/missing --confirm codex/missing --json
+
+  [ "$status" -eq 2 ]
+  assert_envelope delete
+  printf '%s' "$output" | jq -e '
+    (.ok | not) and .data == null and
+    .error.code == "profile_not_found" and
+    .error.details.state == "not_applied"
+  ' >/dev/null
+  assert_no_private_data
+}
+
+@test "delete JSON reports a conservative partial state after cleanup starts" {
+  mkdir -p "$MULTICLI_TOOLS_DIR/cursor-cli" "$MULTICLI_HOME/cursor-cli/broken"
+  cp "$MULTICLI_REPO_ROOT/ai-tools/cursor-cli/adapter.json" \
+    "$MULTICLI_TOOLS_DIR/cursor-cli/adapter.json"
+  printf '%s\n' '{"profileId":"00000000-0000-4000-8000-000000000001"}' \
+    > "$MULTICLI_HOME/cursor-cli/broken/.profile.json"
+  install_fake_secret_tool
+  target='multi-cli/cursor-cli/00000000-0000-4000-8000-000000000001/CURSOR_API_KEY'
+  printf '%s' 'fixture-secret' | \
+    secret-tool store --label="$target" service multicli target "$target"
+  export MULTICLI_TEST_SECRET_TOOL_FAIL_CLEAR=1
+
+  run multicli delete cursor-cli/broken --confirm cursor-cli/broken --json
+
+  [ "$status" -eq 6 ]
+  assert_envelope delete
+  printf '%s' "$output" | jq -e '
+    (.ok | not) and .data == null and
+    .error.code == "operation_failed" and
+    .error.details.state == "partially_applied"
+  ' >/dev/null
+  [ -d "$MULTICLI_HOME/cursor-cli/broken" ]
+  assert_no_private_data
+}

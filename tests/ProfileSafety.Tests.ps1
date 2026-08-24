@@ -378,6 +378,17 @@ Describe 'profile path containment and legacy transfer hardening' {
             $delete.Output | Should Match 'outside MULTICLI_HOME'
             (Get-Content -LiteralPath (Join-Path $outsideRoot 'account-a\keep.txt') -Raw).Trim() | Should Be 'outside-data'
             (Test-Path -LiteralPath (Join-Path $outsideRoot 'account-a')) | Should Be $true
+
+            $jsonDelete = Invoke-ProfileLauncher -Root $root -Arguments @(
+                'delete', 'codex/account-a', '--confirm', 'codex/account-a', '--json'
+            )
+            $jsonDelete.TimedOut | Should Be $false
+            $jsonDelete.ExitCode | Should Be 6
+            $envelope = $jsonDelete.Output | ConvertFrom-Json
+            $envelope.command | Should Be 'delete'
+            $envelope.error.code | Should Be 'operation_failed'
+            $envelope.error.details.state | Should Be 'not_applied'
+            (Get-Content -LiteralPath (Join-Path $outsideRoot 'account-a\keep.txt') -Raw).Trim() | Should Be 'outside-data'
         } finally {
             if (Test-Path -LiteralPath $toolLink) { [System.IO.Directory]::Delete($toolLink) }
             Remove-Item -LiteralPath $outsideRoot -Recurse -Force -ErrorAction SilentlyContinue

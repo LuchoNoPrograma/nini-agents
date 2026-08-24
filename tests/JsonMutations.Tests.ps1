@@ -136,4 +136,77 @@ Describe 'stable JSON profile mutations v1' {
         (Test-Path -LiteralPath (Join-Path $scratch.MultiCliHome 'codex\new') -PathType Container) | Should Be $true
         Assert-NoPrivateMutationData $result.StdOut $scratch
     }
+
+    It 'requires an exact confirmation before deleting' {
+        (Invoke-Launcher -Scratch $scratch -Arguments @('new', 'codex/work', '--no-seed', '--json')).ExitCode | Should Be 0
+
+        $invalid = Invoke-Launcher -Scratch $scratch -Arguments @('delete', '../outside', '--confirm', '../outside', '--json')
+        $invalid.ExitCode | Should Be 2
+        $invalidJson = Convert-MutationLauncherJson $invalid
+        Assert-MutationEnvelope $invalidJson 'delete'
+        $invalidJson.error.code | Should Be 'invalid_identifier'
+        $invalidJson.error.details.state | Should Be 'not_applied'
+        (Test-Path -LiteralPath (Join-Path $scratch.Root 'outside')) | Should Be $false
+
+        $missingConfirmation = Invoke-Launcher -Scratch $scratch -Arguments @('delete', 'codex/work', '--json')
+        $missingConfirmation.ExitCode | Should Be 2
+        $missingJson = Convert-MutationLauncherJson $missingConfirmation
+        Assert-MutationEnvelope $missingJson 'delete'
+        $missingJson.error.code | Should Be 'confirmation_required'
+        $missingJson.error.details.state | Should Be 'not_applied'
+        (Test-Path -LiteralPath (Join-Path $scratch.MultiCliHome 'codex\work') -PathType Container) | Should Be $true
+
+        $mismatch = Invoke-Launcher -Scratch $scratch -Arguments @('delete', 'codex/work', '--confirm', 'codex/other', '--json')
+        $mismatch.ExitCode | Should Be 2
+        $mismatchJson = Convert-MutationLauncherJson $mismatch
+        $mismatchJson.error.code | Should Be 'confirmation_required'
+        $mismatchJson.error.details.state | Should Be 'not_applied'
+        (Test-Path -LiteralPath (Join-Path $scratch.MultiCliHome 'codex\work') -PathType Container) | Should Be $true
+        Assert-NoPrivateMutationData $mismatch.StdOut $scratch
+    }
+
+    It 'deletes a profile and returns only its public address' {
+        (Invoke-Launcher -Scratch $scratch -Arguments @('new', 'codex/work', '--no-seed', '--json')).ExitCode | Should Be 0
+
+        $result = Invoke-Launcher -Scratch $scratch -Arguments @('--json', 'delete', 'codex/work', '--confirm', 'codex/work')
+        $result.ExitCode | Should Be 0
+        $json = Convert-MutationLauncherJson $result
+        Assert-MutationEnvelope $json 'delete'
+        $json.ok | Should Be $true
+        $json.data.state | Should Be 'applied'
+        $json.data.profile.tool | Should Be 'codex'
+        $json.data.profile.name | Should Be 'work'
+        @($json.data.profile.PSObject.Properties).Count | Should Be 2
+        (Test-Path -LiteralPath (Join-Path $scratch.MultiCliHome 'codex\work')) | Should Be $false
+        Assert-NoPrivateMutationData $result.StdOut $scratch
+    }
+
+    It 'rejects a missing profile before mutation' {
+        $result = Invoke-Launcher -Scratch $scratch -Arguments @('delete', 'codex/missing', '--confirm', 'codex/missing', '--json')
+        $result.ExitCode | Should Be 2
+        $json = Convert-MutationLauncherJson $result
+        Assert-MutationEnvelope $json 'delete'
+        $json.error.code | Should Be 'profile_not_found'
+        $json.error.details.state | Should Be 'not_applied'
+        Assert-NoPrivateMutationData $result.StdOut $scratch
+    }
+
+    It 'reports a conservative partial state after delete cleanup starts' {
+        $cursorCliDir = Join-Path $scratch.Tools 'cursor-cli'
+        New-Item -ItemType Directory -Force -Path $cursorCliDir | Out-Null
+        Copy-Item -LiteralPath (Join-Path $script:JsonMutationRepoRoot 'ai-tools\cursor-cli\adapter.json') `
+            -Destination (Join-Path $cursorCliDir 'adapter.json') -Force
+        $profileDir = Join-Path $scratch.MultiCliHome 'cursor-cli\broken'
+        New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+        Set-Content -LiteralPath (Join-Path $profileDir '.profile.json') -Encoding ASCII -Value '{'
+
+        $result = Invoke-Launcher -Scratch $scratch -Arguments @('delete', 'cursor-cli/broken', '--confirm', 'cursor-cli/broken', '--json')
+        $result.ExitCode | Should Be 6
+        $json = Convert-MutationLauncherJson $result
+        Assert-MutationEnvelope $json 'delete'
+        $json.error.code | Should Be 'operation_failed'
+        $json.error.details.state | Should Be 'partially_applied'
+        (Test-Path -LiteralPath $profileDir -PathType Container) | Should Be $true
+        Assert-NoPrivateMutationData $result.StdOut $scratch
+    }
 }

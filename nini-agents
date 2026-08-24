@@ -1012,15 +1012,17 @@ set_redirect_home_links() {
 }
 
 cmd_delete() {
-  local spec="$1"
+  local spec="$1" confirmed="${2:-false}"
   split_profile_spec "$spec"
   validate_name "$NAME"
   local pdir="$(profile_dir "$TOOL" "$NAME")"
   [ -d "$pdir" ] || abort "Profile '$spec' does not exist"
 
-  printf "Delete profile '%s' and all its data? [y/N] " "$spec"
-  read -r confirm
-  [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; return; }
+  if [ "$confirmed" != true ]; then
+    printf "Delete profile '%s' and all its data? [y/N] " "$spec"
+    read -r confirm
+    [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; return; }
+  fi
 
   if [ -f "$pdir/.profile.json" ]; then
     local apath mechanism env_var profile_id
@@ -1868,6 +1870,50 @@ cmd_json_rename() {
   cli_json_success rename "$data"
 }
 
+cmd_json_delete() {
+  local spec="${1:-}" tool name pdir status data
+  [ $# -gt 0 ] || {
+    cli_json_mutation_error delete invalid_identifier 'A valid profile address is required.' not_applied
+    return 2
+  }
+  json_mutation_parse_spec "$spec" || {
+    cli_json_mutation_error delete invalid_identifier 'A valid profile address is required.' not_applied
+    return 2
+  }
+  tool="$JSON_MUTATION_TOOL"
+  name="$JSON_MUTATION_NAME"
+  if [ $# -ne 3 ] || [ "$2" != --confirm ] || [ "$3" != "$spec" ]; then
+    cli_json_mutation_error delete confirmation_required 'JSON deletion requires --confirm followed by the exact profile address.' not_applied
+    return 2
+  fi
+
+  set +e
+  pdir="$(profile_dir "$tool" "$name" 2>/dev/null)"
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    cli_json_mutation_error delete operation_failed 'The profile could not be safely resolved.' not_applied
+    return 6
+  fi
+  if [ ! -d "$pdir" ]; then
+    cli_json_mutation_error delete profile_not_found 'The profile does not exist.' not_applied
+    return 2
+  fi
+
+  set +e
+  ( set -e; cmd_delete "$spec" true ) >/dev/null 2>/dev/null
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ] || [ -d "$pdir" ]; then
+    cli_json_mutation_error delete operation_failed 'The profile could not be completely deleted.' partially_applied
+    return 6
+  fi
+
+  data="$(jq -cn --arg tool "$tool" --arg name "$name" \
+    '{state:"applied",profile:{tool:$tool,name:$name}}')"
+  cli_json_success delete "$data"
+}
+
 cmd_json_query() {
   local command="$1" arg1="${2:-}" arg2="${3:-}" data tools storage_exists storage_writable total
   case "$command" in
@@ -2421,6 +2467,13 @@ if [ "$CLI_JSON" = true ]; then
   if [ "${1:-}" = rename ]; then
     set +e
     cmd_json_rename "${@:2}"
+    cli_json_status=$?
+    set -e
+    exit "$cli_json_status"
+  fi
+  if [ "${1:-}" = delete ]; then
+    set +e
+    cmd_json_delete "${@:2}"
     cli_json_status=$?
     set -e
     exit "$cli_json_status"

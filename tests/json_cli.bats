@@ -109,9 +109,9 @@ assert_no_private_data() {
 }
 
 @test "unsupported JSON commands fail with a deterministic safe envelope" {
-  run multicli delete codex/work --json
+  run multicli clone codex/work codex/copy --json
   [ "$status" -eq 2 ]
-  assert_envelope delete
+  assert_envelope clone
   printf '%s' "$output" | jq -e '
     (.ok | not) and .data == null and .error.code == "json_unsupported" and
     .error.message == "JSON output is not available for this command."

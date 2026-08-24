@@ -1001,22 +1001,24 @@ function Set-RedirectHomeDotfileLinks {
 # nini-agents delete: confirm, clear any process-secret credential, then remove
 # the profile dir, alias, and shortcut.
 function Remove-Profile {
-    param([string]$Spec)
+    param([string]$Spec, [switch]$Confirmed)
     $p = Split-ProfileSpec $Spec
     Test-ProfileName $p.Name
     $profileDir = Get-ProfileDir $p.Tool $p.Name
     if (-not (Test-Path $profileDir)) { throw "Profile '$Spec' does not exist" }
 
-    # Read-Host consults the console on some hosts even when stdin is piped,
-    # silently returning an empty answer and aborting scripted deletes. Read
-    # the redirected stream directly so piped confirmations are honored.
-    if ([Console]::IsInputRedirected) {
-        Write-Host "Delete profile '$Spec' and all its data? [y/N]"
-        $confirm = Read-RedirectedLine
-    } else {
-        $confirm = Read-Host "Delete profile '$Spec' and all its data? [y/N]"
+    if (-not $Confirmed) {
+        # Read-Host consults the console on some hosts even when stdin is piped,
+        # silently returning an empty answer and aborting scripted deletes. Read
+        # the redirected stream directly so piped confirmations are honored.
+        if ([Console]::IsInputRedirected) {
+            Write-Host "Delete profile '$Spec' and all its data? [y/N]"
+            $confirm = Read-RedirectedLine
+        } else {
+            $confirm = Read-Host "Delete profile '$Spec' and all its data? [y/N]"
+        }
+        if ($confirm -notmatch '^[Yy]$') { Write-Host "Aborted."; return }
     }
-    if ($confirm -notmatch '^[Yy]$') { Write-Host "Aborted."; return }
 
     # An OS-user profile owns a sandbox user, optional legacy scheduled tasks,
     # and a Credential Manager entry; remove them before deleting the profile dir.
@@ -1742,6 +1744,53 @@ function Invoke-JsonRenameMutation {
     Write-Output (ConvertTo-NiniJsonSuccess -Command 'rename' -Data $data)
 }
 
+function Invoke-JsonDeleteMutation {
+    param([string]$Spec, [string[]]$Tokens = @())
+    try {
+        $profile = Split-ProfileSpec $Spec
+        Test-ProfileName $profile.Name
+    } catch {
+        Write-JsonMutationError -Command 'delete' -Code 'invalid_identifier' `
+            -Message 'A valid profile address is required.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    if (@($Tokens).Count -ne 2 -or $Tokens[0] -ne '--confirm' -or $Tokens[1] -cne $Spec) {
+        Write-JsonMutationError -Command 'delete' -Code 'confirmation_required' `
+            -Message 'JSON deletion requires --confirm followed by the exact profile address.' `
+            -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        $profileDir = Get-ProfileDir $profile.Tool $profile.Name
+    } catch {
+        Write-JsonMutationError -Command 'delete' -Code 'operation_failed' `
+            -Message 'The profile could not be deleted.' -State 'not_applied' -ExitCode 6
+        return
+    }
+    if (-not (Test-Path -LiteralPath $profileDir -PathType Container)) {
+        Write-JsonMutationError -Command 'delete' -Code 'profile_not_found' `
+            -Message 'The profile does not exist.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        Remove-Profile -Spec $Spec -Confirmed *> $null
+    } catch {
+        Write-JsonMutationError -Command 'delete' -Code 'operation_failed' `
+            -Message 'The profile could not be completely deleted.' -State 'partially_applied' -ExitCode 6
+        return
+    }
+    if (Test-Path -LiteralPath $profileDir) {
+        Write-JsonMutationError -Command 'delete' -Code 'operation_failed' `
+            -Message 'The profile could not be completely deleted.' -State 'partially_applied' -ExitCode 6
+        return
+    }
+    $data = [ordered]@{
+        state = 'applied'
+        profile = [ordered]@{ tool = $profile.Tool; name = $profile.Name }
+    }
+    Write-Output (ConvertTo-NiniJsonSuccess -Command 'delete' -Data $data)
+}
+
 function Get-ToolsJsonArray {
     $tools = @()
     foreach ($adapter in @(Get-Adapters 3>$null | Sort-Object id)) {
@@ -1773,6 +1822,13 @@ function Invoke-JsonQuery {
         }
         'rename' {
             Invoke-JsonRenameMutation -OldSpec $First -NewSpec $Second -ExtraTokens $Remaining
+            return
+        }
+        'delete' {
+            $tokens = @()
+            if ($Second) { $tokens += $Second }
+            if ($Remaining) { $tokens += $Remaining }
+            Invoke-JsonDeleteMutation -Spec $First -Tokens $tokens
             return
         }
         { $_ -in @('version', '--version', '-v') } {

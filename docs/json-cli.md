@@ -1,7 +1,8 @@
 # JSON CLI contract
 
 Nini Agents exposes a versioned JSON interface for read-only consumers and
-profile creation and rename. Human output remains the default and is unchanged.
+profile creation, rename, and deletion. Human output remains the default and is
+unchanged.
 Put `--json` before the first `--` delimiter; both of these forms are equivalent:
 
 ```text
@@ -46,30 +47,40 @@ code.
 | `template list` | `templates[]`, `count` |
 | `new <tool>/<profile> ...` | `state`, `profile` |
 | `rename <tool>/<old> <tool>/<new>` | `state`, `from`, `profile` |
+| `delete <tool>/<profile> --confirm <tool>/<profile>` | `state`, `profile` |
 
 Profile summaries contain `tool`, `name`, `type`, `schemaVersion`, and logical
 `sizeBytes`. Tool summaries contain `id`, `kind`, `strategy`, `supportLevel`,
 and the boolean `installed`. Arrays are sorted by tool and profile or template
 name. Sizes count regular-file bytes without following symbolic links.
 
-Mutation profile summaries contain only `tool`, `name`, `type`, and
-`schemaVersion`; they never include logical size or private metadata. A
-successful `new` or `rename` returns `state: "applied"`. A failed mutation
-returns `data: null` and one of these values in `error.details.state`:
+Mutation profile summaries for `new` and `rename` contain only `tool`, `name`,
+`type`, and `schemaVersion`; deletion returns only the deleted public address,
+`tool` and `name`. They never include logical size or private metadata. A
+successful mutation returns `state: "applied"`. A failed mutation returns
+`data: null` and one of these values in `error.details.state`:
 
 | State | Meaning |
 |---|---|
-| `not_applied` | The addressed profile tree was not created or moved. |
-| `partially_applied` | The profile tree exists at the new address, but a later integration such as alias recreation failed. |
+| `not_applied` | Preflight failed before the addressed profile tree or its integrations were changed. |
+| `partially_applied` | Mutation work began, so the profile tree or an integration may already have changed. |
 
 Consumers must reconcile `partially_applied` through a fresh `list` or
 `status` query. Nini Agents does not automatically delete or move the profile
 again because that could destroy recoverable state.
 
+JSON deletion is deliberately noninteractive and requires the exact target a
+second time. Missing or mismatched confirmation returns `confirmation_required`
+without changing the profile:
+
+```text
+nini-agents --json delete codex/work --confirm codex/work
+```
+
 `doctor --deep` does not yet have a JSON representation. Mutation commands
-other than `new` and `rename`, plus profile movement, reject `--json` with
-`json_unsupported` before doing work. Movement remains an internal engine API
-until a real process probe and a transport can satisfy the transactional
+other than `new`, `rename`, and `delete`, plus profile movement, reject `--json`
+with `json_unsupported` before doing work. Movement remains an internal engine
+API until a real process probe and a transport can satisfy the transactional
 protocol.
 
 ## Exit codes
@@ -83,7 +94,8 @@ protocol.
 Public query error codes in v1 include `invalid_arguments`,
 `json_unsupported`, `dependency_missing`, `health_check_failed`, and
 `operation_failed`. Profile mutations additionally use `invalid_identifier`,
-`profile_not_found`, `profile_exists`, and `cross_tool_rename`.
+`profile_not_found`, `profile_exists`, `cross_tool_rename`, and
+`confirmation_required`.
 
 The internal movement serializer uses the same envelope and preserves every
 engine `code`, `state`, and `format`. It never emits source/destination paths,

@@ -42,6 +42,15 @@
         "profile": { "$ref": "#/$defs/profileMutationSummary" }
       }
     },
+    "deleteMutationData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "profile"],
+      "properties": {
+        "state": { "const": "applied" },
+        "profile": { "$ref": "#/$defs/profileAddress" }
+      }
+    },
     "mutationFailureDetails": {
       "type": "object",
       "additionalProperties": false,
@@ -151,6 +160,35 @@
               "properties": {
                 "code": {
                   "enum": ["invalid_arguments", "invalid_identifier", "profile_not_found", "profile_exists", "cross_tool_rename", "operation_failed"]
+                },
+                "details": { "$ref": "#/$defs/mutationFailureDetails" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "command": { "const": "delete" } },
+        "required": ["command"]
+      },
+      "then": {
+        "if": {
+          "properties": { "ok": { "const": true } },
+          "required": ["ok"]
+        },
+        "then": {
+          "properties": { "data": { "$ref": "#/$defs/deleteMutationData" } }
+        },
+        "else": {
+          "properties": {
+            "error": {
+              "type": "object",
+              "required": ["details"],
+              "properties": {
+                "code": {
+                  "enum": ["invalid_identifier", "confirmation_required", "profile_not_found", "operation_failed"]
                 },
                 "details": { "$ref": "#/$defs/mutationFailureDetails" }
               }
