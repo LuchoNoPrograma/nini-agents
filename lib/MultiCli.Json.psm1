@@ -36,6 +36,12 @@ function ConvertTo-NiniJsonError {
     ConvertTo-NiniJsonEnvelope -Command $Command -Succeeded $false -ErrorCode $Code -ErrorMessage $Message -ErrorDetails $Details
 }
 
+function ConvertTo-NiniMutationJsonError {
+    param([string]$Command, [string]$Code, [string]$Message, [string]$State)
+    ConvertTo-NiniJsonError -Command $Command -Code $Code -Message $Message `
+        -Details ([ordered]@{ state = $State })
+}
+
 function ConvertTo-NiniMoveJson {
     param($Result)
     $details = [ordered]@{
@@ -53,4 +59,4 @@ function ConvertTo-NiniMoveJson {
         -Message 'The profile movement did not complete.' -Details $details
 }
 
-Export-ModuleMember -Function ConvertTo-NiniJsonEnvelope, ConvertTo-NiniJsonSuccess, ConvertTo-NiniJsonError, ConvertTo-NiniMoveJson
+Export-ModuleMember -Function ConvertTo-NiniJsonEnvelope, ConvertTo-NiniJsonSuccess, ConvertTo-NiniJsonError, ConvertTo-NiniMutationJsonError, ConvertTo-NiniMoveJson

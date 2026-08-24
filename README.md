@@ -7,8 +7,8 @@
 > [!IMPORTANT]
 > Nini Agents is currently evolving from the Multi-CLI `6efb0d2` engine base.
 > Cross-machine credential movement and consumer migrations are planned work.
-> A stable JSON v1 interface is available for read-only queries; profile
-> movement remains an internal engine API.
+> A stable JSON v1 interface is available for read-only queries and profile
+> `new`/`rename`; profile movement remains an internal engine API.
 
 <p align="center">
   <a href="#supported-ai-tools"><img src="https://img.shields.io/badge/support-17%20AI%20tools-255C60?style=flat-square&labelColor=14101F" alt="17 supported AI tools"/></a>
@@ -132,10 +132,12 @@ See platform limits in the [support matrix](docs/support-matrix.md). Run `nini-a
 | `nini-agents help` | Show every command |
 | `nini-agents version` | Show the installed version |
 
-Add `--json` to `version`, `list/status`, `tools`, `doctor`, `stats`, or
-`template list` for the stable consumer interface. See the
-[JSON CLI contract](docs/json-cli.md). Mutation commands reject JSON mode
-before doing work.
+Add `--json` to `version`, `list/status`, `tools`, `doctor`, `stats`,
+`template list`, `new`, or `rename` for the stable consumer interface. `new`
+and `rename` keep the same profile and adapter rules as their human forms while
+reporting machine-safe mutation states. See the
+[JSON CLI contract](docs/json-cli.md). Other mutation commands reject JSON
+mode before doing work.
 
 ### Shared Codex permissions
 
