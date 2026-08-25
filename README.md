@@ -196,9 +196,12 @@ activation, runtime reconstruction, and the final integrity comparison, then
 deletes only that backup. It never prunes earlier backups. If cleanup fails,
 the command reports `backup_cleanup_failed` with the destination still active.
 
-Only adapter-declared profile content is movable. Unknown files, links,
-unexpected hardlinks, malformed metadata, and malformed credential JSON fail
-closed before ownership changes.
+Only adapter-declared profile content is movable. Unknown files, arbitrary
+links, unexpected hardlinks, malformed metadata, and malformed credential JSON
+fail closed before ownership changes. Expected shared-state links and exact
+link residue recorded by an older completed migration are never followed: the
+link objects are omitted from destination staging, while the original objects
+remain in the source backup until any requested backup discard succeeds.
 
 ### Shared Codex permissions
 
@@ -267,6 +270,12 @@ but cannot be safely combined with an unrelated live state family during a
 legacy migration. Existing objects at those paths are renamed into
 `.inactive/migrations/<tool>/<profile>/profile-state/`; they are not merged or
 activated automatically, and rollback returns them to the legacy profile.
+
+Legacy links found inside declared shared or session state are likewise moved
+as opaque objects into
+`.inactive/migrations/<tool>/<profile>/linked-state/`. Migration never reads or
+follows their targets, the active schema-v2 profile contains no such links,
+and automatic rollback restores them if the transaction fails.
 
 Only schema-v2 profiles, templates, and archives are portable. Migrate legacy profiles first.
 

@@ -668,10 +668,9 @@ make_dir_writable() {
   [ ! -e "$pdir_b/agents" ]
 }
 
-# 8. Legacy --shared profiles: symlinked entries are recognized and left in
-#    place as shared links; nested links inside merged directories are skipped,
-#    never copied.
-@test "legacy shared links stay in place; nested links inside merged dirs are skipped" {
+# 8. Legacy --shared profiles: links are preserved opaquely outside the active
+#    profile and are never copied into shared state or followed.
+@test "legacy shared links move to inactive linked-state recovery" {
   mkdir -p "$SHARED_ROOT/plugins" "$SHARED_ROOT/agents" "$SHARED_ROOT/outside-dir"
   printf 'plugin\n' > "$SHARED_ROOT/plugins/plugin.md"
   printf 'existing\n' > "$SHARED_ROOT/agents/existing.md"
@@ -688,12 +687,17 @@ make_dir_writable() {
   run cmd_migrate fixture/work
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"  keep shared link plugins (existing link retained)"* ]]
+  [[ "$output" == *"  preserve linked state plugins in inactive recovery"* ]]
   [[ "$output" != *"target:"* ]]
-  [[ "$output" == *"  skip nested link agents/linkdir"* ]]
-  [ -L "$pdir/plugins" ]
-  [ -L "$pdir/agents/linkdir" ]
-  # the link target was not copied or moved anywhere
+  [[ "$output" == *"  preserve linked state agents/linkdir in inactive recovery"* ]]
+  [ ! -e "$pdir/plugins" ] && [ ! -L "$pdir/plugins" ]
+  [ ! -e "$pdir/agents/linkdir" ] && [ ! -L "$pdir/agents/linkdir" ]
+  local inactive="$MULTICLI_HOME/.inactive/migrations/fixture/work/linked-state"
+  [ -L "$inactive/plugins" ]
+  [ -L "$inactive/agents/linkdir" ]
+  [ "$(readlink "$inactive/plugins")" = "$SHARED_ROOT/plugins" ]
+  [ "$(readlink "$inactive/agents/linkdir")" = "$SHARED_ROOT/outside-dir" ]
+  # Neither link target was copied, moved, or modified.
   [ "$(list_tree "$SHARED_ROOT/plugins")" = "plugin.md" ]
   # the real file inside agents merged into the shared root
   [ "$(cat "$SHARED_ROOT/agents/local.md" | tr -d '\r')" = "local" ]
@@ -701,9 +705,50 @@ make_dir_writable() {
   [ ! -e "$SHARED_ROOT/agents/linkdir" ]
   [ "$(list_tree "$pdir")" = "$(printf '%s\n' \
     .migration-journal.json .profile.json .shared \
-    agents agents/linkdir \
-    auth auth/auth.json auth/keys auth/keys/token.json \
-    plugins)" ]
+    auth auth/auth.json auth/keys auth/keys/token.json)" ]
+  run jq -e '[.operations[] | select(.op == "preserve-link" and .status == "done")] | length == 2' "$pdir/.migration-journal.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "linked-state recovery collision refuses migration before writes" {
+  local pdir="$MULTICLI_HOME/fixture/work"
+  local inactive="$MULTICLI_HOME/.inactive/migrations/fixture/work/linked-state"
+  mkdir -p "$pdir" "$SHARED_ROOT/plugins" "$inactive"
+  printf 'profile-token\n' > "$pdir/auth.json"
+  printf 'recovery sentinel\n' > "$inactive/sentinel.txt"
+  make_dir_link "$SHARED_ROOT/plugins" "$pdir/plugins" || skip "directory links unavailable on this host"
+
+  run cmd_migrate fixture/work --dry-run
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"inactive linked-state recovery already exists"* ]]
+  [ -L "$pdir/plugins" ]
+  [ -f "$pdir/auth.json" ]
+  [ ! -e "$pdir/.profile.json" ]
+  [ "$(cat "$inactive/sentinel.txt" | tr -d '\r')" = "recovery sentinel" ]
+}
+
+@test "failure after linked-state preservation restores the legacy link" {
+  local pdir="$MULTICLI_HOME/fixture/work"
+  local outside="$MULTICLI_SCRATCH/outside-link"
+  local inactive="$MULTICLI_HOME/.inactive/migrations/fixture/work/linked-state"
+  mkdir -p "$pdir/agents" "$outside" "$SHARED_ROOT"
+  printf 'profile-token\n' > "$pdir/auth.json"
+  printf 'state\n' > "$pdir/config.toml"
+  printf 'outside sentinel\n' > "$outside/note.md"
+  make_dir_link "$outside" "$pdir/agents/linkdir" || skip "directory links unavailable on this host"
+  make_dir_readonly "$SHARED_ROOT"
+
+  run cmd_migrate fixture/work
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Automatic rollback restored the legacy layout"* ]]
+  [ -L "$pdir/agents/linkdir" ]
+  [ "$(readlink "$pdir/agents/linkdir")" = "$outside" ]
+  [ ! -e "$inactive" ]
+  [ "$(cat "$outside/note.md" | tr -d '\r')" = "outside sentinel" ]
+  run jq -e '[.operations[] | select(.op == "preserve-link")] | map(.status) == ["rolled-back"]' "$pdir/.migration-journal.json"
+  [ "$status" -eq 0 ]
 }
 
 # 9. A failure mid-apply restores every completed move before returning. The

@@ -236,6 +236,25 @@ move_run() {
   [ -f "$MULTICLI_SCRATCH/outside" ]
 }
 
+@test "completed migration residue is removed from staging but retained in the source backup" {
+  make_v2_move_profile
+  local profile="$MOVE_SOURCE_ROOT/account-a"
+  local outside="$MULTICLI_SCRATCH/outside-skill"
+  mkdir -p "$profile/rules" "$outside"
+  printf 'external sentinel\n' > "$outside/SKILL.md"
+  ln -s "$outside" "$profile/rules/custom"
+  printf '%s\n' '{"status":"completed","operations":[{"op":"skip-link","rel":"rules/custom","status":"skipped"}]}' > "$profile/.migration-journal.json"
+
+  run move_run
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "ok|destination_active|v2" ]
+  [ ! -e "$MOVE_DESTINATION_ROOT/account-a/rules/custom" ]
+  [ -L "$MOVE_SOURCE_ROOT/.inactive/account-a.fixture-op/rules/custom" ]
+  [ "$(readlink "$MOVE_SOURCE_ROOT/.inactive/account-a.fixture-op/rules/custom")" = "$outside" ]
+  [ "$(cat "$outside/SKILL.md" | tr -d '\r')" = "external sentinel" ]
+}
+
 @test "an active process blocks the move before staging" {
   make_v2_move_profile
 

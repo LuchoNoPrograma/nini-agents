@@ -253,8 +253,12 @@ make_legacy_profile() {
   [ -f "$MULTICLI_SCRATCH/remote/codex/account-v2/.migration-journal.json" ]
   [ -f "$MULTICLI_SCRATCH/remote/codex/account-v2/.shared" ]
   [ -f "$MULTICLI_SCRATCH/remote/codex/account-v2/sessions/session.jsonl" ]
-  [ -L "$MULTICLI_SCRATCH/remote/codex/account-v2/config.toml" ]
-  [ "$(readlink "$MULTICLI_SCRATCH/remote/codex/account-v2/config.toml")" = "$shared_root/config.toml" ]
+  [ ! -e "$MULTICLI_SCRATCH/remote/codex/account-v2/config.toml" ]
+  local backup
+  for backup in "$MULTICLI_SCRATCH/local/codex/.inactive"/*; do break; done
+  [ -L "$backup/config.toml" ]
+  [ "$(readlink "$backup/config.toml")" = "$shared_root/config.toml" ]
+  [ "$(cat "$shared_root/config.toml" | tr -d '\r')" = "shared config" ]
 }
 
 @test "migrated account-overlay state still rejects an external link" {
@@ -272,6 +276,28 @@ make_legacy_profile() {
   [[ "$output" == *"unsafe_link"* ]]
   [ -d "$profile" ]
   [ ! -e "$MULTICLI_SCRATCH/remote/codex/.staging" ]
+}
+
+@test "completed migration journal permits pruning its exact nested external link" {
+  local profile="$MULTICLI_SCRATCH/local/codex/account-v2"
+  local outside="$MULTICLI_SCRATCH/outside-skill"
+  run env MULTICLI_HOME="$MULTICLI_SCRATCH/local" "$MULTICLI_BIN" new codex/account-v2 --no-seed
+  [ "$status" -eq 0 ]
+  printf '{"tokens":{"access_token":"fixture-v2"}}\n' > "$profile/auth/auth.json"
+  mkdir -p "$profile/skills" "$outside"
+  printf 'external sentinel\n' > "$outside/SKILL.md"
+  ln -s "$outside" "$profile/skills/custom"
+  printf '%s\n' '{"status":"completed","operations":[{"op":"skip-link","rel":"skills/custom","status":"skipped"}]}' > "$profile/.migration-journal.json"
+
+  run multicli move codex/account-v2 ubuntu
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [ ! -e "$MULTICLI_SCRATCH/remote/codex/account-v2/skills/custom" ]
+  [ "$(cat "$outside/SKILL.md" | tr -d '\r')" = "external sentinel" ]
+  local backup
+  for backup in "$MULTICLI_SCRATCH/local/codex/.inactive"/*; do break; done
+  [ -L "$backup/skills/custom" ]
+  [ "$(readlink "$backup/skills/custom")" = "$outside" ]
 }
 
 @test "duplicate active owners fail closed before staging" {

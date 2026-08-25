@@ -721,8 +721,9 @@ move_relative_matches_shared_credential_backup() {
 
 # A completed legacy migration may leave links for already-shared normal state
 # inside an account-overlay profile. Accept only links whose literal target is
-# exactly the adapter-owned native path; arbitrary or nested external links
-# remain unsafe. The literal comparison avoids following the linked content.
+# exactly the adapter-owned native path. Other external links remain unsafe
+# unless the completed legacy migration journal proves their exact path. The
+# literal comparison avoids following the linked content.
 move_expected_shared_state_link() {
   local manifest="$1" rel="$2" entry="$3" shared_root target
   [ "$MOVE_PROFILE_FORMAT" = v2 ] && [ "$MOVE_PROFILE_MODE" = accountOverlay ] || return 1
@@ -732,6 +733,47 @@ move_expected_shared_state_link() {
   shared_root="${shared_root//\\//}"
   target="$(readlink "$entry" 2>/dev/null)" || return 1
   [ "$target" = "${shared_root%/}/$rel" ]
+}
+
+# A migration completed by an older release may have deliberately left a
+# nested normal-state link in the profile. The journal is the proof that this
+# entry is migration residue rather than newly injected profile content. The
+# link target is never read or followed: movement removes the link itself from
+# staging while the source backup retains the original object for rollback.
+move_journaled_shared_state_link() {
+  local manifest="$1" profile="$2" rel="$3" journal
+  [ "$MOVE_PROFILE_FORMAT" = v2 ] && [ "$MOVE_PROFILE_MODE" = accountOverlay ] || return 1
+  move_relative_matches_declaration "$manifest" "$rel" '.normalState.sharedPaths' ||
+    move_relative_matches_declaration "$manifest" "$rel" '.normalState.sessionPaths' || return 1
+  journal="$profile/.migration-journal.json"
+  [ -f "$journal" ] && [ ! -L "$journal" ] || return 1
+  jq -e --arg rel "$rel" '
+    .status == "completed" and
+    any(.operations[]?;
+      (.op == "skip-link" or .op == "keep-link") and
+      .rel == $rel and .status == "skipped")
+  ' "$journal" >/dev/null 2>&1
+}
+
+move_profile_link_allowed() {
+  local manifest="$1" profile="$2" rel="$3" entry="$4"
+  move_expected_shared_state_link "$manifest" "$rel" "$entry" ||
+    move_journaled_shared_state_link "$manifest" "$profile" "$rel"
+}
+
+# Remove only already-validated normal-state links from a staged schema-v2
+# account-overlay profile. `rm` targets the link object itself and never the
+# linked content. Callers validate both before and after this projection.
+move_prune_staging_links() {
+  local manifest="$1" profile="$2" entry rel
+  while IFS= read -r -d '' entry; do
+    rel="${entry#"$profile"/}"
+    case "$rel" in .runtime|.runtime/*) continue ;; esac
+    [ -L "$entry" ] || continue
+    move_profile_link_allowed "$manifest" "$profile" "$rel" "$entry" || return 1
+    rm -f -- "$entry" || return 1
+    [ ! -e "$entry" ] && [ ! -L "$entry" ] || return 1
+  done < <(find "$profile" -mindepth 1 -print0 2>/dev/null)
 }
 
 move_relative_allowed() {
@@ -852,7 +894,7 @@ move_validate_profile() {
     fi
     move_relative_allowed "$manifest" "$rel" "$MOVE_PROFILE_FORMAT" "$MOVE_PROFILE_MODE" || return 26
     if [ -L "$entry" ]; then
-      move_expected_shared_state_link "$manifest" "$rel" "$entry" || return 25
+      move_profile_link_allowed "$manifest" "$profile" "$rel" "$entry" || return 25
     elif [ -f "$entry" ]; then
       if [ "$(file_nlink "$entry")" -gt 1 ]; then
         move_expected_runtime_hardlink "$manifest" "$profile" "$rel" "$entry" || return 27
@@ -881,12 +923,14 @@ move_validation_failure() {
 # Build a deterministic structure/size/hash inventory, excluding disposable
 # schema-v2 runtime. The inventory contains no file contents.
 move_write_inventory() {
-  local root="$1" output="$2" entry rel digest size target
+  local manifest="$1" root="$2" output="$3" entry rel digest size target
+  move_validate_profile "$manifest" "$root" || return $?
   : > "$output"
   while IFS= read -r -d '' entry; do
     rel="${entry#"$root"/}"
     case "$rel" in .runtime|.runtime/*) continue ;; esac
     if [ -L "$entry" ]; then
+      move_profile_link_allowed "$manifest" "$root" "$rel" "$entry" && continue
       target="$(readlink "$entry" 2>/dev/null)" || return 1
       printf 'l\t%s\t%s\n' "$rel" "$target" >> "$output"
     elif [ -d "$entry" ]; then
@@ -903,14 +947,14 @@ move_write_inventory() {
 }
 
 move_trees_equal() {
-  local left="$1" right="$2" left_inventory right_inventory result=1
+  local manifest="$1" left="$2" right="$3" left_inventory right_inventory result=1
   left_inventory="$(mktemp "${TMPDIR:-/tmp}/nini-move-left.XXXXXX")" || return 1
   right_inventory="$(mktemp "${TMPDIR:-/tmp}/nini-move-right.XXXXXX")" || {
     rm -f "$left_inventory"
     return 1
   }
-  if move_write_inventory "$left" "$left_inventory" &&
-     move_write_inventory "$right" "$right_inventory" &&
+  if move_write_inventory "$manifest" "$left" "$left_inventory" &&
+     move_write_inventory "$manifest" "$right" "$right_inventory" &&
      cmp -s "$left_inventory" "$right_inventory"; then
     result=0
   fi
@@ -1074,7 +1118,13 @@ move_profile_transaction() {
     move_fail transport_failed staging_preserved
     return 1
   fi
-  if ! move_trees_equal "$source" "$staging"; then
+  if ! move_validate_profile "$manifest" "$staging" ||
+     ! move_prune_staging_links "$manifest" "$staging" ||
+     ! move_validate_profile "$manifest" "$staging"; then
+    move_fail unsafe_link staging_rejected
+    return 1
+  fi
+  if ! move_trees_equal "$manifest" "$source" "$staging"; then
     move_fail integrity_mismatch staging_rejected
     return 1
   fi
@@ -1091,7 +1141,7 @@ move_profile_transaction() {
     return 1
   fi
   if ! move_validate_profile "$manifest" "$source" ||
-     ! move_trees_equal "$source" "$staging"; then
+     ! move_trees_equal "$manifest" "$source" "$staging"; then
     rmdir "$lock" 2>/dev/null || true
     move_fail integrity_mismatch staging_rejected
     return 1
@@ -1131,7 +1181,7 @@ move_profile_transaction() {
   else
     rc=$?
   fi
-  if [ "$rc" -ne 0 ] || ! move_trees_equal "$backup" "$destination"; then
+  if [ "$rc" -ne 0 ] || ! move_trees_equal "$manifest" "$backup" "$destination"; then
     move_restore_after_failure "$source" "$backup" "$destination" "$failed" destination_invalid_rolled_back
     rmdir "$lock" 2>/dev/null || true
     return 1
@@ -1152,7 +1202,7 @@ move_profile_transaction() {
 
   # Final byte/hash comparison after runtime reconstruction. Runtime is
   # excluded, so it cannot mask a changed canonical credential or metadata.
-  if ! move_trees_equal "$backup" "$destination"; then
+  if ! move_trees_equal "$manifest" "$backup" "$destination"; then
     move_restore_after_failure "$source" "$backup" "$destination" "$failed" destination_invalid_rolled_back
     rmdir "$lock" 2>/dev/null || true
     return 1

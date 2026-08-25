@@ -466,16 +466,46 @@ function Add-MigrationTypeConflictPlan {
     }
 }
 
-# Plan one shared/session entry: whole links are kept, files merge per the
-# conflict policy, clean new directories move whole, and everything else
-# falls back to per-file merging.
+# Preserve a legacy link as an opaque filesystem object outside the active
+# schema-v2 profile. The target is never opened, resolved, or copied.
+function Add-MigrationLinkedStatePlan {
+    param([string]$ProfileDir, [string]$Rel, [string]$Spec, $Ops)
+    $profileStore = Split-Path -Parent (Split-Path -Parent $ProfileDir)
+    $inactiveBase = Join-Path $profileStore '.inactive'
+    $inactiveRoot = Get-MigrationInactiveLinkRoot -ProfileDir $ProfileDir
+    $from = Join-Path $ProfileDir ($Rel -replace '/', '\')
+    $to = Join-Path $inactiveRoot ($Rel -replace '/', '\')
+    Assert-MigrationDestinationPathSafe -Root $inactiveBase -Target $inactiveRoot -Spec $Spec -Label 'inactive linked-state recovery root'
+    if (@($Ops | Where-Object { $_.Op -eq 'preserve-link' }).Count -eq 0 -and
+        (Test-MigrationObjectExists -Path $inactiveRoot)) {
+        throw "Cannot migrate ${Spec}: inactive linked-state recovery already exists. Inspect it before retrying. No changes were made."
+    }
+    Assert-MigrationDestinationPathSafe -Root $inactiveBase -Target $to -Spec $Spec -Label "inactive linked-state destination '$Rel'"
+    if (-not (Test-MigrationReparsePoint -Path $from)) {
+        throw "Cannot migrate ${Spec}: linked state '$Rel' disappeared during planning. No changes were made."
+    }
+    if (Test-MigrationObjectExists -Path $to) {
+        throw "Cannot migrate ${Spec}: inactive linked-state destination '$Rel' already exists. No changes were made."
+    }
+    $sourceVolume = Get-MigrationVolumeRoot -Path $from
+    $destinationVolume = Get-MigrationVolumeRoot -Path $to
+    if (-not $sourceVolume -or -not $destinationVolume -or
+        -not $sourceVolume.Equals($destinationVolume, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Cannot migrate ${Spec}: linked state '$Rel' cannot be preserved by same-volume rename. No changes were made."
+    }
+    [void]$Ops.Add((New-MigrationOp -Op 'preserve-link' -Rel $Rel -From $from -To $to -Note 'inactive recovery'))
+}
+
+# Plan one shared/session entry: links move opaquely to inactive recovery,
+# files merge per the conflict policy, clean new directories move whole, and
+# everything else falls back to per-file merging.
 function Add-MigrationSharedPlan {
     param([string]$ProfileDir, [string]$SharedRoot, [string]$Rel, [string]$Kind, [bool]$PreferProfile, [string]$Spec, $Declarations, $Ops)
     $from = Join-Path $ProfileDir ($Rel -replace '/', '\')
     $to = Join-Path $SharedRoot ($Rel -replace '/', '\')
     Assert-MigrationDestinationPathSafe -Root $SharedRoot -Target $to -Spec $Spec -Label "shared-state destination '$Rel'"
     if (Test-MigrationReparsePoint -Path $from) {
-        [void]$Ops.Add((New-MigrationOp -Op 'keep-link' -Rel $Rel -From $from -To $to -Note 'existing link retained'))
+        Add-MigrationLinkedStatePlan -ProfileDir $ProfileDir -Rel $Rel -Spec $Spec -Ops $Ops
         return
     }
     if (Test-Path -LiteralPath $from -PathType Leaf) {
@@ -507,7 +537,7 @@ function Add-MigrationSharedPlan {
         $sub = $item.FullName.Substring($from.Length).TrimStart('\') -replace '\\', '/'
         $childRel = "$Rel/$sub"
         if ($item.IsLink) {
-            [void]$Ops.Add((New-MigrationOp -Op 'skip-link' -Rel $childRel -From $item.FullName -To '' -Note 'left in profile'))
+            Add-MigrationLinkedStatePlan -ProfileDir $ProfileDir -Rel $childRel -Spec $Spec -Ops $Ops
             continue
         }
         if (Test-MigrationCredentialLeaf -Leaf $item.Name -Credentials $Declarations.Credentials) {
@@ -756,6 +786,14 @@ function Get-MigrationInactiveProfileStateRoot {
     return Join-Path $profileStore ".inactive\migrations\$tool\$name\profile-state"
 }
 
+function Get-MigrationInactiveLinkRoot {
+    param([string]$ProfileDir)
+    $profileStore = Split-Path -Parent (Split-Path -Parent $ProfileDir)
+    $tool = Split-Path -Leaf (Split-Path -Parent $ProfileDir)
+    $name = Split-Path -Leaf $ProfileDir
+    return Join-Path $profileStore ".inactive\migrations\$tool\$name\linked-state"
+}
+
 function Get-MigrationInactiveUnknownRoot {
     param([string]$ProfileDir)
     $profileStore = Split-Path -Parent (Split-Path -Parent $ProfileDir)
@@ -804,6 +842,7 @@ function Get-MigrationOpLine {
         'preserve-shared-credential'   { return "  preserve shared credential $($Op.Rel) in inactive recovery" }
         'preserve-runtime-state'       { return "  preserve runtime state $($Op.Rel) in inactive recovery" }
         'preserve-profile-state'       { return "  preserve profile state $($Op.Rel) in inactive recovery" }
+        'preserve-link'                { return "  preserve linked state $($Op.Rel) in inactive recovery" }
         'preserve-unknown'             { return "  preserve unknown state $($Op.Rel) in inactive recovery (--preserve-unknown)" }
         'merge-move'                  { return "  merge $($Op.Note) $($Op.Rel) -> $($Op.To)" }
         'remove-duplicate'            { return "  remove duplicate $($Op.Rel) (shared root already has identical content)" }
@@ -1007,7 +1046,7 @@ function Undo-MigrationOps {
         $slot = Get-MigrationRollbackSlot -RollbackRoot $RollbackRoot -Index $index
         try {
             switch ($op.Op) {
-                { $_ -in 'move-credential', 'merge-move', 'preserve-shared-credential', 'preserve-runtime-state', 'preserve-profile-state', 'preserve-unknown' } {
+                { $_ -in 'move-credential', 'merge-move', 'preserve-shared-credential', 'preserve-runtime-state', 'preserve-profile-state', 'preserve-link', 'preserve-unknown' } {
                     if ((Test-MigrationObjectExists -Path $op.From) -or -not (Test-MigrationObjectExists -Path $op.To)) { throw 'move rollback precondition failed' }
                     Invoke-MigrationFileMove -From $op.To -To $op.From
                 }
@@ -1076,7 +1115,7 @@ function Test-MigrationLegacyFailureState {
         if ($op.Status -ne 'failed') { continue }
         $slot = Get-MigrationRollbackSlot -RollbackRoot $RollbackRoot -Index $index
         switch ($op.Op) {
-            { $_ -in 'move-credential', 'merge-move', 'preserve-shared-credential', 'preserve-runtime-state', 'preserve-profile-state', 'preserve-unknown' } {
+            { $_ -in 'move-credential', 'merge-move', 'preserve-shared-credential', 'preserve-runtime-state', 'preserve-profile-state', 'preserve-link', 'preserve-unknown' } {
                 if (-not (Test-MigrationObjectExists -Path $op.From) -or (Test-MigrationObjectExists -Path $op.To)) { return $false }
             }
             { $_ -in 'remove-duplicate', 'remove-duplicate-credential' } {
@@ -1163,6 +1202,17 @@ function Invoke-MigrationOps {
                     Assert-MigrationDestinationPathSafe -Root $inactiveBase -Target $op.To -Spec $Context.Spec -Label "inactive profile-state destination '$($op.Rel)'"
                     if (Get-Item -LiteralPath $op.To -Force -ErrorAction SilentlyContinue) {
                         throw "inactive profile-state destination '$($op.Rel)' appeared during apply"
+                    }
+                    Invoke-MigrationFileMove -From $op.From -To $op.To
+                    $op.Status = 'done'
+                }
+                'preserve-link' {
+                    $profileStore = Split-Path -Parent (Split-Path -Parent $ProfileDir)
+                    Register-MigrationMissingParentDirs -Target $op.To -Boundary $profileStore -Context $Context
+                    $inactiveBase = Join-Path $profileStore '.inactive'
+                    Assert-MigrationDestinationPathSafe -Root $inactiveBase -Target $op.To -Spec $Context.Spec -Label "inactive linked-state destination '$($op.Rel)'"
+                    if (Get-Item -LiteralPath $op.To -Force -ErrorAction SilentlyContinue) {
+                        throw "inactive linked-state destination '$($op.Rel)' appeared during apply"
                     }
                     Invoke-MigrationFileMove -From $op.From -To $op.To
                     $op.Status = 'done'

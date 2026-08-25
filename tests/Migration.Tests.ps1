@@ -769,7 +769,7 @@ Describe 'Invoke-MultiCliMigration apply' {
         } finally { Remove-MigrationScratch $scratch }
     }
 
-    It 'leaves legacy shared links in place and skips nested links' {
+    It 'moves legacy shared links to inactive linked-state recovery' {
         $scratch = New-MigrationScratch
         try {
             $adapter = Write-MigrationAdapter -Scratch $scratch
@@ -789,20 +789,76 @@ Describe 'Invoke-MultiCliMigration apply' {
             $result = Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir
 
             $result.Migrated | Should Be $true
-            ($result.Lines -contains '  keep shared link plugins (existing link retained)') | Should Be $true
+            ($result.Lines -contains '  preserve linked state plugins in inactive recovery') | Should Be $true
             ($result.Lines | Where-Object { $_ -like '*target:*' } | Measure-Object).Count | Should Be 0
-            ($result.Lines | Where-Object { $_ -like '  skip nested link agents/linkdir*' } | Measure-Object).Count | Should Be 1
-            $pluginsItem = Get-Item -LiteralPath (Join-Path $pdir 'plugins') -Force
+            ($result.Lines -contains '  preserve linked state agents/linkdir in inactive recovery') | Should Be $true
+            (Get-Item -LiteralPath (Join-Path $pdir 'plugins') -Force -ErrorAction SilentlyContinue) | Should Be $null
+            (Get-Item -LiteralPath (Join-Path $pdir 'agents\linkdir') -Force -ErrorAction SilentlyContinue) | Should Be $null
+            $inactive = Join-Path $scratch.Profiles '.inactive\migrations\fixture\work\linked-state'
+            $pluginsItem = Get-Item -LiteralPath (Join-Path $inactive 'plugins') -Force
             (($pluginsItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) | Should Be $true
-            $linkdirItem = Get-Item -LiteralPath (Join-Path $pdir 'agents\linkdir') -Force
+            $linkdirItem = Get-Item -LiteralPath (Join-Path $inactive 'agents\linkdir') -Force
             (($linkdirItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) | Should Be $true
             (Get-RelativeTree (Join-Path $shared 'plugins')) | Should Be 'plugin.md'
             ((Get-Content -LiteralPath (Join-Path $shared 'agents\local.md') -Raw).Trim()) | Should Be 'local'
             ((Get-Content -LiteralPath (Join-Path $shared 'agents\existing.md') -Raw).Trim()) | Should Be 'existing'
             (Test-Path -LiteralPath (Join-Path $shared 'agents\linkdir')) | Should Be $false
-            $expectedProfile = Get-SortedExpected @('.migration-journal.json', '.profile.json', '.shared', 'agents', 'agents/linkdir', 'auth', 'auth/auth.json', 'auth/keys', 'auth/keys/token.json', 'plugins')
+            $expectedProfile = Get-SortedExpected @('.migration-journal.json', '.profile.json', '.shared', 'auth', 'auth/auth.json', 'auth/keys', 'auth/keys/token.json')
             (Get-RelativeTree $pdir) | Should Be $expectedProfile
+            $journal = Get-Content -LiteralPath (Join-Path $pdir '.migration-journal.json') -Raw | ConvertFrom-Json
+            @($journal.operations | Where-Object { $_.op -eq 'preserve-link' -and $_.status -eq 'done' }).Count | Should Be 2
         } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'refuses a linked-state recovery collision before writes' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $shared = Get-SharedRoot -Scratch $scratch
+            $pdir = Get-ProfileDirFor -Scratch $scratch -Name 'work'
+            $inactive = Join-Path $scratch.Profiles '.inactive\migrations\fixture\work\linked-state'
+            New-Item -ItemType Directory -Force -Path $pdir, (Join-Path $shared 'plugins'), $inactive | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'profile-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $inactive 'sentinel.txt') -Value 'recovery sentinel' -Encoding ASCII
+            New-Item -ItemType Junction -Path (Join-Path $pdir 'plugins') -Target (Join-Path $shared 'plugins') | Out-Null
+
+            $message = Get-ThrownMessage { Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -DryRun }
+
+            $message | Should Match 'inactive linked-state recovery already exists'
+            ((Get-Content -LiteralPath (Join-Path $inactive 'sentinel.txt') -Raw).Trim()) | Should Be 'recovery sentinel'
+            (Test-Path -LiteralPath (Join-Path $pdir 'auth.json')) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $pdir '.profile.json')) | Should Be $false
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
+    It 'restores a preserved linked-state object when a later operation fails' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $shared = Get-SharedRoot -Scratch $scratch
+            $pdir = Get-ProfileDirFor -Scratch $scratch -Name 'work'
+            $outside = Join-Path $scratch.Root 'outside-link'
+            $inactive = Join-Path $scratch.Profiles '.inactive\migrations\fixture\work\linked-state'
+            New-Item -ItemType Directory -Force -Path (Join-Path $pdir 'agents'), $outside, $shared | Out-Null
+            Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'profile-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'config.toml') -Value 'state' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $outside 'note.md') -Value 'outside sentinel' -Encoding ASCII
+            New-Item -ItemType Junction -Path (Join-Path $pdir 'agents\linkdir') -Target $outside | Out-Null
+            Protect-DirectoryFromWrite -Path $shared
+
+            $message = Get-ThrownMessage { Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir }
+
+            $message | Should Match 'Automatic rollback restored the legacy layout'
+            $restored = Get-Item -LiteralPath (Join-Path $pdir 'agents\linkdir') -Force
+            (($restored.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) | Should Be $true
+            (Test-Path -LiteralPath $inactive) | Should Be $false
+            ((Get-Content -LiteralPath (Join-Path $outside 'note.md') -Raw).Trim()) | Should Be 'outside sentinel'
+            $journal = Get-Content -LiteralPath (Join-Path $pdir '.migration-journal.json') -Raw | ConvertFrom-Json
+            @($journal.operations | Where-Object { $_.op -eq 'preserve-link' -and $_.status -eq 'rolled-back' }).Count | Should Be 1
+        } finally {
+            if (Test-Path -LiteralPath $shared) { Unprotect-Directory -Path $shared }
+            Remove-MigrationScratch $scratch
+        }
     }
 
     It 'rolls a failed apply back to legacy and a re-run starts cleanly' {

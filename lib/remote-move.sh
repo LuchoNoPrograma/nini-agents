@@ -320,13 +320,18 @@ remote_move_endpoint() {
       (umask 077; mkdir "$staging")
       ;;
     validate-staging)
-      if move_validate_profile "$manifest" "$staging"; then printf '%s|%s\n' "$MOVE_PROFILE_FORMAT" "$MOVE_PROFILE_MODE"; else return $?; fi
+      move_validate_profile "$manifest" "$staging" || return $?
+      format="$MOVE_PROFILE_FORMAT"; mode="$MOVE_PROFILE_MODE"
+      move_prune_staging_links "$manifest" "$staging" || return 25
+      move_validate_profile "$manifest" "$staging" || return $?
+      [ "$MOVE_PROFILE_FORMAT" = "$format" ] && [ "$MOVE_PROFILE_MODE" = "$mode" ] || return 22
+      printf '%s|%s\n' "$MOVE_PROFILE_FORMAT" "$MOVE_PROFILE_MODE"
       ;;
     inventory)
       case "$detail" in source) path="$target" ;; staging) path="$staging" ;; backup) path="$backup" ;; destination) path="$target" ;; *) return 64 ;; esac
       move_validate_profile "$manifest" "$path" || return $?
       tmp="$(mktemp "${TMPDIR:-/tmp}/nini-remote-inventory.XXXXXX")" || return 1
-      if move_write_inventory "$path" "$tmp"; then cat "$tmp"; rc=0; else rc=1; fi
+      if move_write_inventory "$manifest" "$path" "$tmp"; then cat "$tmp"; rc=0; else rc=1; fi
       rm -f "$tmp"
       return "$rc"
       ;;

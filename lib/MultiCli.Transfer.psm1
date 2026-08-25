@@ -659,6 +659,23 @@ function Test-MoveRelativeDeclaration {
     return $false
 }
 
+function Test-MoveSharedCredentialDeclaration {
+    param($Adapter, [string]$RelativePath)
+    $state = Get-TransferProperty -Object $Adapter -Name 'sharedCredentialState'
+    foreach ($entry in @(Get-TransferProperty -Object $state -Name 'entries')) {
+        $declared = [string](Get-TransferProperty -Object $entry -Name 'path')
+        if ($declared -and (Test-MoveRelativeDeclaration -Values @($declared.Replace('\', '/')) -RelativePath $RelativePath)) {
+            return $true
+        }
+        if ($declared -and (Get-TransferProperty -Object $state -Name 'legacyBackupPattern') -eq 'dotSuffix' -and
+            $RelativePath.StartsWith("$($declared.Replace('\', '/')).", [StringComparison]::OrdinalIgnoreCase) -and
+            $RelativePath.Length -gt ($declared.Length + 1)) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Test-MoveRelativeAllowed {
     param($Adapter, [string]$RelativePath, [string]$Format, [string]$Mode)
     if ($RelativePath.Contains(':') -or $RelativePath.Contains('\') -or $RelativePath.Contains("`n") -or $RelativePath.Contains("`r")) {
@@ -667,7 +684,7 @@ function Test-MoveRelativeAllowed {
     $account = Get-TransferProperty -Object $Adapter -Name 'account'
     $normalState = Get-TransferProperty -Object $Adapter -Name 'normalState'
     if ($Format -eq 'v2') {
-        if ($RelativePath -eq '.profile.json' -or $RelativePath -eq '.cli') { return $true }
+        if ($RelativePath -in @('.profile.json', '.cli', '.migration-journal.json', '.shared')) { return $true }
         if ($RelativePath -eq 'auth') { return $true }
         if ($RelativePath.StartsWith('auth/')) {
             return Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $account -Name 'credentialFiles') -RelativePath $RelativePath.Substring(5)
@@ -685,14 +702,25 @@ function Test-MoveRelativeAllowed {
         }
         if (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'sharedPaths') -RelativePath $declaredPath) { return $true }
         if (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'sessionPaths') -RelativePath $declaredPath) { return $true }
-        return Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'unsafePaths') -RelativePath $declaredPath
+        if (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'runtimePaths') -RelativePath $declaredPath) { return $true }
+        if (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'unsafePaths') -RelativePath $declaredPath) { return $true }
+        return Test-MoveSharedCredentialDeclaration -Adapter $Adapter -RelativePath $declaredPath
+    }
+    if ($Mode -eq 'accountOverlay') {
+        if (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'sharedPaths') -RelativePath $RelativePath) { return $true }
+        if (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'sessionPaths') -RelativePath $RelativePath) { return $true }
+        if (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'runtimePaths') -RelativePath $RelativePath) { return $true }
+        if (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'unsafePaths') -RelativePath $RelativePath) { return $true }
+        return Test-MoveSharedCredentialDeclaration -Adapter $Adapter -RelativePath $RelativePath
     }
 
     if ($RelativePath -eq '.cli') { return $true }
     if (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $account -Name 'credentialFiles') -RelativePath $RelativePath) { return $true }
     if (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'sharedPaths') -RelativePath $RelativePath) { return $true }
     if (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'sessionPaths') -RelativePath $RelativePath) { return $true }
-    return Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'unsafePaths') -RelativePath $RelativePath
+    if (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'runtimePaths') -RelativePath $RelativePath) { return $true }
+    if (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'unsafePaths') -RelativePath $RelativePath) { return $true }
+    return Test-MoveSharedCredentialDeclaration -Adapter $Adapter -RelativePath $RelativePath
 }
 
 function Test-MoveJsonObject {
@@ -721,6 +749,92 @@ function Test-MoveExpectedRuntimeHardLink {
     $targets = @(@(Get-TransferProperty -Object $Item -Name 'Target') | Where-Object { $_ })
     if ($targets.Count -ne 1) { return $false }
     return [System.IO.Path]::GetFullPath([string]$targets[0]) -eq $expectedRuntime
+}
+
+# Accept an account-overlay normal-state link only when its literal target is
+# exactly the adapter-owned Windows path. No linked content is opened.
+function Test-MoveExpectedSharedStateLink {
+    param($Adapter, [string]$RelativePath, $Item, [string]$Format, [string]$Mode)
+    if ($Format -ne 'v2' -or $Mode -ne 'accountOverlay') { return $false }
+    $normalState = Get-TransferProperty -Object $Adapter -Name 'normalState'
+    if (-not (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'sharedPaths') -RelativePath $RelativePath) -and
+        -not (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'sessionPaths') -RelativePath $RelativePath)) {
+        return $false
+    }
+    $targets = @(@(Get-TransferProperty -Object $Item -Name 'Target') | Where-Object { $_ })
+    if ($targets.Count -ne 1 -or -not [System.IO.Path]::IsPathRooted([string]$targets[0])) { return $false }
+    try {
+        $expected = [System.IO.Path]::GetFullPath((Join-Path (Get-TransferSharedRoot -Adapter $Adapter) ($RelativePath -replace '/', '\')))
+        $actual = [System.IO.Path]::GetFullPath([string]$targets[0])
+        return $actual.Equals($expected, [StringComparison]::OrdinalIgnoreCase)
+    } catch { return $false }
+}
+
+# Older completed migrations recorded links they deliberately left behind.
+# The completed journal and exact relative path prove that narrow legacy case;
+# the target is intentionally not inspected.
+function Test-MoveJournaledSharedStateLink {
+    param($Adapter, [string]$ProfilePath, [string]$RelativePath, [string]$Format, [string]$Mode)
+    if ($Format -ne 'v2' -or $Mode -ne 'accountOverlay') { return $false }
+    $normalState = Get-TransferProperty -Object $Adapter -Name 'normalState'
+    if (-not (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'sharedPaths') -RelativePath $RelativePath) -and
+        -not (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'sessionPaths') -RelativePath $RelativePath)) {
+        return $false
+    }
+    $journalPath = Join-Path $ProfilePath '.migration-journal.json'
+    $journalItem = Get-Item -LiteralPath $journalPath -Force -ErrorAction SilentlyContinue
+    if (-not $journalItem -or $journalItem.PSIsContainer -or
+        ($journalItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return $false }
+    try { $journal = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json }
+    catch { return $false }
+    $operations = Get-TransferProperty -Object $journal -Name 'operations'
+    if ((Get-TransferProperty -Object $journal -Name 'status') -ne 'completed' -or -not ($operations -is [System.Array])) { return $false }
+    foreach ($operation in @($operations)) {
+        if ((Get-TransferProperty -Object $operation -Name 'op') -in @('skip-link', 'keep-link') -and
+            (Get-TransferProperty -Object $operation -Name 'rel') -eq $RelativePath -and
+            (Get-TransferProperty -Object $operation -Name 'status') -eq 'skipped') {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Test-MoveProfileLinkAllowed {
+    param($Adapter, [string]$ProfilePath, [string]$RelativePath, $Item, [string]$Format, [string]$Mode)
+    return ((Test-MoveExpectedSharedStateLink -Adapter $Adapter -RelativePath $RelativePath -Item $Item -Format $Format -Mode $Mode) -or
+        (Test-MoveJournaledSharedStateLink -Adapter $Adapter -ProfilePath $ProfilePath -RelativePath $RelativePath -Format $Format -Mode $Mode))
+}
+
+# Remove only links that the complete profile validation already accepted.
+# File.Delete/Directory.Delete delete the reparse object and do not recurse
+# through its target.
+function Remove-MoveStagingLinks {
+    param($Adapter, [string]$ProfilePath, [string]$Format, [string]$Mode)
+    $stack = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
+    $stack.Push((Get-Item -LiteralPath $ProfilePath -Force))
+    while ($stack.Count -gt 0) {
+        $directory = $stack.Pop()
+        foreach ($item in (Get-ChildItem -LiteralPath $directory.FullName -Force)) {
+            $relative = $item.FullName.Substring($ProfilePath.Length).TrimStart('\', '/').Replace('\', '/')
+            if ($relative -eq '.runtime') { continue }
+            if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                if (-not (Test-MoveProfileLinkAllowed -Adapter $Adapter -ProfilePath $ProfilePath -RelativePath $relative -Item $item -Format $Format -Mode $Mode)) {
+                    return $false
+                }
+                try {
+                    if ($item.PSIsContainer -or (Get-TransferProperty -Object $item -Name 'LinkType') -eq 'Junction') {
+                        [System.IO.Directory]::Delete($item.FullName)
+                    } else {
+                        [System.IO.File]::Delete($item.FullName)
+                    }
+                } catch { return $false }
+                if (Get-Item -LiteralPath $item.FullName -Force -ErrorAction SilentlyContinue) { return $false }
+                continue
+            }
+            if ($item.PSIsContainer) { $stack.Push($item) }
+        }
+    }
+    return $true
 }
 
 # Return structural validation without ever returning credential or metadata
@@ -771,6 +885,26 @@ function Test-MoveProfile {
                 return [pscustomobject]@{ Valid = $false; Code = 'invalid_auth_json'; Format = $format; Mode = $mode }
             }
         }
+        $journalPath = Join-Path $ProfilePath '.migration-journal.json'
+        $journalItem = Get-Item -LiteralPath $journalPath -Force -ErrorAction SilentlyContinue
+        if ($journalItem) {
+            if ($journalItem.PSIsContainer -or ($journalItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+                return [pscustomobject]@{ Valid = $false; Code = 'invalid_metadata'; Format = $format; Mode = $mode }
+            }
+            try { $journal = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json }
+            catch { return [pscustomobject]@{ Valid = $false; Code = 'invalid_metadata'; Format = $format; Mode = $mode } }
+            $operations = Get-TransferProperty -Object $journal -Name 'operations'
+            if ((Get-TransferProperty -Object $journal -Name 'status') -ne 'completed' -or
+                -not ($operations -is [System.Array])) {
+                return [pscustomobject]@{ Valid = $false; Code = 'invalid_metadata'; Format = $format; Mode = $mode }
+            }
+        }
+        $markerPath = Join-Path $ProfilePath '.shared'
+        $markerItem = Get-Item -LiteralPath $markerPath -Force -ErrorAction SilentlyContinue
+        if ($markerItem -and ($markerItem.PSIsContainer -or
+            ($markerItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or $markerItem.Length -ne 0)) {
+            return [pscustomobject]@{ Valid = $false; Code = 'unknown_content'; Format = $format; Mode = $mode }
+        }
     } else {
         $format = 'legacy'
         $mode = 'legacy'
@@ -801,7 +935,10 @@ function Test-MoveProfile {
                 return [pscustomobject]@{ Valid = $false; Code = 'unknown_content'; Format = $format; Mode = $mode }
             }
             if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
-                return [pscustomobject]@{ Valid = $false; Code = 'unsafe_link'; Format = $format; Mode = $mode }
+                if (-not (Test-MoveProfileLinkAllowed -Adapter $Adapter -ProfilePath $ProfilePath -RelativePath $relative -Item $item -Format $format -Mode $mode)) {
+                    return [pscustomobject]@{ Valid = $false; Code = 'unsafe_link'; Format = $format; Mode = $mode }
+                }
+                continue
             }
             $linkType = Get-TransferProperty -Object $item -Name 'LinkType'
             if (-not $item.PSIsContainer -and $linkType -eq 'HardLink' -and
@@ -823,7 +960,9 @@ function Get-MoveFileHash {
 }
 
 function Get-MoveInventory {
-    param([string]$Root)
+    param($Adapter, [string]$Root)
+    $validation = Test-MoveProfile -Adapter $Adapter -ProfilePath $Root
+    if (-not $validation.Valid) { throw "profile inventory rejected: $($validation.Code)" }
     $entries = New-Object 'System.Collections.Generic.List[string]'
     $stack = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
     $stack.Push((Get-Item -LiteralPath $Root -Force))
@@ -832,6 +971,12 @@ function Get-MoveInventory {
         foreach ($item in (Get-ChildItem -LiteralPath $directory.FullName -Force)) {
             $relative = $item.FullName.Substring($Root.Length).TrimStart('\', '/').Replace('\', '/')
             if ($relative -eq '.runtime') { continue }
+            if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                if (Test-MoveProfileLinkAllowed -Adapter $Adapter -ProfilePath $Root -RelativePath $relative -Item $item -Format $validation.Format -Mode $validation.Mode) {
+                    continue
+                }
+                throw "unsafe link in profile inventory: $relative"
+            }
             if ($item.PSIsContainer) {
                 $entries.Add("d`t$relative")
                 $stack.Push($item)
@@ -844,10 +989,10 @@ function Get-MoveInventory {
 }
 
 function Test-MoveTreesEqual {
-    param([string]$Left, [string]$Right)
+    param($Adapter, [string]$Left, [string]$Right)
     try {
-        $leftInventory = @(Get-MoveInventory -Root $Left)
-        $rightInventory = @(Get-MoveInventory -Root $Right)
+        $leftInventory = @(Get-MoveInventory -Adapter $Adapter -Root $Left)
+        $rightInventory = @(Get-MoveInventory -Adapter $Adapter -Root $Right)
         return ($leftInventory -join "`n") -ceq ($rightInventory -join "`n")
     } catch {
         return $false
@@ -859,7 +1004,9 @@ function Copy-MoveCandidateLocal {
     foreach ($item in (Get-ChildItem -LiteralPath $Source -Force)) {
         if ($item.Name -eq '.runtime') { continue }
         $destination = Join-Path $Staging $item.Name
-        if ($item.PSIsContainer) {
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            Copy-MoveLinkObject -Item $item -Destination $destination
+        } elseif ($item.PSIsContainer) {
             New-Item -ItemType Directory -Force -Path $destination | Out-Null
             Copy-MoveTree -Source $item.FullName -Destination $destination
         } else {
@@ -872,13 +1019,25 @@ function Copy-MoveTree {
     param([string]$Source, [string]$Destination)
     foreach ($item in (Get-ChildItem -LiteralPath $Source -Force)) {
         $target = Join-Path $Destination $item.Name
-        if ($item.PSIsContainer) {
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            Copy-MoveLinkObject -Item $item -Destination $target
+        } elseif ($item.PSIsContainer) {
             New-Item -ItemType Directory -Force -Path $target | Out-Null
             Copy-MoveTree -Source $item.FullName -Destination $target
         } else {
             Copy-Item -LiteralPath $item.FullName -Destination $target -Force
         }
     }
+}
+
+function Copy-MoveLinkObject {
+    param($Item, [string]$Destination)
+    $linkType = Get-TransferProperty -Object $Item -Name 'LinkType'
+    $targets = @(@(Get-TransferProperty -Object $Item -Name 'Target') | Where-Object { $_ })
+    if ($targets.Count -ne 1 -or $linkType -notin @('Junction', 'SymbolicLink')) {
+        throw 'transport cannot preserve link object safely'
+    }
+    New-Item -ItemType $linkType -Path $Destination -Target ([string]$targets[0]) -ErrorAction Stop | Out-Null
 }
 
 function Invoke-MoveProbe {
@@ -1030,7 +1189,18 @@ function Invoke-MultiCliProfileMove {
     } catch { return New-MoveResult -Succeeded $false -Code 'staging_create_failed' -State 'source_active' -Format $format }
     try { & $TransportCopy $source $staging | Out-Null }
     catch { return New-MoveResult -Succeeded $false -Code 'transport_failed' -State 'staging_preserved' -Format $format }
-    if (-not (Test-MoveTreesEqual -Left $source -Right $staging)) {
+    $stagingValidation = Test-MoveProfile -Adapter $Adapter -ProfilePath $staging
+    if (-not $stagingValidation.Valid) {
+        return New-MoveResult -Succeeded $false -Code $stagingValidation.Code -State 'staging_rejected' -Format $format
+    }
+    if (-not (Remove-MoveStagingLinks -Adapter $Adapter -ProfilePath $staging -Format $stagingValidation.Format -Mode $stagingValidation.Mode)) {
+        return New-MoveResult -Succeeded $false -Code 'unsafe_link' -State 'staging_rejected' -Format $format
+    }
+    $projectedValidation = Test-MoveProfile -Adapter $Adapter -ProfilePath $staging
+    if (-not $projectedValidation.Valid) {
+        return New-MoveResult -Succeeded $false -Code $projectedValidation.Code -State 'staging_rejected' -Format $format
+    }
+    if (-not (Test-MoveTreesEqual -Adapter $Adapter -Left $source -Right $staging)) {
         return New-MoveResult -Succeeded $false -Code 'integrity_mismatch' -State 'staging_rejected' -Format $format
     }
 
@@ -1041,7 +1211,7 @@ function Invoke-MultiCliProfileMove {
         return New-MoveResult -Succeeded $false -Code 'destination_appeared' -State 'staging_preserved' -Format $format
     }
     $lockedValidation = Test-MoveProfile -Adapter $Adapter -ProfilePath $source
-    if (-not $lockedValidation.Valid -or -not (Test-MoveTreesEqual -Left $source -Right $staging)) {
+    if (-not $lockedValidation.Valid -or -not (Test-MoveTreesEqual -Adapter $Adapter -Left $source -Right $staging)) {
         Remove-MoveTransactionLock -Path $lock | Out-Null
         return New-MoveResult -Succeeded $false -Code 'integrity_mismatch' -State 'staging_rejected' -Format $format
     }
@@ -1073,7 +1243,7 @@ function Invoke-MultiCliProfileMove {
     }
 
     $destinationValidation = Test-MoveProfile -Adapter $Adapter -ProfilePath $destination
-    if (-not $destinationValidation.Valid -or -not (Test-MoveTreesEqual -Left $backup -Right $destination)) {
+    if (-not $destinationValidation.Valid -or -not (Test-MoveTreesEqual -Adapter $Adapter -Left $backup -Right $destination)) {
         $result = Restore-MoveSource -Source $source -Backup $backup -Destination $destination -Failed $failed -Code 'destination_invalid_rolled_back' -Format $format -Quarantine $Quarantine
         Remove-MoveTransactionLock -Path $lock | Out-Null
         return $result
@@ -1090,7 +1260,7 @@ function Invoke-MultiCliProfileMove {
             return $result
         }
     }
-    if (-not (Test-MoveTreesEqual -Left $backup -Right $destination)) {
+    if (-not (Test-MoveTreesEqual -Adapter $Adapter -Left $backup -Right $destination)) {
         $result = Restore-MoveSource -Source $source -Backup $backup -Destination $destination -Failed $failed -Code 'destination_invalid_rolled_back' -Format $format -Quarantine $Quarantine
         Remove-MoveTransactionLock -Path $lock | Out-Null
         return $result

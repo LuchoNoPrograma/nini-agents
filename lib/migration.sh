@@ -462,6 +462,7 @@ migration_plan_ops() {
   local entry class inactive_root="" runtime_inactive_root="" profile_state_inactive_root="" unknown_inactive_root="" store_root
   local has_shared_credentials=false has_runtime_state=false has_profile_state=false has_unknown_state=false
   MIGRATION_OPS=()
+  MIGRATION_LINK_ROOT_CHECKED=false
   # Credentials first (profile-local moves), then state merges, then metadata.
   for entry in "${MIGRATION_ENTRIES[@]+"${MIGRATION_ENTRIES[@]}"}"; do
     class="${entry%%	*}"
@@ -565,6 +566,14 @@ migration_inactive_profile_state_root() {
   printf '%s/.inactive/migrations/%s/%s/profile-state\n' "$store_root" "$tool" "$name"
 }
 
+migration_inactive_link_root() {
+  local pdir="$1" store_root tool name
+  store_root="$(dirname "$(dirname "$pdir")")"
+  tool="$(basename "$(dirname "$pdir")")"
+  name="$(basename "$pdir")"
+  printf '%s/.inactive/migrations/%s/%s/linked-state\n' "$store_root" "$tool" "$name"
+}
+
 migration_inactive_unknown_root() {
   local pdir="$1" store_root tool name
   store_root="$(dirname "$(dirname "$pdir")")"
@@ -624,6 +633,31 @@ migration_plan_profile_state() {
   [ -n "$source_device" ] && [ -n "$destination_device" ] && [ "$source_device" = "$destination_device" ] || \
     abort "Cannot migrate $spec: profile state '$rel' cannot be preserved by same-volume rename. No changes were made."
   migration_add_op preserve-profile-state "$rel" "$from" "$to" "inactive recovery"
+}
+
+# Legacy links are preserved as opaque filesystem objects outside the active
+# schema-v2 profile. Their targets are never opened, resolved, or copied.
+migration_plan_link_state() {
+  local pdir="$1" rel="$2" spec="$3"
+  local from="$pdir/$rel" inactive_root to store_root parent source_device destination_device
+  store_root="$(dirname "$(dirname "$pdir")")"
+  inactive_root="$(migration_inactive_link_root "$pdir")"
+  to="$inactive_root/$rel"
+  migration_assert_destination_path_safe "$store_root/.inactive" "$inactive_root" "$spec" "inactive linked-state recovery root"
+  if [ "${MIGRATION_LINK_ROOT_CHECKED:-false}" = false ]; then
+    [ ! -e "$inactive_root" ] && [ ! -L "$inactive_root" ] || \
+      abort "Cannot migrate $spec: inactive linked-state recovery already exists. Inspect it before retrying. No changes were made."
+    MIGRATION_LINK_ROOT_CHECKED=true
+  fi
+  migration_assert_destination_path_safe "$store_root/.inactive" "$to" "$spec" "inactive linked-state destination '$rel'"
+  [ -L "$from" ] || abort "Cannot migrate $spec: linked state '$rel' disappeared during planning. No changes were made."
+  [ ! -e "$to" ] && [ ! -L "$to" ] || abort "Cannot migrate $spec: inactive linked-state destination '$rel' already exists. No changes were made."
+  parent="$(migration_existing_destination_parent "$to")"
+  source_device="$(migration_file_device "$from" 2>/dev/null || true)"
+  destination_device="$(migration_file_device "$parent" 2>/dev/null || true)"
+  [ -n "$source_device" ] && [ -n "$destination_device" ] && [ "$source_device" = "$destination_device" ] || \
+    abort "Cannot migrate $spec: linked state '$rel' cannot be preserved by same-volume rename. No changes were made."
+  migration_add_op preserve-link "$rel" "$from" "$to" "inactive recovery"
 }
 
 # Unknown legacy state is accepted only after the operator explicitly asks to
@@ -691,15 +725,15 @@ migration_dir_has_blocked_entries() {
   return 1
 }
 
-# Plan one shared/session entry: whole links are kept, files merge per the
-# conflict policy, clean new directories move whole, and everything else
-# falls back to per-file merging.
+# Plan one shared/session entry: links move opaquely to inactive recovery,
+# files merge per the conflict policy, clean new directories move whole, and
+# everything else falls back to per-file merging.
 migration_plan_shared() {
   local pdir="$1" shared_root="$2" rel="$3" kind="$4" prefer_profile="$5" spec="$6"
   local from="$pdir/$rel" to="$shared_root/$rel"
   migration_assert_destination_path_safe "$shared_root" "$to" "$spec" "shared-state destination '$rel'"
   if [ -L "$from" ]; then
-    migration_add_op keep-link "$rel" "$from" "$to" "existing link retained"
+    migration_plan_link_state "$pdir" "$rel" "$spec"
     return
   fi
   if [ -f "$from" ]; then
@@ -722,7 +756,7 @@ migration_plan_shared() {
     [ -z "$f" ] && continue
     sub="${f#"$from"/}"
     if [ -L "$f" ]; then
-      migration_add_op skip-link "$rel/$sub" "$f" "" "left in profile"
+      migration_plan_link_state "$pdir" "$rel/$sub" "$spec"
       continue
     fi
     [ -f "$f" ] || continue
@@ -847,6 +881,7 @@ migration_op_line() {
     preserve-shared-credential)   printf '  preserve shared credential %s in inactive recovery\n' "$rel" ;;
     preserve-runtime-state)       printf '  preserve runtime state %s in inactive recovery\n' "$rel" ;;
     preserve-profile-state)       printf '  preserve profile state %s in inactive recovery\n' "$rel" ;;
+    preserve-link)                printf '  preserve linked state %s in inactive recovery\n' "$rel" ;;
     preserve-unknown)             printf '  preserve unknown state %s in inactive recovery (--preserve-unknown)\n' "$rel" ;;
     merge-move)                   printf '  merge %s %s -> %s\n' "$note" "$rel" "$to" ;;
     remove-duplicate)             printf '  remove duplicate %s (shared root already has identical content)\n' "$rel" ;;
@@ -1023,7 +1058,7 @@ migration_rollback_ops() {
     case "$MIG_OP" in
       keep-metadata|keep-link|skip-conflict|skip-link|skip-credential-lookalike)
         ;;
-      move-credential|merge-move|preserve-shared-credential|preserve-runtime-state|preserve-profile-state|preserve-unknown)
+      move-credential|merge-move|preserve-shared-credential|preserve-runtime-state|preserve-profile-state|preserve-link|preserve-unknown)
         if [ ! -e "$MIG_FROM" ] && [ ! -L "$MIG_FROM" ] && { [ -e "$MIG_TO" ] || [ -L "$MIG_TO" ]; }; then
           migration_do_move "$MIG_TO" "$MIG_FROM" || op_failed=true
         else
@@ -1101,7 +1136,7 @@ migration_failure_state_is_legacy() {
     [ "$MIG_STATUS" = failed ] || continue
     slot="$(migration_rollback_slot "$rollback_root" "$i")"
     case "$MIG_OP" in
-      move-credential|merge-move|preserve-shared-credential|preserve-runtime-state|preserve-profile-state|preserve-unknown)
+      move-credential|merge-move|preserve-shared-credential|preserve-runtime-state|preserve-profile-state|preserve-link|preserve-unknown)
         { [ -e "$MIG_FROM" ] || [ -L "$MIG_FROM" ]; } && [ ! -e "$MIG_TO" ] && [ ! -L "$MIG_TO" ] || return 1
         ;;
       remove-duplicate|remove-duplicate-credential)
@@ -1217,6 +1252,12 @@ migration_exec_ops() {
       preserve-profile-state)
         migration_record_missing_parent_dirs "$MIG_TO" "$(dirname "$(dirname "$pdir")")" || \
           migration_fail_and_rollback "$i" "inactive profile-state destination escaped profile storage" "$pdir" "$rollback_root" "$journal" "$tool" "$name" "$shared_root" "$prefer_profile"
+        err="$(migration_do_preserve_inactive "$MIG_FROM" "$MIG_TO" "$(dirname "$(dirname "$pdir")")/.inactive" 2>&1)" || rc=$?
+        if [ "${rc:-0}" -eq 0 ]; then migration_set_op_status "$i" done; else migration_fail_and_rollback "$i" "$err" "$pdir" "$rollback_root" "$journal" "$tool" "$name" "$shared_root" "$prefer_profile"; fi
+        ;;
+      preserve-link)
+        migration_record_missing_parent_dirs "$MIG_TO" "$(dirname "$(dirname "$pdir")")" || \
+          migration_fail_and_rollback "$i" "inactive linked-state destination escaped profile storage" "$pdir" "$rollback_root" "$journal" "$tool" "$name" "$shared_root" "$prefer_profile"
         err="$(migration_do_preserve_inactive "$MIG_FROM" "$MIG_TO" "$(dirname "$(dirname "$pdir")")/.inactive" 2>&1)" || rc=$?
         if [ "${rc:-0}" -eq 0 ]; then migration_set_op_status "$i" done; else migration_fail_and_rollback "$i" "$err" "$pdir" "$rollback_root" "$journal" "$tool" "$name" "$shared_root" "$prefer_profile"; fi
         ;;

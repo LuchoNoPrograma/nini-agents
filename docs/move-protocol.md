@@ -65,10 +65,19 @@ runtime paths, shared credential entries, and declared dot-suffix credential
 backups. Undeclared content remains a preflight rejection.
 
 Migrated account-overlay profiles may retain a completed migration journal, an
-empty legacy shared marker, and adapter-declared normal state. A retained
-normal-state link is accepted only when its literal target is exactly the
-adapter-owned shared path; external links still fail closed. Link inventories
-compare the link target text and never hash or traverse linked content.
+empty legacy shared marker, and adapter-declared normal state. A normal-state
+link is accepted only when either its literal target is exactly the
+adapter-owned shared path or an older completed migration journal records the
+exact relative path as a skipped `keep-link`/`skip-link` operation. The latter
+is the narrow compatibility case for legacy migration residue; arbitrary
+external links still fail closed.
+
+Accepted links are copied only as link objects into reserved staging, validated
+again, and removed from staging without resolving their targets. Integrity
+inventories compare the projected profile: they omit those accepted links on
+the source/backup side and require them to be absent on the staged/destination
+side. The original link objects remain in the inactive source backup for
+rollback. No target content is read, hashed, traversed, copied, or deleted.
 
 Schema-v2 `.runtime/` is not transported and is not a credential source. The
 destination reconstructs it from the adapter after activation, then proves
@@ -84,8 +93,10 @@ the declared runtime link; unrelated hardlinks fail closed.
    destination.
 2. Require an idle result from the process probe on both sides.
 3. Reserve a unique staging directory and ask the transport to populate it.
-4. Compare source and staging structure, sizes, and SHA-256 hashes. Runtime is
-   excluded because it is reconstructible.
+4. Revalidate staging, remove only proven normal-state link residue, revalidate
+   the projected candidate, then compare source and staging structure, sizes,
+   and SHA-256 hashes. Runtime and proven link residue are excluded because
+   neither belongs in the destination profile.
 5. Acquire an atomic per-profile ownership lock.
 6. Revalidate source, destination, hashes, and process state while locked.
 7. Atomically move the source into its inactive backup path.

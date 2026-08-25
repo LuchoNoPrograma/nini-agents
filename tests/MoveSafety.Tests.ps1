@@ -435,6 +435,79 @@ Describe 'transactional profile movement' {
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
+    It 'removes completed migration residue from staging and retains it in the source backup' {
+        $scratch = New-MoveScratch
+        $previousHome = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = $scratch.Home
+            $adapter = New-MoveAdapter
+            $profile = New-V2MoveProfile -Scratch $scratch
+            $outside = Join-Path $scratch.Root 'outside-skill'
+            New-Item -ItemType Directory -Force -Path (Join-Path $profile 'rules'), $outside | Out-Null
+            'external sentinel' | Set-Content -LiteralPath (Join-Path $outside 'SKILL.md') -Encoding ASCII
+            New-Item -ItemType Junction -Path (Join-Path $profile 'rules\custom') -Target $outside | Out-Null
+            '{"status":"completed","operations":[{"op":"skip-link","rel":"rules/custom","status":"skipped"}]}' |
+                Set-Content -LiteralPath (Join-Path $profile '.migration-journal.json') -Encoding ASCII
+
+            $result = Invoke-FixtureMove -Scratch $scratch -Adapter $adapter
+
+            $result.Succeeded | Should Be $true
+            (Get-Item -LiteralPath (Join-Path $scratch.Destination 'account-a\rules\custom') -Force -ErrorAction SilentlyContinue) | Should Be $null
+            $backupLink = Get-Item -LiteralPath (Join-Path $scratch.Source '.inactive\account-a.fixture-op\rules\custom') -Force
+            (($backupLink.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) | Should Be $true
+            ((Get-Content -LiteralPath (Join-Path $outside 'SKILL.md') -Raw).Trim()) | Should Be 'external sentinel'
+        } finally {
+            $env:USERPROFILE = $previousHome
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'projects an expected shared-state link out of the destination' {
+        $scratch = New-MoveScratch
+        $previousHome = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = $scratch.Home
+            $adapter = New-MoveAdapter
+            $profile = New-V2MoveProfile -Scratch $scratch
+            $shared = Join-Path $scratch.Home '.fixture'
+            New-Item -ItemType Directory -Force -Path $shared | Out-Null
+            'shared config' | Set-Content -LiteralPath (Join-Path $shared 'config.toml') -Encoding ASCII
+            New-Item -ItemType SymbolicLink -Path (Join-Path $profile 'config.toml') -Target (Join-Path $shared 'config.toml') -ErrorAction Stop | Out-Null
+            [System.IO.File]::WriteAllBytes((Join-Path $profile '.shared'), [byte[]]@())
+            '{"status":"completed","operations":[]}' | Set-Content -LiteralPath (Join-Path $profile '.migration-journal.json') -Encoding ASCII
+
+            $result = Invoke-FixtureMove -Scratch $scratch -Adapter $adapter
+
+            $result.Succeeded | Should Be $true
+            (Get-Item -LiteralPath (Join-Path $scratch.Destination 'account-a\config.toml') -Force -ErrorAction SilentlyContinue) | Should Be $null
+            $backupLink = Get-Item -LiteralPath (Join-Path $scratch.Source '.inactive\account-a.fixture-op\config.toml') -Force
+            (($backupLink.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) | Should Be $true
+            ((Get-Content -LiteralPath (Join-Path $shared 'config.toml') -Raw).Trim()) | Should Be 'shared config'
+        } finally {
+            $env:USERPROFILE = $previousHome
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'rejects an external normal-state link without exact journal proof' {
+        $scratch = New-MoveScratch
+        try {
+            $adapter = New-MoveAdapter
+            $profile = New-V2MoveProfile -Scratch $scratch
+            $outside = Join-Path $scratch.Root 'outside-unproven'
+            New-Item -ItemType Directory -Force -Path (Join-Path $profile 'rules'), $outside | Out-Null
+            New-Item -ItemType Junction -Path (Join-Path $profile 'rules\custom') -Target $outside | Out-Null
+            '{"status":"completed","operations":[]}' | Set-Content -LiteralPath (Join-Path $profile '.migration-journal.json') -Encoding ASCII
+
+            $result = Invoke-FixtureMove -Scratch $scratch -Adapter $adapter -DryRun
+
+            $result.Succeeded | Should Be $false
+            $result.Code | Should Be 'unsafe_link'
+            (Test-Path -LiteralPath $profile) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $scratch.Destination '.staging')) | Should Be $false
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
     It 'classifies missing, unsupported, malformed, linked, and unsafe profile shapes' {
         $scratch = New-MoveScratch
         try {
@@ -499,6 +572,25 @@ Describe 'transactional profile movement' {
                 Set-Content -LiteralPath (Join-Path $unsafeRuntime '.profile.json') -Encoding ASCII
             'not-a-directory' | Set-Content -LiteralPath (Join-Path $unsafeRuntime '.runtime') -Encoding ASCII
             (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $adapter $unsafeRuntime).Code | Should Be 'unsafe_link'
+
+            $invalidJournal = Join-Path $scratch.Source 'invalid-journal'
+            New-Item -ItemType Directory -Path (Join-Path $invalidJournal 'auth') | Out-Null
+            '{"fixture":true}' | Set-Content -LiteralPath (Join-Path $invalidJournal 'auth\auth.json') -Encoding ASCII
+            '{"schemaVersion":2,"adapterId":"fixture","profileId":"fixture-profile","mode":"accountOverlay"}' |
+                Set-Content -LiteralPath (Join-Path $invalidJournal '.profile.json') -Encoding ASCII
+            '{"status":"running","operations":[]}' | Set-Content -LiteralPath (Join-Path $invalidJournal '.migration-journal.json') -Encoding ASCII
+            (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $adapter $invalidJournal).Code | Should Be 'invalid_metadata'
+            '{"status":"completed","operations":{"op":"skip-link","rel":"rules/custom","status":"skipped"}}' |
+                Set-Content -LiteralPath (Join-Path $invalidJournal '.migration-journal.json') -Encoding ASCII
+            (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $adapter $invalidJournal).Code | Should Be 'invalid_metadata'
+
+            $invalidMarker = Join-Path $scratch.Source 'invalid-shared-marker'
+            New-Item -ItemType Directory -Path (Join-Path $invalidMarker 'auth') | Out-Null
+            '{"fixture":true}' | Set-Content -LiteralPath (Join-Path $invalidMarker 'auth\auth.json') -Encoding ASCII
+            '{"schemaVersion":2,"adapterId":"fixture","profileId":"fixture-profile","mode":"accountOverlay"}' |
+                Set-Content -LiteralPath (Join-Path $invalidMarker '.profile.json') -Encoding ASCII
+            'not-empty' | Set-Content -LiteralPath (Join-Path $invalidMarker '.shared') -Encoding ASCII
+            (& $script:TransferModule { param($a, $p) Test-MoveProfile -Adapter $a -ProfilePath $p } $adapter $invalidMarker).Code | Should Be 'unknown_content'
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
@@ -507,7 +599,7 @@ Describe 'transactional profile movement' {
         try {
             $adapter = New-MoveAdapter
             New-V2MoveProfile -Scratch $scratch | Out-Null
-            (& $script:TransferModule { param($root) Test-MoveTreesEqual -Left $root -Right (Join-Path $root 'missing') } $scratch.Source) | Should Be $false
+            (& $script:TransferModule { param($a, $root) Test-MoveTreesEqual -Adapter $a -Left $root -Right (Join-Path $root 'missing') } $adapter $scratch.Source) | Should Be $false
             (& $script:TransferModule { Invoke-MoveProbe -Probe { 'indeterminate' } -Path 'synthetic' }).Valid | Should Be $false
             (& $script:TransferModule { param($path) Remove-MoveTransactionLock -Path $path } (Join-Path $scratch.Root 'missing-lock')).ToString() | Should Be 'False'
 
