@@ -142,7 +142,11 @@ migration_process_name_matches() {
   platform_name="$(platform)"
   while IFS= read -r candidate; do
     [ -n "$candidate" ] || continue
-    case "$candidate" in http://*|https://*|appx:*) continue ;; esac
+    case "$candidate" in
+      http://*|https://*|appx:*)
+        continue
+        ;;
+    esac
     process_name="${candidate##*/}"
     process_name="${process_name##*\\}"
     process_name="${process_name%.cmd}"
@@ -192,7 +196,9 @@ migration_process_probe() {
     [ -n "$candidate" ] || continue
     pgrep -x "$candidate" >/dev/null 2>&1 && return 0
   done < <(runtime_json_arr ".binary.$platform_name" "$manifest" | while IFS= read -r candidate; do
-    case "$candidate" in http://*|https://*|appx:*) continue ;; esac
+    if [[ "$candidate" == http://* || "$candidate" == https://* || "$candidate" == appx:* ]]; then
+      continue
+    fi
     process_name="${candidate##*/}"
     process_name="${process_name##*\\}"
     process_name="${process_name%.cmd}"
