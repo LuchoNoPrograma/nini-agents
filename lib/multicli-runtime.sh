@@ -463,6 +463,7 @@ runtime_overlay_is_current() {
       expected_source="$profile_dir/auth/$declared"
     elif [ -n "$shared_credential_root" ] && runtime_is_shared_credential_path "$manifest" "$declared"; then
       expected_source="$shared_credential_root/$declared"
+      [ ! -L "$expected_source" ] || return 1
     else
       expected_source="$shared_root/$declared"
     fi
@@ -474,8 +475,12 @@ runtime_overlay_is_current() {
 # Serialize builds across processes. A current overlay is reused so launching a
 # second process never removes the runtime tree from beneath the first.
 runtime_build_overlay() {
-  local manifest="$1" profile_dir="$2" lock_dir owner attempts=0 runtime_root
+  local manifest="$1" profile_dir="$2" lock_dir owner attempts=0 runtime_root shared_credential_root
   runtime_root="$profile_dir/.runtime"
+  shared_credential_root="$(runtime_shared_credential_root "$manifest" "$profile_dir" 2>/dev/null || true)"
+  if [ -n "$shared_credential_root" ]; then
+    runtime_ensure_shared_credential_sources "$manifest" "$profile_dir" "$shared_credential_root" || return $?
+  fi
   if runtime_overlay_is_current "$manifest" "$runtime_root"; then
     printf '%s\n' "$runtime_root"
     return
@@ -559,6 +564,37 @@ runtime_expand_value() {
   printf '%s\n' "$value"
 }
 
+# Expand enforced adapter arguments and merge them after user options but before
+# a literal `--`, so adapter-owned security settings win without becoming
+# positional input. The result is returned in RUNTIME_LAUNCH_ARGS.
+RUNTIME_LAUNCH_ARGS=()
+runtime_prepare_launch_args() {
+  local manifest="$1" profile_dir="$2" profile_id="$3" auth_dir="$4" runtime_root="$5" shared_root="$6" adapter_arg user_arg
+  shift 6
+  local adapter_args=()
+  RUNTIME_LAUNCH_ARGS=()
+  if runtime_contract_is_preloaded "$manifest"; then
+    for adapter_arg in "${ADAPTER_LAUNCH_ARGS[@]}"; do
+      [ -z "$adapter_arg" ] || adapter_args+=("$(runtime_expand_value "$adapter_arg" "$profile_dir" "$profile_id" "$auth_dir" "$runtime_root" "$shared_root")")
+    done
+  else
+    while IFS= read -r adapter_arg; do
+      [ -z "$adapter_arg" ] || adapter_args+=("$(runtime_expand_value "$adapter_arg" "$profile_dir" "$profile_id" "$auth_dir" "$runtime_root" "$shared_root")")
+    done < <(runtime_json_arr '.isolation.args' "$manifest")
+  fi
+  local inserted=false
+  for user_arg in "$@"; do
+    if [ "$inserted" = false ] && [ "$user_arg" = -- ]; then
+      [ "${#adapter_args[@]}" -eq 0 ] || RUNTIME_LAUNCH_ARGS+=("${adapter_args[@]}")
+      inserted=true
+    fi
+    RUNTIME_LAUNCH_ARGS+=("$user_arg")
+  done
+  if [ "$inserted" = false ]; then
+    [ "${#adapter_args[@]}" -eq 0 ] || RUNTIME_LAUNCH_ARGS+=("${adapter_args[@]}")
+  fi
+}
+
 # Launch $binary with the adapter's isolation environment. fileOverlay builds
 # a per-profile runtime view; processSecret reads the profile's secret from
 # the OS credential store and injects it into the child environment only
@@ -566,7 +602,7 @@ runtime_expand_value() {
 # inseparable refuse to launch by design. Extra binary args follow $@.
 runtime_launch_account_overlay() {
   local tool="$1" profile_dir="$2" binary="$3"; shift 3
-  local manifest profile_id auth_dir runtime_root shared_root mechanism key value adapter_arg index
+  local manifest profile_id auth_dir runtime_root shared_root mechanism key value index
   local env_args=()
   local unset_args=()
   manifest="$(adapter_path "$tool")"
@@ -631,33 +667,9 @@ runtime_launch_account_overlay() {
   env_args+=("MULTICLI_PROFILE_ID=$profile_id")
   [ -n "$secret_env_var" ] && env_args+=("$secret_env_var=$process_secret")
 
-  local adapter_args=()
-  if runtime_contract_is_preloaded "$manifest"; then
-    for adapter_arg in "${ADAPTER_LAUNCH_ARGS[@]}"; do
-      [ -z "$adapter_arg" ] && continue
-      adapter_args+=("$(runtime_expand_value "$adapter_arg" "$profile_dir" "$profile_id" "$auth_dir" "$runtime_root" "$shared_root")")
-    done
-  else
-    while IFS= read -r adapter_arg; do
-      [ -z "$adapter_arg" ] && continue
-      adapter_args+=("$(runtime_expand_value "$adapter_arg" "$profile_dir" "$profile_id" "$auth_dir" "$runtime_root" "$shared_root")")
-    done < <(runtime_json_arr '.isolation.args' "$manifest")
+  runtime_prepare_launch_args "$manifest" "$profile_dir" "$profile_id" "$auth_dir" "$runtime_root" "$shared_root" "$@"
+  if [ "${NINI_MACHINE_EXEC:-false}" = true ]; then
+    exec env "${unset_args[@]+"${unset_args[@]}"}" "${env_args[@]+"${env_args[@]}"}" "$binary" "${RUNTIME_LAUNCH_ARGS[@]+"${RUNTIME_LAUNCH_ARGS[@]}"}"
   fi
-
-  # Enforced adapter options follow user options so their value wins, but must
-  # remain before a literal `--` delimiter or the tool would parse them as
-  # positional input.
-  local final_args=() user_arg adapter_args_inserted=false
-  for user_arg in "$@"; do
-    if [ "$adapter_args_inserted" = false ] && [ "$user_arg" = "--" ]; then
-      [ "${#adapter_args[@]}" -eq 0 ] || final_args+=("${adapter_args[@]}")
-      adapter_args_inserted=true
-    fi
-    final_args+=("$user_arg")
-  done
-  if [ "$adapter_args_inserted" = false ]; then
-    [ "${#adapter_args[@]}" -eq 0 ] || final_args+=("${adapter_args[@]}")
-  fi
-
-  env "${unset_args[@]+"${unset_args[@]}"}" "${env_args[@]+"${env_args[@]}"}" "$binary" "${final_args[@]+"${final_args[@]}"}"
+  env "${unset_args[@]+"${unset_args[@]}"}" "${env_args[@]+"${env_args[@]}"}" "$binary" "${RUNTIME_LAUNCH_ARGS[@]+"${RUNTIME_LAUNCH_ARGS[@]}"}"
 }

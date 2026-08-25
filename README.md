@@ -6,9 +6,11 @@
 
 > [!IMPORTANT]
 > Nini Agents is currently evolving from the Multi-CLI `6efb0d2` engine base.
-> Cross-machine credential movement and consumer migrations are planned work.
-> A stable JSON v1 interface is available for read-only queries; profile
-> movement remains an internal engine API.
+> Cross-machine movement for filesystem-credential profiles is public on the
+> Bash launcher (Linux verified; macOS transport implemented but not yet
+> exercised here). Windows PowerShell fails explicitly until transport parity
+> is implemented. Read-only queries, profile `new`/`rename`/`delete`, and Bash
+> `move` use the stable JSON v1 envelope.
 
 <p align="center">
   <a href="#supported-ai-tools"><img src="https://img.shields.io/badge/support-17%20AI%20tools-255C60?style=flat-square&labelColor=14101F" alt="17 supported AI tools"/></a>
@@ -38,6 +40,8 @@
 - Windows: [Windows PowerShell 5.1](https://www.microsoft.com/download/details.aspx?id=54616)
 - [jq 1.7.1](https://jqlang.github.io/jq/download/), installed automatically when missing
 - One of the [supported AI tools](#supported-ai-tools)
+- Cross-device movement additionally requires SSH, rsync, and the same Nini
+  Agents adapter version on each device
 
 ### Install from source
 
@@ -100,6 +104,7 @@ See platform limits in the [support matrix](docs/support-matrix.md). Run `nini-a
 | `nini-agents new <tool>/<name> --from <template>` | Create a schema-v2 profile from a schema-v2 template |
 | `nini-agents <tool>/<name>` | Launch a profile |
 | `nini-agents launch <tool>/<name> [-- args...]` | Launch and pass arguments to the tool |
+| `nini-agents exec <tool>/<name> [-- args...]` | Run a foreground file-overlay profile with machine-clean stdio |
 | `nini-agents list [<tool>]` | List profiles |
 | `nini-agents clone <tool>/<src> <tool>/<dest>` | Copy a schema-v2 profile |
 | `nini-agents rename <tool>/<old> <tool>/<new>` | Rename a profile |
@@ -119,6 +124,10 @@ See platform limits in the [support matrix](docs/support-matrix.md). Run `nini-a
 | `nini-agents template list \| delete <name>` | List or delete templates |
 | `nini-agents export <tool>/<name> [path]` | Export a schema-v2 profile |
 | `nini-agents import <archive> <tool>/<name>` | Import a schema-v2 archive |
+| `nini-agents move <tool>/<name> <device> [--dry-run] [--discard-source-backup] [--devices-config <path>]` | Move a legacy or schema-v2 filesystem-credential profile to one configured device |
+| `nini-agents devices list [tool]` | List active local profiles through the device registry |
+| `nini-agents devices status <tool>/<name>` | Show active/absent/inaccessible state on every configured device |
+| `nini-agents devices doctor [tool]` | Verify the SSH movement boundary |
 
 ### Maintenance
 
@@ -132,10 +141,64 @@ See platform limits in the [support matrix](docs/support-matrix.md). Run `nini-a
 | `nini-agents help` | Show every command |
 | `nini-agents version` | Show the installed version |
 
-Add `--json` to `version`, `list/status`, `tools`, `doctor`, `stats`, or
-`template list` for the stable consumer interface. See the
-[JSON CLI contract](docs/json-cli.md). Mutation commands reject JSON mode
-before doing work.
+Add `--json` to `version`, `list/status`, `tools`, `doctor`, `stats`,
+`template list`, `new`, `rename`, `delete`, or Bash `move` for the stable
+consumer interface. These mutations keep the same profile and adapter rules as
+their human forms while reporting machine-safe mutation states. JSON deletion
+is noninteractive and requires the exact target twice:
+
+```bash
+nini-agents --json delete codex/work --confirm codex/work
+```
+
+See the [JSON CLI contract](docs/json-cli.md). Other mutation commands reject
+JSON mode before doing work.
+
+`exec` is a raw process transport rather than a JSON-envelope command. It emits
+no launcher notice on stdout, inherits the child's stdin/stdout/stderr, applies
+the same profile overlay and enforced adapter arguments as `launch`, and
+propagates the child exit code. Its supported boundary is deliberately limited
+to foreground `accountOverlay/fileOverlay` profiles, including legacy
+whole-root profiles. This is the integration surface for consumers such as
+`codex app-server --stdio`; see the [exec contract](docs/exec-contract.md).
+
+### Move profiles between devices
+
+Create a private devices file. New configurations should use a profile home:
+
+```text
+this_device|mint
+profiles_home|/home/you/MultiCliProfiles
+device|ubuntu|ubuntu|/home/you/MultiCliProfiles
+```
+
+The third `device` field is an SSH host or alias. Codexporter's historical
+`profiles_root|.../codex` format remains accepted for its migration.
+
+```bash
+nini-agents devices doctor codex --devices-config ~/.config/nini-agents/devices.conf
+nini-agents devices status codex/work --devices-config ~/.config/nini-agents/devices.conf
+nini-agents move codex/work ubuntu --dry-run --devices-config ~/.config/nini-agents/devices.conf
+nini-agents move codex/work ubuntu --discard-source-backup --devices-config ~/.config/nini-agents/devices.conf
+nini-agents --json move codex/work ubuntu --devices-config ~/.config/nini-agents/devices.conf
+```
+
+Nini Agents proves one active owner, rejects active or inconclusive processes,
+copies into operation-specific staging, compares structure/size/SHA-256,
+revalidates under locks on both devices, then activates the destination. The
+source remains under `.inactive/`; older backups are never pruned automatically.
+Failed activated candidates are quarantined under `.failed/` before rollback.
+Schema-v2 `.runtime/` is excluded and rebuilt at the destination. See the
+[movement protocol](docs/move-protocol.md).
+
+`--discard-source-backup` keeps the operation-owned backup through destination
+activation, runtime reconstruction, and the final integrity comparison, then
+deletes only that backup. It never prunes earlier backups. If cleanup fails,
+the command reports `backup_cleanup_failed` with the destination still active.
+
+Only adapter-declared profile content is movable. Unknown files, links,
+unexpected hardlinks, malformed metadata, and malformed credential JSON fail
+closed before ownership changes.
 
 ### Shared Codex permissions
 

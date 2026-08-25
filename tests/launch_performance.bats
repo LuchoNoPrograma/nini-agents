@@ -68,6 +68,43 @@ COUNTING_JQ
   [ ! -e "$HOME/outside" ]
 }
 
+@test "the fast launch path rejects credential and shared-state overlap before linking" {
+  run multicli new codex/account-a --no-seed
+  [ "$status" -eq 0 ]
+
+  jq '.account.credentialFiles=["collision/auth.json"]
+    | .normalState.sharedPaths=["collision"]
+    | .normalState.sessionPaths=[]
+    | .normalState.runtimePaths=[]
+    | .normalState.filePaths=[]
+    | .normalState.directPaths=[]
+    | .normalState.migrationPreservePaths=[]
+    | .normalState.unsafePaths=[]' \
+    "$MULTICLI_TOOLS_DIR/codex/adapter.json" > "$MULTICLI_TOOLS_DIR/codex/updated.json"
+  mv "$MULTICLI_TOOLS_DIR/codex/updated.json" "$MULTICLI_TOOLS_DIR/codex/adapter.json"
+
+  run multicli launch codex/account-a
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"credential path 'collision/auth.json' overlaps shared path 'collision'"* ]]
+  [ ! -e "$HOME/.codex/collision" ]
+  [ ! -e "$MULTICLI_HOME/codex/account-a/.runtime/collision" ]
+}
+
+@test "the fast launch path rejects unknown placeholders in enforced arguments" {
+  run multicli new codex/account-a --no-seed
+  [ "$status" -eq 0 ]
+
+  jq '.isolation.args=["--state={outsideRoot}"]' \
+    "$MULTICLI_TOOLS_DIR/codex/adapter.json" > "$MULTICLI_TOOLS_DIR/codex/updated.json"
+  mv "$MULTICLI_TOOLS_DIR/codex/updated.json" "$MULTICLI_TOOLS_DIR/codex/adapter.json"
+
+  run multicli launch codex/account-a
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown placeholder '{outsideRoot}'"* ]]
+}
+
 @test "doctor keeps exhaustive semantic adapter validation off the launch path" {
   jq '.normalState.unsafePaths=["../unused"]' \
     "$MULTICLI_TOOLS_DIR/codex/adapter.json" > "$MULTICLI_TOOLS_DIR/codex/updated.json"

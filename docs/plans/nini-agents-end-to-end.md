@@ -1071,7 +1071,7 @@ Pendientes y siguiente gate:
 - Objetivo: convertir el `migrate` ya existente en una transaccion suficientemente
   conservadora para preparar un primer piloto voluntario sin copiar, regenerar,
   revocar ni dejar dos propietarios independientes de la credencial.
-- Candidato acordado para una fase real posterior: `codex-luis`.
+- Candidato acordado para una fase real posterior: `codex-example`.
   `codex-vivi` queda expresamente fuera. Registrar el candidato no autoriza
   inspeccionarlo, ejecutar su dry-run ni migrarlo.
 - Antes: el motor producia un plan ordenado, usaba movimientos atomicos y
@@ -1140,10 +1140,10 @@ Pendientes y siguiente gate:
   hacia uno, no se ejecuto Codex y no hubo logout, refresh, revoke, auth clear,
   migracion o backup de una cuenta real.
 - Fase real siguiente, aun pendiente de G5: inspeccion read-only de
-  `codex-luis` limitada a tipo/existencia de entradas declaradas, links,
+  `codex-example` limitada a tipo/existencia de entradas declaradas, links,
   link-count, volumen, artefactos de control y procesos; confirmar que no existe
   un segundo destino `auth/auth.json`; luego ejecutar solamente
-  `nini-agents migrate codex/codex-luis --dry-run` desde el checkout aislado.
+  `nini-agents migrate codex/codex-example --dry-run` desde el checkout aislado.
   No se leeran valores de auth, no se lanzara Codex y no se escribira el perfil.
 - Apply real, aun pendiente de un G9 separado: solo despues de revisar juntos
   el preflight y el plan. Sera un apply sin `--prefer-profile`, con todos los
@@ -1172,7 +1172,7 @@ Pendientes y siguiente gate:
   caracterizada en pruebas, pero no ejecutada; tampoco se probo un binario
   Codex real ni una cuenta real.
 - Punto de reanudacion tras compactacion: cerrar los gates sinteticos y reportar
-  resultados. No inspeccionar ni migrar automaticamente `codex-luis`; pedir G5
+  resultados. No inspeccionar ni migrar automaticamente `codex-example`; pedir G5
   para el preflight read-only y dry-run, y despues G9 para un apply distinto.
 
 ### 2026-08-22 — preflight de `codex/luis` y limite moderno del adapter Codex
@@ -1180,8 +1180,8 @@ Pendientes y siguiente gate:
 - Estado: el G5 read-only del candidato y el G2 minimo derivado quedaron
   completados localmente. No se hizo apply real, lanzamiento de Codex, commit,
   push, instalacion ni publicacion.
-- Correccion de identidad: `codex-luis` es el launcher legacy y corresponde al
-  spec almacenado `codex/luis`; el spec `codex/codex-luis` escrito en la entrada
+- Correccion de identidad: `codex-example` es el launcher legacy y corresponde al
+  spec almacenado `codex/example`; el spec `codex/codex-example` escrito en la entrada
   anterior fue una suposicion incorrecta. No se listaron otros perfiles para
   resolverla.
 - Preflight real sanitizado: el perfil existe como directorio legacy regular;
@@ -1853,3 +1853,253 @@ Pendientes y siguiente gate:
   desinstalo ni publico nada real. El gate de cobertura no inicio porque falta
   `bashcov`. PowerShell/Pester, Windows y macOS no estan disponibles en este
   host y permanecen sin ejecucion.
+
+### 2026-08-24 — handoff para migracion completa de MultiCLI AI
+
+- Intencion del usuario: el siguiente trabajo debe migrar completamente la
+  aplicacion MultiCLI AI para que Nini Agents sea su unico motor. No se considera
+  suficiente seguir usando indefinidamente el shim ni limitarse a renombrar el
+  comando.
+- Estado base: `main` local esta en `ad9630c99648`, un commit delante de
+  `origin/main`. Ese commit agrupa el motor transaccional y sus protecciones,
+  los quince perfiles Codex migrados y probados en Linux, el launcher rapido,
+  permisos compartidos, pruebas y documentacion. No fue publicado, instalado
+  ni convertido en release como parte de este cierre.
+- Compatibilidad existente: `multi-cli` es un shim delgado que delega a
+  `nini-agents`, de modo que el consumidor puede atravesar transitoriamente el
+  motor nuevo sin haber completado su propia migracion. El inventario vigente
+  de MultiCLI AI indica invocacion del shim y descubrimiento propio por
+  filesystem y texto; se debe verificar de nuevo contra su worktree antes de
+  disenar cambios.
+- Brechas conocidas: JSON v1 solo cubre consultas read-only; mutaciones y
+  `doctor --deep` rechazan JSON, no existe un dispatch publico de movimiento y
+  launch no tiene todavia una ejecucion machine-safe con stdout limpio para el
+  flujo `codex app-server`. No presentar estas superficies como implementadas.
+- Frontera deseada: MultiCLI AI debe invocar directamente `nini-agents`, usar
+  contratos versionados y delegar al motor descubrimiento, perfiles,
+  credenciales, ownership y mutaciones. La GUI no debe leer secretos, resolver
+  rutas privadas ni decidir por parsing de salida humana.
+- UX que se conserva en el consumidor: deteccion y apertura de terminales,
+  Hyper, titulos `perfil · proyecto`, navegador y enfoque best effort de
+  ventanas. La migracion cambia el backend invocado, no traslada esas
+  responsabilidades visuales al launcher.
+- Procedimiento para reanudar: leer las reglas de ambos repositorios; obtener
+  aprobacion read-only para auditar el worktree real de MultiCLI AI; inventariar
+  cada comando, parser, acceso a filesystem y prueba; construir una matriz de
+  capacidades contra el contrato Nini; y separar las brechas que requieren G2
+  en el motor de las que requieren G4 en el consumidor.
+- Implementacion futura: usar una branch dedicada, fixtures y homes temporales;
+  agregar primero los contratos machine-safe faltantes con paridad Bash y
+  PowerShell; despues portar la GUI sin duplicar logica del motor. Definir y
+  probar rollback antes del corte y conservar el shim mientras existan
+  consumidores legacy comprobados.
+- Gates de cierre: pruebas contractuales y de redaccion de secretos, suite del
+  motor aplicable, validacion del repositorio Flutter, smoke controlado de
+  terminal y `codex app-server`, preservacion de Hyper/titulos, y rollback sin
+  tocar credenciales reales durante pruebas sinteticas. Registrar Windows,
+  macOS o PowerShell como no verificados si no se ejecutan.
+- Coordinacion: esta prioridad no autoriza migrar Codexporter en el mismo delta.
+  MultiCLI AI puede cerrar su corte con evidencia propia, pero la Etapa H global
+  no se declara completa hasta que Codexporter tambien consuma el motor comun.
+- Autorizacion de esta entrada: solo actualizar las dos bitacoras. Quedaron
+  fuera cambios en MultiCLI AI o Nini Agents, lectura nueva de perfiles reales,
+  instalaciones, releases, push, commits y retiro de compatibilidad.
+
+### 2026-08-24 — ENG-02A: JSON v1 para crear y renombrar perfiles
+
+- Alcance aprobado: ampliar exclusivamente `new` y `rename` con respuestas JSON
+  v1 equivalentes en Bash y PowerShell, congelar schema/pruebas/documentacion y
+  actualizar la bitacora de Nini Hub. Quedaron fuera delete, exec, codigo
+  Flutter, SQLite, perfiles o credenciales reales, instalaciones, Git y
+  publicacion.
+- Contrato: exito devuelve `state: applied` y un resumen publico con `tool`,
+  `name`, `type` y `schemaVersion`; rename agrega la direccion publica `from`.
+  Los rechazos usan codigos estables y `error.details.state` con
+  `not_applied` o `partially_applied`. No se serializan paths, `profileId`,
+  nombres o contenido de credenciales ni detalles privados de runtime.
+- Implementacion: ambos entrypoints siguen llamando los owners vigentes
+  `cmd_new`/`cmd_rename` y `New-Profile`/`Rename-Profile`; JSON solo agrega
+  preflight machine-safe, supresion de salida humana, inspeccion estructural
+  posterior y envelope. El schema v1 fija las formas de exito y los estados de
+  fallo sin cambiar el envelope de consultas o movimiento.
+- Incidente encontrado con fixture: el rename Bash movia el directorio y luego
+  terminaba por `set -e` cuando `remove_shortcut()` no encontraba un desktop
+  shortcut de un adapter CLI. Tras diagnostico y ampliacion explicita, se agrego
+  un retorno exitoso al final de esa limpieza idempotente. No cambia targets ni
+  elimina archivos adicionales; permite completar alias y el mensaje humano.
+- Seguridad: todas las mutaciones de prueba usaron `HOME`, `MULTICLI_HOME` y
+  tools temporales con el adapter Codex publico. No se abrieron perfiles,
+  credenciales, stores o procesos reales y no hubo logout, revoke, refresh,
+  instalacion, stage, commit o push.
+- Evidencia Linux: 8/8 en `json_mutations.bats`, 11/11 en `json_cli.bats` y
+  12/12 en la suite de seguridad de perfiles. Cuatro respuestas de exito/rechazo
+  validaron contra `schema/cli-output.schema.json`. Overlay paso 22/23; el unico
+  fallo es el protocolo de titulo Hyper de cambios concurrentes y no participa
+  en new/rename. Sintaxis Bash, parseo del schema, validacion documental y
+  `git diff --check` del alcance pasaron.
+- Gates abiertos: PowerShell/Pester y Windows no estan disponibles en este host;
+  los tests equivalentes quedaron implementados pero no ejecutados. El gate de
+  cobertura Bash no inicio porque `bashcov` no esta instalado. ENG-02A queda
+  implementada y validada en Bash, pero no se declara cerrada multiplataforma.
+- Siguiente orden: cerrar esos gates o registrar evidencia CI de este delta;
+  solo despues delimitar ENG-02B para delete JSON con confirmacion explicita.
+
+### 2026-08-24 — validacion CI aislada de ENG-02A
+
+- Alcance aprobado: aislar exactamente ENG-02A sobre `ad9630c`, validar con
+  ramas/commits temporales y PR borrador, actualizar los relevos y detenerse
+  ante cualquier fix. No se autorizo mezclar movimiento remoto, modificar
+  `main`, corregir la base, mergear, instalar localmente, publicar o limpiar
+  las refs remotas.
+- Aislamiento: una copia temporal creo la base
+  `validation/eng-02a-base-ad9630c` y el delta `a155613` de nueve archivos. El
+  tip `94c1ef1` agrega solo un commit vacio para reintentar el evento. PR
+  borrador `#1`; `origin/main` permanece en `293c48d` y el worktree original no
+  fue stageado ni modificado por el aislamiento.
+- Contenido exacto: helpers JSON Bash/PowerShell, dispatch `new`/`rename`,
+  `remove_shortcut()` idempotente, schema, dos suites de mutaciones y
+  documentacion contractual. Busquedas y diff excluyeron `remote-move`,
+  devices, launch/runtime, delete y exec.
+- Validacion local aislada: 31/31 pruebas dirigidas exitosas — 8 mutaciones, 11
+  contrato JSON y 12 seguridad — mas sintaxis Bash, parseo JSON Schema,
+  `validate-docs.py` y `git diff --check`.
+- CI manual `32741318583` sobre `94c1ef1`: las siete pruebas nuevas pasaron en
+  Windows PowerShell 5.1 con Pester 3.4.0. Tambien pasaron PSScriptAnalyzer,
+  install smoke Windows, install smoke Ubuntu, shellcheck, Bats Ubuntu,
+  actionlint y metadata de release.
+- Gate Pester global: 419 passed, 18 failed, 0 skipped/pending/inconclusive. La
+  primera falla aparecio despues de las siete mutaciones en
+  `tests/Migration.Tests.ps1:286`; la cobertura PowerShell no se ejecuto. Los
+  fallos restantes estan fuera de los nueve archivos ENG-02A y no fueron
+  corregidos ni atribuidos al contrato de mutaciones.
+- Gate Bash ampliado: 313/332 lineas, 94,28 %. Los 19 misses pertenecen al
+  delta `origin/main..ad9630c` en permisos, migracion, runtime, transfer y
+  entrypoint. Los rangos exactos ENG-02A — `lib/cli-json.sh:32-39` y
+  `nini-agents:1213,1736-1870,2304-2305,2414-2427` — no aparecen entre los
+  misses. Esta evidencia no reemplaza formalmente el gate con baseline
+  `ad9630c`.
+- Incidente macOS separado: install smoke y Bats fallaron al parsear
+  `lib/migration.sh:195` bajo Bash 3.2; `git blame` ubica esa linea en
+  `ad9630c`. No cruza ENG-02A y requiere diagnostico/fix propio.
+- Resultado: ENG-02A sigue `validating`. La siguiente accion necesita un nuevo
+  alcance para ejecutar una harness temporal con baseline `ad9630c` y permitir
+  cobertura PowerShell aun cuando la suite base falle, o para corregir primero
+  los incidentes de la base. No iniciar ENG-02B mientras falte ese gate.
+
+### 2026-08-24 — cobertura exacta aislada de ENG-02A
+
+- Alcance aprobado `VALID-ENG-02A-B`: modificar solo el workflow de la rama
+  temporal, fijar `ad9630c` como baseline Bash/PowerShell y ejecutar cobertura
+  PowerShell aunque la suite Pester base falle. El commit `b7790c9` cambio tres
+  lineas de `.github/workflows/ci.yml`; `actionlint` paso en CI `32743230689`.
+- Primer resultado exacto: Bash changed-line paso 100 % (4/4). PowerShell se
+  ejecuto y encontro 33,33 % (1/3), con misses en
+  `lib/MultiCli.Json.psm1:41-42`. `MultiCli.Json.psm1` obtuvo 91,67 % (33/36).
+- Causa observada: `JsonMutations.Tests.ps1` prueba los entrypoints mediante
+  procesos hijos, que Pester 3.4 no contabiliza en el runspace de cobertura.
+  `ModuleFunctions.Tests.ps1`, owner de las llamadas in-process, importaba los
+  otros modulos pero no `MultiCli.Json.psm1` ni llamaba el helper de error.
+- Alcance aprobado `VALID-ENG-02A-C`: agregar solo una prueba in-process, volver
+  a ejecutar CI y actualizar los cuatro relevos. El commit test-only `879d461`
+  importa el modulo JSON y verifica schema, command, `ok`, `data`, codigo,
+  mensaje y `error.details.state`; no cambia codigo productivo ni usa perfiles,
+  filesystem o credenciales.
+- CI `32744574564`: la prueba nueva paso. La suite completa termino 420 passed,
+  18 failed y cero skipped/pending/inconclusive. Bash changed-line paso 100 %
+  (4/4); PowerShell changed-line paso 100 % (3/3) y
+  `MultiCli.Json.psm1` quedo 100 % (36/36).
+- El job PowerShell global continua rojo: su subconjunto de cobertura tuvo 283
+  passed, 17 failed y 502 comandos inesperadamente no cubiertos en modulos de
+  la base. Esta condicion no invalida la cobertura exacta ENG-02A, pero el gate
+  de cierre tambien exige `tests/run-pester.ps1 -CI` sin fallos.
+- macOS repitio el parse error Bash 3.2 en `lib/migration.sh:195`, perteneciente
+  a `ad9630c`; install smoke y Bats macOS siguen como `separate_fix`.
+- Resultado: los dos gates de cobertura exacta de ENG-02A estan cerrados. La
+  subfraccion permanece `validating` exclusivamente porque Pester global tiene
+  18 fallos base. Su diagnostico/fix necesita alcance propio; no iniciar
+  ENG-02B, merge, release ni publicacion de `main` mientras falte esa puerta.
+
+### 2026-08-24 — ENG-02B: delete JSON seguro para Nini Hub
+
+- Decision posterior: el usuario autorizo continuar ENG-02B sin perseguir en
+  esta fraccion los 18 fallos Pester ni el incidente Bash 3.2 ya atribuidos a
+  la base. Esos gates permanecen visibles como `separate_fix`; no se declararon
+  corregidos ni se debilitaron sus suites.
+- Alcance ejecutado: sobre el tip aislado `879d461` se creo
+  `validation/eng-02b` y el commit `c36a229`. Se modificaron solo los entrypoints
+  Bash/PowerShell, schema JSON v1, pruebas de mutaciones/contrato/containment,
+  README y contrato JSON. No se copiaron estos cambios sobre el worktree
+  concurrente original ni se modificaron perfiles, credenciales, Flutter,
+  SQLite, launch, app-server, instalacion, release o `main`.
+- Contrato: `nini-agents --json delete <tool>/<profile> --confirm
+  <tool>/<profile>` es no interactivo y exige que la confirmacion coincida
+  exactamente con el target. Falta, mismatch o identificador invalido devuelve
+  exit 2 y `not_applied`; perfil ausente devuelve `profile_not_found` y
+  `not_applied`. Una falla despues de iniciar cleanup devuelve exit 6,
+  `operation_failed` y el estado conservador `partially_applied`.
+- Exito: devuelve `state: applied` y solo la direccion publica `{tool,name}`
+  del perfil borrado. No serializa paths, `profileId`, archivos de auth,
+  credenciales, hashes, IDs de cuenta ni detalles privados. El flujo humano
+  conserva su prompt; solo el wrapper JSON usa el bypass interno despues del
+  preflight y de la confirmacion explicita.
+- Seguridad y ownership: ambos wrappers reutilizan `cmd_delete` /
+  `Remove-Profile`, por lo que credential-store, OS-user cleanup, alias,
+  shortcut y borrado siguen perteneciendo al motor. El preflight resuelve la
+  ruta contenida antes de operar. Si cleanup puede haber comenzado, el motor no
+  promete rollback destructivo y obliga al consumidor a reconciliar mediante
+  un `list/status` nuevo.
+- Evidencia local: sintaxis Bash, parseo del schema, tres envelopes delete,
+  documentacion y `git diff --check` pasaron. Las suites focales terminaron
+  35/35; despues de agregar las aserciones finales de identificador y junction,
+  sus dos tests dirigidos pasaron 2/2. Todo uso de filesystem y credential store
+  ocurrio bajo roots y doubles temporales.
+- Unico CI autorizado: `32748238240` sobre `c36a229`. Pasaron actionlint,
+  metadata, shellcheck, PSScriptAnalyzer, install smoke Windows/Ubuntu, Bats
+  Ubuntu completo y Bash changed-line 100 % (9/9). Los cuatro tests delete
+  pasaron en Windows PowerShell 5.1/Pester 3.4.0. El gate de modulos PowerShell
+  reporto 100 % (3/3) sobre `MultiCli.Json.psm1`; ENG-02B toca el entrypoint y
+  su conducta se cubrio con procesos hijos, fuera de ese instrumentador.
+- Deuda separada repetida: Pester total termino 424 passed / 18 failed; los
+  cuatro tests ENG-02B pasaron antes de la primera falla. macOS volvio a fallar
+  por el parse error de `lib/migration.sh:195` bajo Bash 3.2. No se implemento
+  ningun fix para esos incidentes.
+- Resultado y continuidad: ENG-02B queda implementada y validada en la rama
+  temporal, sin merge ni release. Nini Hub ya puede implementar `PRF-01`
+  contra el contrato tipado de `new`/`rename`/`delete`; para uso instalado aun
+  falta decidir integracion/publicacion del motor. Exec stdout-clean y launch
+  permanecen para un gate posterior.
+
+### 2026-08-24 — ENG-02C e integracion local del motor para Nini Hub
+
+- Alcance aprobado: versionar ENG-02C en la branch aislada existente, portar
+  manualmente ENG-02B/C sobre el worktree concurrente de `main`, validar solo
+  contratos focalizados y actualizar los relevos. Se excluyeron branch nueva,
+  installer, perfiles o credenciales reales, builds, suites amplias, merge,
+  push, tag y release.
+- Linaje: `validation/eng-02b` avanzo al commit `fc3361f` con los nueve archivos
+  exactos de ENG-02C. El checkout principal conserva HEAD `ad9630c` y sus
+  cambios concurrentes; los hunks de delete JSON y exec se integraron sin
+  stagear, borrar, revertir o commitear ese worktree.
+- Antes/despues: el checkout activo carecia del delete machine-safe y del
+  transporte requerido por Nini Hub. Ahora `--json delete` exige confirmacion
+  exacta y `exec <tool>/<profile> -- <args...>` inicia un foreground
+  `accountOverlay/fileOverlay` con stdio limpio, entorno/overlay del adapter y
+  propagacion del exit code. `launch` humano y perfiles detached no cambiaron.
+- Implementacion: los entrypoints Bash/PowerShell agregan dispatch, ayuda,
+  completion y validaciones; `lib/multicli-runtime.sh` reemplaza el wrapper por
+  el hijo en machine-exec. El schema JSON fija delete; README,
+  `docs/json-cli.md` y `docs/exec-contract.md` congelan los contratos. Las
+  pruebas cubren confirmacion, containment, estados parciales y stdio/exit.
+- Activacion instalada: `~/.local/bin/nini-agents` ya era un wrapper regular
+  hacia el entrypoint del checkout local. No fue reescrito ni reinstalado; al
+  apuntar al checkout integrado reporto version
+  `1.0.0` y mostro `exec` en ayuda.
+- Evidencia Linux sintetica: 92/92 pruebas Bats focalizadas pasaron con la
+  variable externa de titulo Hyper retirada; tambien pasaron sintaxis Bash,
+  parseo JSON Schema, validacion de 17 adapters, documentacion, metadata de
+  release, `git diff --check` y la regresion consumidora de Nini Hub (38/38 mas
+  guarda arquitectonica 1/1 y analyze focalizado sin issues).
+- Limites: PowerShell/Pester, Windows, macOS, Codex real y credenciales reales
+  no se ejecutaron. Los 18 fallos Pester y el parseo Bash 3.2 de la base siguen
+  como `separate_fix`. `origin/main` y releases publicados aun no contienen
+  ENG-02; esa publicacion pertenece al cutover posterior.

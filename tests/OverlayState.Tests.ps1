@@ -261,6 +261,14 @@ Describe 'schema-v2 account overlay on Windows' {
             $doctor.ExitCode | Should Be 0
             $doctor.Output | Should Not Match 'wrong target'
             $doctor.Output | Should Not Match 'unexpected runtime file'
+
+            $outsideLocks = Join-Path $scratch.Root 'outside-oauth-locks'
+            New-Item -ItemType Directory -Force -Path $outsideLocks | Out-Null
+            Remove-Item -LiteralPath (Join-Path $store 'oauth-locks') -Force
+            New-Item -ItemType Junction -Path (Join-Path $store 'oauth-locks') -Target $outsideLocks | Out-Null
+            $replaced = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'fixture/account-a') -Probe $probe
+            $replaced.ExitCode | Should Not Be 0
+            $replaced.Output | Should Match 'shared credential store component.*is a link'
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
@@ -268,6 +276,10 @@ Describe 'schema-v2 account overlay on Windows' {
         $scratch = New-OverlayScratch
         try {
             Write-OverlayAdapter -Scratch $scratch
+            $adapterPath = Join-Path $scratch.Tools 'fixture\adapter.json'
+            $adapter = Get-Content -LiteralPath $adapterPath -Raw | ConvertFrom-Json
+            $adapter.isolation | Add-Member -NotePropertyName args -NotePropertyValue @('-c', 'sqlite_home="{sharedStateRoot}"')
+            $adapter | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $adapterPath -Encoding UTF8
             $profile = Join-Path $scratch.Profiles 'fixture\legacy'
             New-Item -ItemType Directory -Force -Path $profile | Out-Null
             $credential = Join-Path $profile 'auth.json'
@@ -281,10 +293,11 @@ Describe 'schema-v2 account overlay on Windows' {
   runtime = $env:FIXTURE_HOME
   inherited = $env:GLOBAL_FIXTURE_TOKEN
   profile = $env:MULTICLI_PROFILE_ID
+  args = @($args)
 } | ConvertTo-Json | Set-Content -LiteralPath $env:CAPTURE_OUTPUT -Encoding UTF8
 '@ | Set-Content -LiteralPath $probeScript -Encoding UTF8
             $probe = Join-Path $scratch.Root 'capture-legacy.cmd'
-            "@powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$probeScript`"" | Set-Content -LiteralPath $probe -Encoding ASCII
+            "@powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$probeScript`" %*" | Set-Content -LiteralPath $probe -Encoding ASCII
 
             $env:GLOBAL_FIXTURE_TOKEN = 'wrong-account-secret'
             $env:MULTICLI_PROFILE_ID = 'stale-schema-v2-id'
@@ -299,6 +312,10 @@ Describe 'schema-v2 account overlay on Windows' {
             $captured.runtime | Should Be $profile
             [string]::IsNullOrEmpty($captured.inherited) | Should Be $true
             [string]::IsNullOrEmpty($captured.profile) | Should Be $true
+            $capturedArgs = @($captured.args)
+            $capturedArgs.Count | Should Be 2
+            $capturedArgs[0] | Should Be '-c'
+            $capturedArgs[1] | Should Be "sqlite_home=`"$profile`""
             (Get-FileHash -LiteralPath $credential -Algorithm SHA256).Hash | Should Be $credentialHash
             (Test-Path -LiteralPath (Join-Path $profile '.profile.json')) | Should Be $false
             (Test-Path -LiteralPath (Join-Path $profile '.runtime')) | Should Be $false
@@ -362,6 +379,52 @@ Describe 'schema-v2 account overlay on Windows' {
             $result.ExitCode | Should Not Be 0
             $result.Output | Should Match "unsafe shared state path '../outside'"
             (Test-Path -LiteralPath (Join-Path $scratch.UserHome 'outside')) | Should Be $false
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+
+    It 'rejects credential and shared-state overlap on the lightweight launch path' {
+        $scratch = New-OverlayScratch
+        try {
+            Write-OverlayAdapter -Scratch $scratch
+            $probe = Join-Path $scratch.Root 'noop.cmd'
+            '@exit /b 0' | Set-Content -LiteralPath $probe -Encoding ASCII
+            (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('new', 'fixture/account-a', '--no-seed')).ExitCode | Should Be 0
+
+            $adapterPath = Join-Path $scratch.Tools 'fixture\adapter.json'
+            $adapter = Get-Content -LiteralPath $adapterPath -Raw | ConvertFrom-Json
+            $adapter.account.credentialFiles = @('collision/auth.json')
+            $adapter.normalState.sharedPaths = @('collision')
+            $adapter.normalState.sessionPaths = @()
+            $adapter.normalState.filePaths = @()
+            $adapter | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $adapterPath -Encoding UTF8
+
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'fixture/account-a') -Probe $probe
+
+            $result.ExitCode | Should Not Be 0
+            $result.Output | Should Match "credential path 'collision/auth.json' overlaps shared path 'collision'"
+            (Test-Path -LiteralPath (Join-Path $scratch.UserHome '.fixture\collision')) | Should Be $false
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+
+    It 'rejects unknown placeholders in enforced arguments on the lightweight launch path' {
+        $scratch = New-OverlayScratch
+        try {
+            Write-OverlayAdapter -Scratch $scratch
+            $probe = Join-Path $scratch.Root 'noop.cmd'
+            '@exit /b 0' | Set-Content -LiteralPath $probe -Encoding ASCII
+            (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('new', 'fixture/account-a', '--no-seed')).ExitCode | Should Be 0
+
+            $adapterPath = Join-Path $scratch.Tools 'fixture\adapter.json'
+            $adapter = Get-Content -LiteralPath $adapterPath -Raw | ConvertFrom-Json
+            $adapter.isolation | Add-Member -NotePropertyName args -NotePropertyValue @('--state={outsideRoot}')
+            $adapter | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $adapterPath -Encoding UTF8
+
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'fixture/account-a') -Probe $probe
+
+            $result.ExitCode | Should Not Be 0
+            $result.Output | Should Match "unknown placeholder '{outsideRoot}'"
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }

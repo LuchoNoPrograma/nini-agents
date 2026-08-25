@@ -4,14 +4,24 @@ Nini Agents contains a credential-bearing movement engine that is separate
 from `export`, `import`, templates, and session continuation. Those existing
 flows remain credential-free.
 
-The engine is currently an internal API. It does not expose a public `move`
-command, SSH transport, device registry, or stable JSON response yet. Those
-boundaries are intentionally deferred until the JSON contract and remote
-coordination are implemented.
+The local engine remains available as an internal API. The Bash launcher also
+exposes a public coordinator:
+
+```text
+nini-agents move <tool>/<profile> <device> [--dry-run] [--discard-source-backup] [--devices-config <path>]
+nini-agents devices list|status|doctor ...
+```
+
+It uses SSH only to invoke the same Nini Agents endpoint and rsync only to
+populate reserved staging. The controller validates its adapter and requires
+the remote adapter SHA-256 to match before any remote validation or mutation.
+The public JSON response uses envelope v1 and contains only `code`, `state`,
+and `format`.
 
 ## Implementations
 
-- Bash 3.2+: `move_profile_transaction` in `lib/transfer.sh`.
+- Bash 3.2+: `move_profile_transaction` in `lib/transfer.sh`; public SSH
+  coordination in `lib/remote-move.sh`.
 - Windows PowerShell 5.1+: `Invoke-MultiCliProfileMove` in
   `lib/MultiCli.Transfer.psm1`.
 
@@ -22,8 +32,11 @@ Both implementations require two caller-provided capabilities:
 2. A transport that populates an already reserved staging directory. The
    transport never chooses ownership or activates a profile.
 
-The local-copy implementations exist for synthetic tests. No production SSH
-transport is wired to the engine.
+The local-copy implementations remain the unit-test boundary. The public Bash
+coordinator supplies the production SSH/rsync transport and a Linux/macOS
+process probe. Linux is verified in this checkout; macOS and real-host
+execution require protected platform validation. PowerShell rejects the public
+remote command explicitly.
 
 ## Supported profile boundary
 
@@ -47,6 +60,9 @@ Schema v2:
 Authentication JSON is parsed only to prove that it is a JSON object. Its
 values are never printed or returned. Metadata must identify schema v2, the
 selected adapter, a non-empty profile ID, and a recognized profile mode.
+Legacy and isolated whole-root profiles may also contain adapter-declared
+runtime paths, shared credential entries, and declared dot-suffix credential
+backups. Undeclared content remains a preflight rejection.
 
 Schema-v2 `.runtime/` is not transported and is not a credential source. The
 destination reconstructs it from the adapter after activation, then proves
@@ -86,18 +102,22 @@ For profile `name` and operation `operation-id`, roots contain:
 
 ```text
 destination/.staging/name.operation-id   candidate, never active
-source/.inactive/name.operation-id        verified inactive backup
+source/.inactive/name.operation-id        verified inactive backup, optionally discarded after success
 destination/.failed/name.operation-id     quarantined partial destination
 source/.move-lock.name                    atomic ownership lock
 ```
 
 Existing artifacts are never overwritten or pruned automatically.
+With `--discard-source-backup`, the coordinator removes only the backup owned
+by the current operation, after destination activation, runtime reconstruction,
+and the final source/destination inventory comparison succeed. Earlier backups
+are never selected. A cleanup failure leaves the destination active, releases
+the ownership locks, and reports `backup_cleanup_failed`.
 
-## Result inventory for the future JSON CLI
+## Public result inventory
 
-The internal implementations currently return only non-secret state and error
-codes. Stage F will wrap these in a versioned JSON envelope; field names and
-the public command are not frozen yet.
+The internal and public implementations return only non-secret state and error
+codes. These are wrapped by the stable JSON v1 envelope.
 
 States:
 
@@ -121,15 +141,21 @@ by boundary:
 | Profile | `invalid_metadata`, `missing_credential`, `invalid_auth_json`, `unknown_content`, `unsafe_entry`, `unsafe_link`, `unsafe_hardlink` |
 | Ownership/artifacts | `destination_active`, `destination_appeared`, `staging_conflict`, `backup_conflict`, `failed_artifact_conflict`, `transaction_locked` |
 | Process/transport | `process_active`, `process_appeared`, `process_probe_failed`, `staging_create_failed`, `transport_failed`, `integrity_mismatch` |
-| Activation/rollback | `backup_prepare_failed`, `source_deactivation_failed`, `activation_failed_rolled_back`, `destination_invalid_rolled_back`, `destination_runtime_failed_rolled_back`, `rollback_failed`, `lock_release_failed` |
+| Activation/rollback | `backup_prepare_failed`, `source_deactivation_failed`, `activation_failed_rolled_back`, `destination_invalid_rolled_back`, `destination_runtime_failed_rolled_back`, `rollback_failed`, `backup_cleanup_failed`, `lock_release_failed` |
 
-The future JSON response must not expose tokens, authentication values,
+The public coordinator can additionally return `invalid_configuration`,
+`invalid_adapter`, `ownership_unproven`, `ownership_changed`,
+`destination_unavailable`, `remote_health_failed`, `adapter_mismatch`, and
+`remote_to_remote_unsupported`. These describe the device-registry and SSH
+coordination boundary; engine structural failures keep their original codes.
+
+The JSON response must not expose tokens, authentication values,
 profile IDs, private machine identifiers, or absolute filesystem paths.
 
 ## Verification boundary
 
-Automated movement tests use disposable roots and structural fixture JSON.
+Automated movement tests use disposable roots, a fake SSH endpoint, a fake
+copy transport, and structural fixture JSON.
 They inject idle/busy probes, local/tampered/failed transports, activation
 failures, runtime failures, and rollback failures. They do not inspect the
 operator's processes, credential stores, profiles, or network.
-

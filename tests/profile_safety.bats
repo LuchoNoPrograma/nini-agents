@@ -100,6 +100,16 @@ make_junction() {
   [[ "$output" == *"outside MULTICLI_HOME"* ]]
   [ -f "$outside_root/account-a/keep.txt" ]
   [ "$(tr -d '\r' < "$outside_root/account-a/keep.txt")" = "outside-data" ]
+
+  run multicli delete fixture/account-a --confirm fixture/account-a --json
+
+  [ "$status" -eq 6 ]
+  printf '%s' "$output" | jq -e '
+    (.ok | not) and .command == "delete" and
+    .error.code == "operation_failed" and
+    .error.details.state == "not_applied"
+  ' >/dev/null
+  [ -f "$outside_root/account-a/keep.txt" ]
 }
 
 @test "rename refuses a junctioned tool directory that resolves outside MULTICLI_HOME" {

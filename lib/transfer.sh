@@ -708,6 +708,17 @@ move_relative_matches_declaration() {
   return 1
 }
 
+move_relative_matches_shared_credential_backup() {
+  local manifest="$1" rel="$2" declared pattern
+  pattern="$(runtime_json_str '.sharedCredentialState.legacyBackupPattern' "$manifest")"
+  [ "$pattern" = dotSuffix ] || return 1
+  while IFS= read -r declared; do
+    [ -n "$declared" ] || continue
+    adapter_path_is_dot_suffix_backup "$declared" "$rel" && return 0
+  done < <(runtime_json_arr '.sharedCredentialState.entries // [] | map(.path)' "$manifest")
+  return 1
+}
+
 move_relative_allowed() {
   local manifest="$1" rel="$2" format="$3" mode="$4" state_subdir declared_rel
   case "$rel" in
@@ -734,7 +745,10 @@ move_relative_allowed() {
       fi
       move_relative_matches_declaration "$manifest" "$declared_rel" '.normalState.sharedPaths' && return 0
       move_relative_matches_declaration "$manifest" "$declared_rel" '.normalState.sessionPaths' && return 0
+      move_relative_matches_declaration "$manifest" "$declared_rel" '.normalState.runtimePaths' && return 0
       move_relative_matches_declaration "$manifest" "$declared_rel" '.normalState.unsafePaths' && return 0
+      move_relative_matches_declaration "$manifest" "$declared_rel" '.sharedCredentialState.entries // [] | map(.path)' && return 0
+      move_relative_matches_shared_credential_backup "$manifest" "$declared_rel" && return 0
     fi
     return 1
   fi
@@ -743,7 +757,10 @@ move_relative_allowed() {
   move_relative_matches_declaration "$manifest" "$rel" '.account.credentialFiles' && return 0
   move_relative_matches_declaration "$manifest" "$rel" '.normalState.sharedPaths' && return 0
   move_relative_matches_declaration "$manifest" "$rel" '.normalState.sessionPaths' && return 0
+  move_relative_matches_declaration "$manifest" "$rel" '.normalState.runtimePaths' && return 0
   move_relative_matches_declaration "$manifest" "$rel" '.normalState.unsafePaths' && return 0
+  move_relative_matches_declaration "$manifest" "$rel" '.sharedCredentialState.entries // [] | map(.path)' && return 0
+  move_relative_matches_shared_credential_backup "$manifest" "$rel" && return 0
   return 1
 }
 

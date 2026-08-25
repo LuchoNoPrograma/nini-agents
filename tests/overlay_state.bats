@@ -214,6 +214,31 @@ JSON
   [[ "$output" != *"wrong target"* ]]
 }
 
+@test "a warm overlay revalidates a replaced shared credential backing file" {
+  jq '.sharedCredentialState={
+    root:".shared/fixture/oauth",
+    entries:[{path:".credentials.json",kind:"jsonObjectFile"}],
+    legacyMigration:"preserveInactive"
+  }' "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  run multicli launch fixture/account-a
+  [ "$status" -eq 0 ]
+
+  local store="$MULTICLI_HOME/.shared/fixture/oauth/.credentials.json"
+  local outside="$MULTICLI_SCRATCH/outside-credentials.json"
+  printf '{}\n' > "$outside"
+  rm "$store"
+  ln -s "$outside" "$store"
+
+  run multicli launch fixture/account-a
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"links are not allowed in the backing store"* ]]
+  [ -L "$store" ]
+}
+
 @test "shared credential initialization rejects an unexpected POSIX hardlink" {
   case "$(uname -s 2>/dev/null || echo unknown)" in
     MINGW*|MSYS*|CYGWIN*|Windows*) skip "Windows runtimes intentionally expose declared files through managed hardlinks" ;;
@@ -297,7 +322,7 @@ JSON
   mkdir -p "$TOOLS_ROOT/codex" "$MULTICLI_HOME/codex/omega"
   cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
 
-  run env TERM_PROGRAM=Hyper "$MULTICLI_BIN" launch codex/omega
+  run env TERM_PROGRAM=Hyper NINI_AGENTS_HYPER_TITLE_LOCK= "$MULTICLI_BIN" launch codex/omega
 
   [ "$status" -eq 0 ]
   [[ "$output" != *"__MULTICLI_TITLE_LOCK__"* ]]
@@ -481,6 +506,22 @@ JSON
   [ ! -e "$profile/.profile.json" ]
   [ ! -e "$profile/.runtime" ]
   [ ! -e "$profile/auth" ]
+}
+
+@test "legacy whole-root launch applies enforced adapter arguments inside the profile root" {
+  jq '.isolation.args=["-c", "sqlite_home=\"{sharedStateRoot}\""]' \
+    "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+  local profile="$MULTICLI_HOME/fixture/legacy-args"
+  mkdir -p "$profile"
+  printf '{}\n' > "$profile/auth.json"
+
+  run multicli launch fixture/legacy-args --user-value
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  run jq -e --arg root "$profile" \
+    '.args == ["--user-value", "-c", ("sqlite_home=\"" + $root + "\"")]' "$CAPTURE_OUTPUT"
+  [ "$status" -eq 0 ]
 }
 
 @test "legacy whole-root compatibility stays closed for process-secret adapters" {

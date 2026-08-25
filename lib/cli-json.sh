@@ -29,6 +29,14 @@ cli_json_error() {
     }'
 }
 
+# Serialize a profile mutation failure without forwarding implementation
+# messages, filesystem paths, profile IDs, or credential details.
+cli_json_mutation_error() {
+  local command="$1" code="$2" message="$3" state="$4"
+  cli_json_error "$command" "$code" "$message" \
+    "$(jq -cn --arg state "$state" '{state: $state}')"
+}
+
 # Serialize the current transactional movement result without paths, profile
 # identifiers, operation identifiers, credentials, or callback details.
 cli_json_move_result() {

@@ -11,6 +11,7 @@
   USAGE
     nini-agents new <tool>/<name>      Create a new profile
     nini-agents launch <tool>/<name>   Launch the profile (binary args after `--`)
+    nini-agents exec <tool>/<name>     Run a foreground file-overlay profile with clean stdio
     nini-agents continue <tool> <src> <dest>   Copy a chat session between profiles
     nini-agents list                   List all profiles
     nini-agents tools                  List supported tools and detect installs
@@ -45,6 +46,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $MultiCliLauncherPath = $MyInvocation.MyCommand.Definition
 $ToolsDir  = if ($env:MULTICLI_TOOLS_DIR) { $env:MULTICLI_TOOLS_DIR } else { Join-Path $ScriptDir 'ai-tools' }
 $BASE = if ($env:MULTICLI_HOME) { $env:MULTICLI_HOME } else { Join-Path $env:USERPROFILE 'MultiCliProfiles' }
+$script:NiniMachineExecRequested = $false
 
 # Locate a lib module next to this launcher, falling back to the tools dir
 # parent when MULTICLI_TOOLS_DIR points elsewhere (tests).
@@ -140,6 +142,11 @@ function Get-AdapterForLaunch {
         throw "Unknown isolation strategy '$($adapter.isolation.strategy)'"
     }
     if (@($adapter.binary.windows).Count -eq 0) { throw "Adapter '$ToolId' has no binary candidates for windows. Run: nini-agents doctor" }
+    Import-AdapterValidationModule
+    $launchErrors = @(Test-AdapterLaunchContract -Adapter $adapter)
+    if ($launchErrors.Count -gt 0) {
+        throw "Unsafe launch contract for adapter '$ToolId': $($launchErrors -join '; '). Run: nini-agents doctor"
+    }
     return $adapter
 }
 
@@ -1001,22 +1008,24 @@ function Set-RedirectHomeDotfileLinks {
 # nini-agents delete: confirm, clear any process-secret credential, then remove
 # the profile dir, alias, and shortcut.
 function Remove-Profile {
-    param([string]$Spec)
+    param([string]$Spec, [switch]$Confirmed)
     $p = Split-ProfileSpec $Spec
     Test-ProfileName $p.Name
     $profileDir = Get-ProfileDir $p.Tool $p.Name
     if (-not (Test-Path $profileDir)) { throw "Profile '$Spec' does not exist" }
 
-    # Read-Host consults the console on some hosts even when stdin is piped,
-    # silently returning an empty answer and aborting scripted deletes. Read
-    # the redirected stream directly so piped confirmations are honored.
-    if ([Console]::IsInputRedirected) {
-        Write-Host "Delete profile '$Spec' and all its data? [y/N]"
-        $confirm = Read-RedirectedLine
-    } else {
-        $confirm = Read-Host "Delete profile '$Spec' and all its data? [y/N]"
+    if (-not $Confirmed) {
+        # Read-Host consults the console on some hosts even when stdin is piped,
+        # silently returning an empty answer and aborting scripted deletes. Read
+        # the redirected stream directly so piped confirmations are honored.
+        if ([Console]::IsInputRedirected) {
+            Write-Host "Delete profile '$Spec' and all its data? [y/N]"
+            $confirm = Read-RedirectedLine
+        } else {
+            $confirm = Read-Host "Delete profile '$Spec' and all its data? [y/N]"
+        }
+        if ($confirm -notmatch '^[Yy]$') { Write-Host "Aborted."; return }
     }
-    if ($confirm -notmatch '^[Yy]$') { Write-Host "Aborted."; return }
 
     # An OS-user profile owns a sandbox user, optional legacy scheduled tasks,
     # and a Credential Manager entry; remove them before deleting the profile dir.
@@ -1200,10 +1209,11 @@ function Remove-StartMenuShortcut {
 # Launch -- strategy dispatch
 # =============================================================================
 
-# nini-agents launch <tool>/<name> [args...]: resolve the adapter, profile and
-# binary, then hand off to the adapter's isolation strategy.
+# nini-agents launch|exec <tool>/<name> [args...]: resolve the adapter, profile
+# and binary, then hand off to the adapter's isolation strategy. Machine exec
+# is deliberately narrower: a foreground file overlay with transparent stdio.
 function Invoke-Launch {
-    param([string]$Spec, [string[]]$BinaryArgs = @())
+    param([string]$Spec, [string[]]$BinaryArgs = @(), [switch]$MachineExec)
     $p = Split-ProfileSpec $Spec
     $adapter = Get-AdapterForLaunch $p.Tool
     $profileDir = Get-ProfileDir $p.Tool $p.Name
@@ -1220,6 +1230,14 @@ function Invoke-Launch {
     if (Test-UriBinary -Binary $binary) {
         $BinaryArgs = @($adapter.isolation.args) + @($BinaryArgs)
     }
+    if ($MachineExec) {
+        if ($adapter.isolation.mode -ne 'foreground') {
+            throw "Machine exec requires a foreground adapter; '$Spec' uses '$($adapter.isolation.mode)'."
+        }
+        if ($adapter.isolation.strategy -ne 'accountOverlay' -or $adapter.account.mechanism -ne 'fileOverlay') {
+            throw "Machine exec requires accountOverlay/fileOverlay; '$Spec' uses '$($adapter.isolation.strategy)/$($adapter.account.mechanism)'."
+        }
+    }
 
     # A pre-schema profile has no metadata and already stores the tool's
     # complete home, including its file credential, at the profile root.
@@ -1231,7 +1249,7 @@ function Invoke-Launch {
     if ($adapter.isolation.strategy -eq 'accountOverlay' -and
         $adapter.account.mechanism -eq 'fileOverlay' -and
         $null -eq $metadataEntry) {
-        Write-Host "Launching $($adapter.displayName) profile '$Spec' [$($adapter.isolation.strategy), legacy whole-root]"
+        if (-not $MachineExec) { Write-Host "Launching $($adapter.displayName) profile '$Spec' [$($adapter.isolation.strategy), legacy whole-root]" }
         Invoke-LaunchIsolated -Adapter $adapter -ProfileDir $profileDir -Binary $binary -BinaryArgs $BinaryArgs
         return
     }
@@ -1242,12 +1260,12 @@ function Invoke-Launch {
         if (Test-AdapterNeedsOsUser -Adapter $adapter) {
             throw "Profile '$Spec' cannot use --isolated because folder redirection does not isolate Windows Credential Manager."
         }
-        Write-Host "Launching $($adapter.displayName) profile '$Spec' [$($adapter.isolation.strategy), isolated]"
+        if (-not $MachineExec) { Write-Host "Launching $($adapter.displayName) profile '$Spec' [$($adapter.isolation.strategy), isolated]" }
         Invoke-LaunchIsolated -Adapter $adapter -ProfileDir $profileDir -Binary $binary -BinaryArgs $BinaryArgs
         return
     }
 
-    Write-Host "Launching $($adapter.displayName) profile '$Spec' [$($adapter.isolation.strategy)]"
+    if (-not $MachineExec) { Write-Host "Launching $($adapter.displayName) profile '$Spec' [$($adapter.isolation.strategy)]" }
 
     switch ($adapter.isolation.strategy) {
         'env'            { Invoke-LaunchEnv            -Adapter $adapter -ProfileDir $profileDir -Binary $binary -BinaryArgs $BinaryArgs }
@@ -1394,9 +1412,31 @@ function Invoke-LaunchIsolated {
         $environment['TMP']          = $tempDir
     }
 
+    $adapterArgs = @()
+    foreach ($argument in @($Adapter.isolation.args)) {
+        if ($null -eq $argument -or $argument -eq '') { continue }
+        $adapterArgs += ([string]$argument).
+            Replace('{profileDir}', $ProfileDir).
+            Replace('{profileId}', $profileId).
+            Replace('{authDir}', (Join-Path $ProfileDir 'auth')).
+            Replace('{runtimeRoot}', $ProfileDir).
+            Replace('{sharedStateRoot}', $ProfileDir).
+            Replace('{realHome}', $env:USERPROFILE)
+    }
+    $launchArgs = @()
+    $adapterArgsInserted = $false
+    foreach ($argument in @($BinaryArgs)) {
+        if (-not $adapterArgsInserted -and $argument -eq '--') {
+            $launchArgs += @($adapterArgs)
+            $adapterArgsInserted = $true
+        }
+        $launchArgs += $argument
+    }
+    if (-not $adapterArgsInserted) { $launchArgs += @($adapterArgs) }
+
     Start-LaunchPlan -Plan ([pscustomobject]@{
         Binary = $Binary
-        Arguments = @($BinaryArgs)
+        Arguments = @($launchArgs)
         Environment = $environment
         # Schema-v2 immediately sets its metadata value again; legacy profiles
         # must not inherit an unrelated id from the parent process.
@@ -1614,6 +1654,181 @@ function Get-ProfileJsonData {
     return [ordered]@{ profiles = @($profiles); count = $profiles.Count }
 }
 
+function Get-ProfileMutationSummary {
+    param([string]$Tool, [string]$Name, [string]$ProfileDir)
+    $type = if (Test-Path -LiteralPath (Join-Path $ProfileDir '.isolated') -PathType Leaf) { 'isolated' }
+        elseif (Test-Path -LiteralPath (Join-Path $ProfileDir '.shared') -PathType Leaf) { 'shared' }
+        elseif (Test-Path -LiteralPath (Join-Path $ProfileDir '.cli') -PathType Leaf) { 'cli' }
+        else { 'full' }
+    return [ordered]@{
+        tool = $Tool
+        name = $Name
+        type = $type
+        schemaVersion = $(if (Test-Path -LiteralPath (Join-Path $ProfileDir '.profile.json') -PathType Leaf) { 2 } else { 1 })
+    }
+}
+
+function Write-JsonMutationError {
+    param([string]$Command, [string]$Code, [string]$Message, [string]$State, [int]$ExitCode)
+    Write-Output (ConvertTo-NiniMutationJsonError -Command $Command -Code $Code -Message $Message -State $State)
+    $script:NiniJsonExitCode = $ExitCode
+}
+
+function Invoke-JsonNewMutation {
+    param([string]$Spec, [string[]]$Tokens)
+    try {
+        $profile = Split-ProfileSpec $Spec
+        Test-ProfileName $profile.Name
+    } catch {
+        Write-JsonMutationError -Command 'new' -Code 'invalid_identifier' `
+            -Message 'A valid profile address is required.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        $flags = Read-NewFlags $Tokens
+    } catch {
+        Write-JsonMutationError -Command 'new' -Code 'invalid_arguments' `
+            -Message 'The new command received invalid arguments.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    if ($flags.Shared -and $flags.Isolated) {
+        Write-JsonMutationError -Command 'new' -Code 'invalid_arguments' `
+            -Message 'The new command received invalid arguments.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        $profileDir = Get-ProfileDir $profile.Tool $profile.Name
+    } catch {
+        Write-JsonMutationError -Command 'new' -Code 'operation_failed' `
+            -Message 'The profile could not be created.' -State 'not_applied' -ExitCode 6
+        return
+    }
+    if (Test-Path -LiteralPath $profileDir) {
+        Write-JsonMutationError -Command 'new' -Code 'profile_exists' `
+            -Message 'The destination profile already exists.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        New-Profile -Spec $Spec -Shared $flags.Shared -Cli $flags.Cli `
+            -FromTemplate $flags.FromTemplate -NoSeed $flags.NoSeed `
+            -Isolated ($flags.Isolated -or $WholeRoot) *> $null
+    } catch {
+        $state = if (Test-Path -LiteralPath $profileDir) { 'partially_applied' } else { 'not_applied' }
+        Write-JsonMutationError -Command 'new' -Code 'operation_failed' `
+            -Message 'The profile could not be created.' -State $state -ExitCode 6
+        return
+    }
+    $data = [ordered]@{
+        state = 'applied'
+        profile = (Get-ProfileMutationSummary -Tool $profile.Tool -Name $profile.Name -ProfileDir $profileDir)
+    }
+    Write-Output (ConvertTo-NiniJsonSuccess -Command 'new' -Data $data)
+}
+
+function Invoke-JsonRenameMutation {
+    param([string]$OldSpec, [string]$NewSpec, [string[]]$ExtraTokens = @())
+    if (@($ExtraTokens).Count -gt 0) {
+        Write-JsonMutationError -Command 'rename' -Code 'invalid_arguments' `
+            -Message 'The rename command requires exactly two profile addresses.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        $source = Split-ProfileSpec $OldSpec
+        Test-ProfileName $source.Name
+        $destination = Split-ProfileSpec $NewSpec
+        Test-ProfileName $destination.Name
+    } catch {
+        Write-JsonMutationError -Command 'rename' -Code 'invalid_identifier' `
+            -Message 'Both profile addresses must be valid.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    if ($source.Tool -ne $destination.Tool) {
+        Write-JsonMutationError -Command 'rename' -Code 'cross_tool_rename' `
+            -Message 'Profiles cannot be renamed across tools.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        $sourceDir = Get-ProfileDir $source.Tool $source.Name
+        $destinationDir = Get-ProfileDir $destination.Tool $destination.Name
+    } catch {
+        Write-JsonMutationError -Command 'rename' -Code 'operation_failed' `
+            -Message 'The profile could not be renamed.' -State 'not_applied' -ExitCode 6
+        return
+    }
+    if (-not (Test-Path -LiteralPath $sourceDir -PathType Container)) {
+        Write-JsonMutationError -Command 'rename' -Code 'profile_not_found' `
+            -Message 'The source profile does not exist.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    if (Test-Path -LiteralPath $destinationDir) {
+        Write-JsonMutationError -Command 'rename' -Code 'profile_exists' `
+            -Message 'The destination profile already exists.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        Rename-Profile $OldSpec $NewSpec *> $null
+    } catch {
+        $state = if (-not (Test-Path -LiteralPath $sourceDir -PathType Container) -and
+            (Test-Path -LiteralPath $destinationDir -PathType Container)) { 'partially_applied' } else { 'not_applied' }
+        Write-JsonMutationError -Command 'rename' -Code 'operation_failed' `
+            -Message 'The profile could not be renamed.' -State $state -ExitCode 6
+        return
+    }
+    $data = [ordered]@{
+        state = 'applied'
+        from = [ordered]@{ tool = $source.Tool; name = $source.Name }
+        profile = (Get-ProfileMutationSummary -Tool $destination.Tool -Name $destination.Name -ProfileDir $destinationDir)
+    }
+    Write-Output (ConvertTo-NiniJsonSuccess -Command 'rename' -Data $data)
+}
+
+function Invoke-JsonDeleteMutation {
+    param([string]$Spec, [string[]]$Tokens = @())
+    try {
+        $profile = Split-ProfileSpec $Spec
+        Test-ProfileName $profile.Name
+    } catch {
+        Write-JsonMutationError -Command 'delete' -Code 'invalid_identifier' `
+            -Message 'A valid profile address is required.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    if (@($Tokens).Count -ne 2 -or $Tokens[0] -ne '--confirm' -or $Tokens[1] -cne $Spec) {
+        Write-JsonMutationError -Command 'delete' -Code 'confirmation_required' `
+            -Message 'JSON deletion requires --confirm followed by the exact profile address.' `
+            -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        $profileDir = Get-ProfileDir $profile.Tool $profile.Name
+    } catch {
+        Write-JsonMutationError -Command 'delete' -Code 'operation_failed' `
+            -Message 'The profile could not be deleted.' -State 'not_applied' -ExitCode 6
+        return
+    }
+    if (-not (Test-Path -LiteralPath $profileDir -PathType Container)) {
+        Write-JsonMutationError -Command 'delete' -Code 'profile_not_found' `
+            -Message 'The profile does not exist.' -State 'not_applied' -ExitCode 2
+        return
+    }
+    try {
+        Remove-Profile -Spec $Spec -Confirmed *> $null
+    } catch {
+        Write-JsonMutationError -Command 'delete' -Code 'operation_failed' `
+            -Message 'The profile could not be completely deleted.' -State 'partially_applied' -ExitCode 6
+        return
+    }
+    if (Test-Path -LiteralPath $profileDir) {
+        Write-JsonMutationError -Command 'delete' -Code 'operation_failed' `
+            -Message 'The profile could not be completely deleted.' -State 'partially_applied' -ExitCode 6
+        return
+    }
+    $data = [ordered]@{
+        state = 'applied'
+        profile = [ordered]@{ tool = $profile.Tool; name = $profile.Name }
+    }
+    Write-Output (ConvertTo-NiniJsonSuccess -Command 'delete' -Data $data)
+}
+
 function Get-ToolsJsonArray {
     $tools = @()
     foreach ($adapter in @(Get-Adapters 3>$null | Sort-Object id)) {
@@ -1632,10 +1847,28 @@ function Get-ToolsJsonArray {
 }
 
 function Invoke-JsonQuery {
-    param([string]$Command, [string]$First, [string]$Second)
+    param([string]$Command, [string]$First, [string]$Second, [string[]]$Remaining = @())
     Import-JsonModule
     $script:NiniJsonExitCode = 0
     switch ($Command) {
+        'new' {
+            $tokens = @()
+            if ($Second) { $tokens += $Second }
+            if ($Remaining) { $tokens += $Remaining }
+            Invoke-JsonNewMutation -Spec $First -Tokens $tokens
+            return
+        }
+        'rename' {
+            Invoke-JsonRenameMutation -OldSpec $First -NewSpec $Second -ExtraTokens $Remaining
+            return
+        }
+        'delete' {
+            $tokens = @()
+            if ($Second) { $tokens += $Second }
+            if ($Remaining) { $tokens += $Remaining }
+            Invoke-JsonDeleteMutation -Spec $First -Tokens $tokens
+            return
+        }
         { $_ -in @('version', '--version', '-v') } {
             if ($First) { Write-Output (ConvertTo-NiniJsonError -Command 'version' -Code 'invalid_arguments' -Message 'This JSON command received unsupported arguments.'); $script:NiniJsonExitCode = 2; return }
             Write-Output (ConvertTo-NiniJsonSuccess -Command 'version' -Data ([ordered]@{ product = 'nini-agents'; version = $VERSION }))
@@ -2105,6 +2338,7 @@ USAGE
 COMMANDS
   new <tool>/<name> [--shared] [--isolated] [--cli] [--from <tpl>] [--no-seed]   Create a profile
   launch <tool>/<name> [-- args...]                     Launch the profile
+  exec <tool>/<name> [-- args...]                       Run foreground file-overlay profile with clean stdio
   continue <tool> <src> <dest> [--no-merge] [--dry-run] Copy a chat session src->dest ('base' = real home)
   migrate <tool>/<name> [--dry-run] [--prefer-profile] [--preserve-unknown]
                                                         Migrate a legacy profile to schema-v2
@@ -2120,6 +2354,8 @@ COMMANDS
   template list | delete <name>                         Manage templates
   export <tool>/<name> [path]                           Export to .zip
   import <archive> <tool>/<name>                        Import from .zip
+  move <tool>/<name> <device> [--dry-run]               Cross-device move (Bash transport only)
+  devices list|status|doctor                            Device fleet commands (Bash transport only)
   tools                                                 List supported tools
   doctor                                                Diagnose environment
   stats                                                 Storage usage
@@ -2127,7 +2363,8 @@ COMMANDS
   help | version                                        This / version
 
 JSON QUERIES
-  --json supports version, list/status, tools, doctor, stats, and template list.
+  --json supports version, list/status, tools, doctor, stats, template list,
+  new, rename, and delete.
   See docs/json-cli.md for the versioned envelope and exit codes.
 
 PROFILE SHORTHAND
@@ -2142,6 +2379,7 @@ EXAMPLES
   nini-agents new codex/acme --isolated
   nini-agents new opencode/personal --isolated
   nini-agents launch codex/acme -- exec --search "fix the build"
+  nini-agents exec codex/acme -- app-server --stdio
   nini-agents continue codex rate-limited fresh-account   # resume a chat under another account
   claude-cli-work          # via auto-generated alias on `$PATH
 
@@ -2159,7 +2397,7 @@ Register-ArgumentCompleter -Native -CommandName nini-agents,multi-cli -ScriptBlo
     param(`$wordToComplete, `$commandAst, `$cursorPosition)
     `$base = if (`$env:MULTICLI_HOME) { `$env:MULTICLI_HOME } else { Join-Path `$env:USERPROFILE 'MultiCliProfiles' }
     `$tools = (Get-ChildItem -Directory '$ToolsDir' -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path `$_.FullName 'adapter.json') }).Name
-    `$cmds = @('new','launch','continue','migrate','list','status','rename','delete','clone','auth','permissions','template','export','import','tools','doctor','stats','completion','help','version')
+    `$cmds = @('new','launch','exec','continue','migrate','list','status','rename','delete','clone','auth','permissions','template','export','import','move','devices','tools','doctor','stats','completion','help','version')
     `$specs = @()
     foreach (`$t in `$tools) {
         `$dir = Join-Path `$base `$t
@@ -2259,10 +2497,11 @@ $Cmd = if ($normalizedTokens.Count -gt 0) { [string]$normalizedTokens[0] } else 
 $Arg1 = if ($normalizedTokens.Count -gt 1) { [string]$normalizedTokens[1] } else { $null }
 $Arg2 = if ($normalizedTokens.Count -gt 2) { [string]$normalizedTokens[2] } else { $null }
 $ForwardArgs = if ($normalizedTokens.Count -gt 3) { @($normalizedTokens[3..($normalizedTokens.Count - 1)]) } else { @() }
+$script:NiniMachineExecRequested = ($Cmd -eq 'exec')
 
 if ($jsonOutput) {
     try {
-        Invoke-JsonQuery -Command $Cmd -First $Arg1 -Second $Arg2
+        Invoke-JsonQuery -Command $Cmd -First $Arg1 -Second $Arg2 -Remaining $ForwardArgs
         exit $script:NiniJsonExitCode
     } catch {
         Import-JsonModule
@@ -2312,6 +2551,14 @@ try {
             $passthrough = if ($split.HadDelim) { $split.Post } else { $split.Pre }
             Invoke-Launch -Spec $Arg1 -BinaryArgs $passthrough
         }
+        'exec' {
+            $forward = @()
+            if ($Arg2) { $forward += $Arg2 }
+            if ($ForwardArgs) { $forward += $ForwardArgs }
+            $split = Split-LaunchArgs $forward
+            $passthrough = if ($split.HadDelim) { $split.Post } else { $split.Pre }
+            Invoke-Launch -Spec $Arg1 -BinaryArgs $passthrough -MachineExec
+        }
         'list'    { Show-List $Arg1 }
         'status'  { Show-Status }
         'rename'  { Rename-Profile $Arg1 $Arg2 }
@@ -2323,6 +2570,8 @@ try {
         }
         'export'  { Invoke-Export $Arg1 $Arg2 }
         'import'  { Invoke-Import $Arg1 $Arg2 }
+        'move'    { throw 'Cross-device SSH movement is currently supported by the Bash launcher on Linux and macOS.' }
+        'devices' { throw 'Device fleet commands are currently supported by the Bash launcher on Linux and macOS.' }
         'tools'   { Show-Tools }
         'doctor'  {
             $tokens = @()
@@ -2359,6 +2608,10 @@ try {
         }
     }
 } catch {
-    Write-Host "Error: $_" -ForegroundColor Red
+    if ($script:NiniMachineExecRequested) {
+        [Console]::Error.WriteLine("Error: $_")
+    } else {
+        Write-Host "Error: $_" -ForegroundColor Red
+    }
     exit 1
 }

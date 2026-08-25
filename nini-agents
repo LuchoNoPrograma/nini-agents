@@ -14,6 +14,7 @@ VERSION="1.0.0"
 SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 TOOLS_DIR="${MULTICLI_TOOLS_DIR:-$SCRIPT_DIR/ai-tools}"
 BASE="${MULTICLI_HOME:-$HOME/MultiCliProfiles}"
+NINI_MACHINE_EXEC=false
 
 # shellcheck source=lib/adapter-validation.sh
 source "$SCRIPT_DIR/lib/adapter-validation.sh"
@@ -23,6 +24,8 @@ source "$SCRIPT_DIR/lib/multicli-runtime.sh"
 source "$SCRIPT_DIR/lib/credential-store.sh"
 # shellcheck source=lib/transfer.sh
 source "$SCRIPT_DIR/lib/transfer.sh"
+# shellcheck source=lib/remote-move.sh
+source "$SCRIPT_DIR/lib/remote-move.sh"
 # shellcheck source=lib/migration.sh
 source "$SCRIPT_DIR/lib/migration.sh"
 # shellcheck source=lib/multicli-osuser.sh
@@ -98,11 +101,13 @@ list_tool_ids() {
 # fail-closed at the filesystem boundary.
 ADAPTER_LAUNCH_TOOL=""
 ADAPTER_LAUNCH_MANIFEST=""
+ADAPTER_LAUNCH_SCHEMA=""
 ADAPTER_LAUNCH_ID=""
 ADAPTER_LAUNCH_DISPLAY=""
 ADAPTER_LAUNCH_STRATEGY=""
 ADAPTER_LAUNCH_MODE=""
 ADAPTER_LAUNCH_MECHANISM=""
+ADAPTER_LAUNCH_SECRET_ENV=""
 ADAPTER_LAUNCH_SUPPORT=""
 ADAPTER_LAUNCH_SUPPORT_REASON=""
 ADAPTER_LAUNCH_INSTALL=""
@@ -119,6 +124,9 @@ ADAPTER_LAUNCH_SHARED_PATHS=()
 ADAPTER_LAUNCH_SESSION_PATHS=()
 ADAPTER_LAUNCH_FILE_PATHS=()
 ADAPTER_LAUNCH_DIRECT_PATHS=()
+ADAPTER_LAUNCH_RUNTIME_PATHS=()
+ADAPTER_LAUNCH_MIGRATION_PATHS=()
+ADAPTER_LAUNCH_UNSAFE_PATHS=()
 ADAPTER_LAUNCH_SHARED_CREDENTIAL_PATHS=()
 ADAPTER_LAUNCH_SHARED_CREDENTIAL_KINDS=()
 
@@ -131,11 +139,13 @@ load_adapter_launch_contract() {
 
   ADAPTER_LAUNCH_TOOL="$tool_id"
   ADAPTER_LAUNCH_MANIFEST="$manifest"
+  ADAPTER_LAUNCH_SCHEMA=""
   ADAPTER_LAUNCH_ID=""
   ADAPTER_LAUNCH_DISPLAY=""
   ADAPTER_LAUNCH_STRATEGY=""
   ADAPTER_LAUNCH_MODE=""
   ADAPTER_LAUNCH_MECHANISM=""
+  ADAPTER_LAUNCH_SECRET_ENV=""
   ADAPTER_LAUNCH_SUPPORT=""
   ADAPTER_LAUNCH_SUPPORT_REASON=""
   ADAPTER_LAUNCH_INSTALL=""
@@ -152,6 +162,9 @@ load_adapter_launch_contract() {
   ADAPTER_LAUNCH_SESSION_PATHS=()
   ADAPTER_LAUNCH_FILE_PATHS=()
   ADAPTER_LAUNCH_DIRECT_PATHS=()
+  ADAPTER_LAUNCH_RUNTIME_PATHS=()
+  ADAPTER_LAUNCH_MIGRATION_PATHS=()
+  ADAPTER_LAUNCH_UNSAFE_PATHS=()
   ADAPTER_LAUNCH_SHARED_CREDENTIAL_PATHS=()
   ADAPTER_LAUNCH_SHARED_CREDENTIAL_KINDS=()
 
@@ -159,11 +172,13 @@ load_adapter_launch_contract() {
         IFS= read -r -d '' name && \
         IFS= read -r -d '' value; do
     case "$record:$name" in
+      scalar:schema) ADAPTER_LAUNCH_SCHEMA="$value" ;;
       scalar:id) ADAPTER_LAUNCH_ID="$value" ;;
       scalar:display) ADAPTER_LAUNCH_DISPLAY="$value" ;;
       scalar:strategy) ADAPTER_LAUNCH_STRATEGY="$value" ;;
       scalar:mode) ADAPTER_LAUNCH_MODE="$value" ;;
       scalar:mechanism) ADAPTER_LAUNCH_MECHANISM="$value" ;;
+      scalar:secret-env) ADAPTER_LAUNCH_SECRET_ENV="$value" ;;
       scalar:support) ADAPTER_LAUNCH_SUPPORT="$value" ;;
       scalar:support-reason) ADAPTER_LAUNCH_SUPPORT_REASON="$value" ;;
       scalar:install) ADAPTER_LAUNCH_INSTALL="$value" ;;
@@ -179,6 +194,9 @@ load_adapter_launch_contract() {
       session:*) ADAPTER_LAUNCH_SESSION_PATHS+=("$name") ;;
       file:*) ADAPTER_LAUNCH_FILE_PATHS+=("$name") ;;
       direct:*) ADAPTER_LAUNCH_DIRECT_PATHS+=("$name") ;;
+      runtime:*) ADAPTER_LAUNCH_RUNTIME_PATHS+=("$name") ;;
+      migration:*) ADAPTER_LAUNCH_MIGRATION_PATHS+=("$name") ;;
+      unsafe:*) ADAPTER_LAUNCH_UNSAFE_PATHS+=("$name") ;;
       shared-credential:*) ADAPTER_LAUNCH_SHARED_CREDENTIAL_PATHS+=("$name"); ADAPTER_LAUNCH_SHARED_CREDENTIAL_KINDS+=("$value") ;;
       complete:yes) complete=true ;;
     esac
@@ -187,11 +205,13 @@ load_adapter_launch_contract() {
       $record, "\u0000", (($name // "") | tostring), "\u0000", (($value // "") | tostring), "\u0000";
     if any(.. | strings; contains("\u0000")) then error("adapter strings may not contain NUL")
     else
+      row("scalar"; "schema"; (.schemaVersion // 1)),
       row("scalar"; "id"; .id),
       row("scalar"; "display"; .displayName),
       row("scalar"; "strategy"; .isolation.strategy),
       row("scalar"; "mode"; .isolation.mode),
       row("scalar"; "mechanism"; .account.mechanism),
+      row("scalar"; "secret-env"; .account.secret.environmentVariable),
       row("scalar"; "support"; .support[$platform].level),
       row("scalar"; "support-reason"; .support[$platform].reason),
       row("scalar"; "install"; .install),
@@ -207,6 +227,9 @@ load_adapter_launch_contract() {
       ((.normalState.sessionPaths // [])[] | row("session"; .; "")),
       ((.normalState.filePaths // [])[] | row("file"; .; "")),
       ((.normalState.directPaths // [])[] | row("direct"; .; "")),
+      ((.normalState.runtimePaths // [])[] | row("runtime"; .; "")),
+      ((.normalState.migrationPreservePaths // [])[] | row("migration"; .; "")),
+      ((.normalState.unsafePaths // [])[] | row("unsafe"; .; "")),
       ((.sharedCredentialState.entries // [])[] | row("shared-credential"; .path; .kind)),
       row("complete"; "yes"; "")
     end
@@ -220,6 +243,130 @@ load_adapter_launch_contract() {
     env|accountOverlay|userDataDir|redirectHome|appdata|sandboxUser) ;;
     *) abort "Unknown isolation strategy '$ADAPTER_LAUNCH_STRATEGY'" ;;
   esac
+  validate_adapter_launch_contract
+}
+
+# Validate the security-sensitive subset already decoded by the launch parser.
+# This keeps launch to one adapter jq parse while restoring the same path
+# separation, state classification, and placeholder guarantees that prevent an
+# adapter from linking profile credentials into shared state.
+validate_adapter_launch_contract() {
+  local label path left right normalized declared found placeholder remaining value index path_label
+  local restore_nocasematch=false
+  local allowed_placeholders=' {profileDir} {profileId} {authDir} {runtimeRoot} {sharedStateRoot} {realHome} '
+  shopt -q nocasematch || { shopt -s nocasematch; restore_nocasematch=true; }
+
+  case "$ADAPTER_LAUNCH_SCHEMA" in
+    1) ;;
+    2)
+      [ "$ADAPTER_LAUNCH_STRATEGY" = accountOverlay ] || abort "Adapter '$ADAPTER_LAUNCH_ID' schema-v2 launch strategy must be 'accountOverlay'. Run: nini-agents doctor"
+      case "$ADAPTER_LAUNCH_MODE" in foreground|detached) ;; *) abort "Adapter '$ADAPTER_LAUNCH_ID' has invalid launch mode '$ADAPTER_LAUNCH_MODE'. Run: nini-agents doctor" ;; esac
+      case "$ADAPTER_LAUNCH_MECHANISM" in
+        fileOverlay) [ "${#ADAPTER_LAUNCH_CREDENTIAL_PATHS[@]}" -gt 0 ] || abort "Adapter '$ADAPTER_LAUNCH_ID' fileOverlay has no credential paths. Run: nini-agents doctor" ;;
+        processSecret) [ -n "$ADAPTER_LAUNCH_SECRET_ENV" ] || abort "Adapter '$ADAPTER_LAUNCH_ID' processSecret has no credential environment variable. Run: nini-agents doctor" ;;
+        osUserCredentialStore|inseparable) ;;
+        *) abort "Adapter '$ADAPTER_LAUNCH_ID' has unsupported account mechanism '$ADAPTER_LAUNCH_MECHANISM'. Run: nini-agents doctor" ;;
+      esac
+      [ -n "$ADAPTER_LAUNCH_ROOT_RAW" ] || abort "Adapter '$ADAPTER_LAUNCH_ID' has no normal-state root for $(platform). Run: nini-agents doctor"
+      ;;
+    *) abort "Adapter '$ADAPTER_LAUNCH_ID' has unsupported schemaVersion '$ADAPTER_LAUNCH_SCHEMA'. Run: nini-agents doctor" ;;
+  esac
+
+  for label in credential shared session file direct runtime migration unsafe shared-credential; do
+    case "$label" in
+      credential) set -- "${ADAPTER_LAUNCH_CREDENTIAL_PATHS[@]+"${ADAPTER_LAUNCH_CREDENTIAL_PATHS[@]}"}" ;;
+      shared) set -- "${ADAPTER_LAUNCH_SHARED_PATHS[@]+"${ADAPTER_LAUNCH_SHARED_PATHS[@]}"}" ;;
+      session) set -- "${ADAPTER_LAUNCH_SESSION_PATHS[@]+"${ADAPTER_LAUNCH_SESSION_PATHS[@]}"}" ;;
+      file) set -- "${ADAPTER_LAUNCH_FILE_PATHS[@]+"${ADAPTER_LAUNCH_FILE_PATHS[@]}"}" ;;
+      direct) set -- "${ADAPTER_LAUNCH_DIRECT_PATHS[@]+"${ADAPTER_LAUNCH_DIRECT_PATHS[@]}"}" ;;
+      runtime) set -- "${ADAPTER_LAUNCH_RUNTIME_PATHS[@]+"${ADAPTER_LAUNCH_RUNTIME_PATHS[@]}"}" ;;
+      migration) set -- "${ADAPTER_LAUNCH_MIGRATION_PATHS[@]+"${ADAPTER_LAUNCH_MIGRATION_PATHS[@]}"}" ;;
+      unsafe) set -- "${ADAPTER_LAUNCH_UNSAFE_PATHS[@]+"${ADAPTER_LAUNCH_UNSAFE_PATHS[@]}"}" ;;
+      shared-credential) set -- "${ADAPTER_LAUNCH_SHARED_CREDENTIAL_PATHS[@]+"${ADAPTER_LAUNCH_SHARED_CREDENTIAL_PATHS[@]}"}" ;;
+    esac
+    for path in "$@"; do
+      path_label="$label"
+      [ "$label" != shared ] || path_label='shared state'
+      is_safe_adapter_path "$path" || abort "Adapter '$ADAPTER_LAUNCH_ID' has unsafe $path_label path '$path'. Run: nini-agents doctor"
+    done
+  done
+  [ -z "$ADAPTER_LAUNCH_STATE_SUBDIR" ] || is_safe_adapter_path "$ADAPTER_LAUNCH_STATE_SUBDIR" || abort "Adapter '$ADAPTER_LAUNCH_ID' has unsafe runtime subdirectory '$ADAPTER_LAUNCH_STATE_SUBDIR'. Run: nini-agents doctor"
+
+  # All launch-visible state classes must be mutually disjoint where an
+  # overlap could redirect credentials or change which backing store wins.
+  for left in "${ADAPTER_LAUNCH_CREDENTIAL_PATHS[@]}"; do
+    for label in shared session runtime unsafe; do
+      case "$label" in
+        shared) set -- "${ADAPTER_LAUNCH_SHARED_PATHS[@]+"${ADAPTER_LAUNCH_SHARED_PATHS[@]}"}" ;;
+        session) set -- "${ADAPTER_LAUNCH_SESSION_PATHS[@]+"${ADAPTER_LAUNCH_SESSION_PATHS[@]}"}" ;;
+        runtime) set -- "${ADAPTER_LAUNCH_RUNTIME_PATHS[@]+"${ADAPTER_LAUNCH_RUNTIME_PATHS[@]}"}" ;;
+        unsafe) set -- "${ADAPTER_LAUNCH_UNSAFE_PATHS[@]+"${ADAPTER_LAUNCH_UNSAFE_PATHS[@]}"}" ;;
+      esac
+      for right in "$@"; do launch_paths_overlap "$left" "$right" && abort "Adapter '$ADAPTER_LAUNCH_ID' credential path '$left' overlaps $label path '$right'. Run: nini-agents doctor"; done
+    done
+  done
+  for left in "${ADAPTER_LAUNCH_SHARED_PATHS[@]}"; do
+    for right in "${ADAPTER_LAUNCH_SESSION_PATHS[@]}" "${ADAPTER_LAUNCH_RUNTIME_PATHS[@]}" "${ADAPTER_LAUNCH_UNSAFE_PATHS[@]}"; do launch_paths_overlap "$left" "$right" && abort "Adapter '$ADAPTER_LAUNCH_ID' shared path '$left' overlaps another state path '$right'. Run: nini-agents doctor"; done
+  done
+  for left in "${ADAPTER_LAUNCH_SESSION_PATHS[@]}"; do
+    for right in "${ADAPTER_LAUNCH_RUNTIME_PATHS[@]}" "${ADAPTER_LAUNCH_UNSAFE_PATHS[@]}"; do launch_paths_overlap "$left" "$right" && abort "Adapter '$ADAPTER_LAUNCH_ID' session path '$left' overlaps another state path '$right'. Run: nini-agents doctor"; done
+  done
+  for left in "${ADAPTER_LAUNCH_RUNTIME_PATHS[@]}"; do
+    for right in "${ADAPTER_LAUNCH_UNSAFE_PATHS[@]}"; do launch_paths_overlap "$left" "$right" && abort "Adapter '$ADAPTER_LAUNCH_ID' runtime path '$left' overlaps unsafe path '$right'. Run: nini-agents doctor"; done
+  done
+
+  for left in "${ADAPTER_LAUNCH_SHARED_CREDENTIAL_PATHS[@]}"; do
+    for right in "${ADAPTER_LAUNCH_SHARED_CREDENTIAL_PATHS[@]}"; do
+      [ "$left" = "$right" ] || { launch_paths_overlap "$left" "$right" && abort "Adapter '$ADAPTER_LAUNCH_ID' shared credential path '$left' overlaps shared credential path '$right'. Run: nini-agents doctor"; }
+    done
+    for right in "${ADAPTER_LAUNCH_CREDENTIAL_PATHS[@]}" "${ADAPTER_LAUNCH_SHARED_PATHS[@]}" "${ADAPTER_LAUNCH_SESSION_PATHS[@]}" "${ADAPTER_LAUNCH_RUNTIME_PATHS[@]}" "${ADAPTER_LAUNCH_UNSAFE_PATHS[@]}"; do
+      launch_paths_overlap "$left" "$right" && abort "Adapter '$ADAPTER_LAUNCH_ID' shared credential path '$left' overlaps state path '$right'. Run: nini-agents doctor"
+    done
+  done
+  if [ "${#ADAPTER_LAUNCH_SHARED_CREDENTIAL_PATHS[@]}" -gt 0 ]; then
+    is_safe_adapter_path "$ADAPTER_LAUNCH_SHARED_CREDENTIAL_ROOT" || abort "Adapter '$ADAPTER_LAUNCH_ID' has unsafe shared credential root '$ADAPTER_LAUNCH_SHARED_CREDENTIAL_ROOT'. Run: nini-agents doctor"
+    normalized="${ADAPTER_LAUNCH_SHARED_CREDENTIAL_ROOT//\\//}"
+    case "$normalized" in ".shared/$ADAPTER_LAUNCH_ID/"*) ;; *) abort "Adapter '$ADAPTER_LAUNCH_ID' shared credential root must stay below '.shared/$ADAPTER_LAUNCH_ID/'. Run: nini-agents doctor" ;; esac
+    [ "${#ADAPTER_LAUNCH_SHARED_CREDENTIAL_PATHS[@]}" -eq "${#ADAPTER_LAUNCH_SHARED_CREDENTIAL_KINDS[@]}" ] || abort "Adapter '$ADAPTER_LAUNCH_ID' has an incomplete shared credential contract. Run: nini-agents doctor"
+    for value in "${ADAPTER_LAUNCH_SHARED_CREDENTIAL_KINDS[@]}"; do case "$value" in jsonObjectFile|directory) ;; *) abort "Adapter '$ADAPTER_LAUNCH_ID' has unsupported shared credential kind '$value'. Run: nini-agents doctor" ;; esac; done
+  fi
+
+  for label in file direct migration; do
+    case "$label" in
+      file) set -- "${ADAPTER_LAUNCH_FILE_PATHS[@]+"${ADAPTER_LAUNCH_FILE_PATHS[@]}"}" ;;
+      direct) set -- "${ADAPTER_LAUNCH_DIRECT_PATHS[@]+"${ADAPTER_LAUNCH_DIRECT_PATHS[@]}"}" ;;
+      migration) set -- "${ADAPTER_LAUNCH_MIGRATION_PATHS[@]+"${ADAPTER_LAUNCH_MIGRATION_PATHS[@]}"}" ;;
+    esac
+    for path in "$@"; do
+      normalized="${path//\\//}"; found=false
+      for declared in "${ADAPTER_LAUNCH_SHARED_PATHS[@]}" "${ADAPTER_LAUNCH_SESSION_PATHS[@]}"; do
+        [[ "$normalized" = "${declared//\\//}" ]] && { found=true; break; }
+      done
+      [ "$found" = true ] || abort "Adapter '$ADAPTER_LAUNCH_ID' $label path '$path' is not declared as shared or session state. Run: nini-agents doctor"
+    done
+  done
+
+  for value in "$ADAPTER_LAUNCH_ROOT_RAW" "${ADAPTER_LAUNCH_ENV_VALUES[@]}" "${ADAPTER_LAUNCH_ARGS[@]}"; do
+    remaining="$value"
+    while [[ "$remaining" =~ (\{[A-Za-z][A-Za-z0-9_]*\}) ]]; do
+      placeholder="${BASH_REMATCH[1]}"
+      case "$allowed_placeholders" in *" $placeholder "*) ;; *) abort "Adapter '$ADAPTER_LAUNCH_ID' uses unknown placeholder '$placeholder'. Run: nini-agents doctor" ;; esac
+      remaining="${remaining#*"$placeholder"}"
+    done
+  done
+  for value in "${ADAPTER_LAUNCH_ENV_KEYS[@]}" "${ADAPTER_LAUNCH_CLEAR_ENV[@]}"; do
+    [[ "$value" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || abort "Adapter '$ADAPTER_LAUNCH_ID' has invalid environment variable name '$value'. Run: nini-agents doctor"
+  done
+  [ "$restore_nocasematch" = false ] || shopt -u nocasematch
+}
+
+# Case-insensitive path overlap for the hot launch path, implemented entirely
+# with Bash builtins so large adapter path inventories do not spawn thousands
+# of normalization subprocesses.
+launch_paths_overlap() {
+  local left="${1//\\//}" right="${2//\\//}"
+  left="${left%/}"; right="${right%/}"
+  [[ "$left" = "$right" || "$left" = "$right"/* || "$right" = "$left"/* ]]
 }
 
 # Expand the path tokens adapters use for per-OS roots: $HOME/~ everywhere,
@@ -1012,15 +1159,17 @@ set_redirect_home_links() {
 }
 
 cmd_delete() {
-  local spec="$1"
+  local spec="$1" confirmed="${2:-false}"
   split_profile_spec "$spec"
   validate_name "$NAME"
   local pdir="$(profile_dir "$TOOL" "$NAME")"
   [ -d "$pdir" ] || abort "Profile '$spec' does not exist"
 
-  printf "Delete profile '%s' and all its data? [y/N] " "$spec"
-  read -r confirm
-  [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; return; }
+  if [ "$confirmed" != true ]; then
+    printf "Delete profile '%s' and all its data? [y/N] " "$spec"
+    read -r confirm
+    [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Aborted."; return; }
+  fi
 
   if [ -f "$pdir/.profile.json" ]; then
     local apath mechanism env_var profile_id
@@ -1210,6 +1359,7 @@ remove_shortcut() {
       [ -f "$dp" ] && rm -f "$dp"
       ;;
   esac
+  return 0
 }
 
 create_shortcut_macos() {
@@ -1284,8 +1434,9 @@ DESKTOP
 # Launch -- strategy dispatch
 # =============================================================================
 
-# nini-agents launch <tool>/<name> [args...]: resolve the adapter, profile and
-# binary, then hand off to the adapter's isolation strategy.
+# nini-agents launch|exec <tool>/<name> [args...]: resolve the adapter, profile
+# and binary, then hand off to the adapter's isolation strategy. Machine exec
+# is deliberately narrower: a foreground file overlay with transparent stdio.
 cmd_launch() {
   local spec="$1"; shift
   local binary_args=("$@")
@@ -1312,10 +1463,18 @@ cmd_launch() {
   strategy="$ADAPTER_LAUNCH_STRATEGY"
   display="$ADAPTER_LAUNCH_DISPLAY"
 
+  if [ "$NINI_MACHINE_EXEC" = true ]; then
+    [ "$ADAPTER_LAUNCH_MODE" = foreground ] || \
+      abort "Machine exec requires a foreground adapter; '$spec' uses '$ADAPTER_LAUNCH_MODE'."
+    [ "$strategy" = accountOverlay ] && [ "$ADAPTER_LAUNCH_MECHANISM" = fileOverlay ] || \
+      abort "Machine exec requires accountOverlay/fileOverlay; '$spec' uses '$strategy/$ADAPTER_LAUNCH_MECHANISM'."
+  fi
+
   # The local Hyper integration treats these legacy-compatible markers as a
   # per-tab title lock. Keep this at the common Codex launch boundary so every
   # current or future profile alias is covered, including whole-root profiles.
-  if [ "$TOOL" = codex ] && [ "${TERM_PROGRAM:-}" = Hyper ] && \
+  if [ "$NINI_MACHINE_EXEC" = false ] && \
+     [ "$TOOL" = codex ] && [ "${TERM_PROGRAM:-}" = Hyper ] && \
      [ "${NINI_AGENTS_HYPER_TITLE_LOCK:-}" = 1 ]; then
     printf '\033]0;__MULTICLI_TITLE_LOCK__:%s\007' "$NAME"
     trap 'printf "\033]0;__MULTICLI_TITLE_UNLOCK__\007"' EXIT
@@ -1329,7 +1488,8 @@ cmd_launch() {
   if [ "$strategy" = "accountOverlay" ] && \
      [ "$ADAPTER_LAUNCH_MECHANISM" = fileOverlay ] && \
      [ ! -e "$pdir/.profile.json" ] && [ ! -L "$pdir/.profile.json" ]; then
-    echo "Launching $display profile '$spec' [$strategy, legacy whole-root]"
+    [ "$NINI_MACHINE_EXEC" = true ] || \
+      echo "Launching $display profile '$spec' [$strategy, legacy whole-root]"
     launch_isolated "$TOOL" "$pdir" "$binary" "${binary_args[@]+"${binary_args[@]}"}"
     return
   fi
@@ -1340,12 +1500,13 @@ cmd_launch() {
     if [ "$ADAPTER_LAUNCH_MECHANISM" = osUserCredentialStore ]; then
       abort "Profile '$spec' cannot use --isolated because folder redirection does not isolate the OS credential store."
     fi
-    echo "Launching $display profile '$spec' [$strategy, isolated]"
+    [ "$NINI_MACHINE_EXEC" = true ] || \
+      echo "Launching $display profile '$spec' [$strategy, isolated]"
     launch_isolated "$TOOL" "$pdir" "$binary" "${binary_args[@]+"${binary_args[@]}"}"
     return
   fi
 
-  echo "Launching $display profile '$spec' [$strategy]"
+  [ "$NINI_MACHINE_EXEC" = true ] || echo "Launching $display profile '$spec' [$strategy]"
 
   case "$strategy" in
     env)            launch_env                    "$TOOL" "$pdir" "$binary" "${binary_args[@]+"${binary_args[@]}"}" ;;
@@ -1409,6 +1570,7 @@ launch_isolated() {
 
   local mode
   mode="$(json_str '.isolation.mode' "$apath")"
+  runtime_prepare_launch_args "$apath" "$pdir" "$profile_id" "$pdir/auth" "$pdir" "$pdir" "$@"
   local launch_env=()
   case "$mechanism" in
     fileOverlay|processSecret)
@@ -1440,11 +1602,14 @@ launch_isolated() {
       ;;
   esac
   if [ "$mode" = detached ]; then
-    env "${unset_args[@]+"${unset_args[@]}"}" "${launch_env[@]+"${launch_env[@]}"}" "$binary" "$@" \
+    env "${unset_args[@]+"${unset_args[@]}"}" "${launch_env[@]+"${launch_env[@]}"}" "$binary" "${RUNTIME_LAUNCH_ARGS[@]+"${RUNTIME_LAUNCH_ARGS[@]}"}" \
       > "$pdir/.isolated-launch.log" 2>&1 &
     return 0
   fi
-  env "${unset_args[@]+"${unset_args[@]}"}" "${launch_env[@]+"${launch_env[@]}"}" "$binary" "$@"
+  if [ "$NINI_MACHINE_EXEC" = true ]; then
+    exec env "${unset_args[@]+"${unset_args[@]}"}" "${launch_env[@]+"${launch_env[@]}"}" "$binary" "${RUNTIME_LAUNCH_ARGS[@]+"${RUNTIME_LAUNCH_ARGS[@]}"}"
+  fi
+  env "${unset_args[@]+"${unset_args[@]}"}" "${launch_env[@]+"${launch_env[@]}"}" "$binary" "${RUNTIME_LAUNCH_ARGS[@]+"${RUNTIME_LAUNCH_ARGS[@]}"}"
 }
 
 # env strategy: the whole isolation is the adapter's env map, expanded and
@@ -1730,6 +1895,185 @@ json_tools_array() {
         '{id:$id,kind:$kind,strategy:$strategy,supportLevel:$supportLevel,installed:$installed}'
     done
   } | jq -sc '.'
+}
+
+# Parse a public profile address without invoking abort(), so JSON mutations can
+# return one deterministic envelope even for malformed input.
+json_mutation_parse_spec() {
+  local spec="$1"
+  JSON_MUTATION_TOOL=""
+  JSON_MUTATION_NAME=""
+  if [[ "$spec" =~ ^([a-zA-Z0-9][a-zA-Z0-9-]*)/([a-zA-Z0-9][a-zA-Z0-9-]*)$ ]]; then
+    JSON_MUTATION_TOOL="${BASH_REMATCH[1]}"
+    JSON_MUTATION_NAME="${BASH_REMATCH[2]}"
+    return 0
+  fi
+  return 1
+}
+
+json_new_flags_valid() {
+  local shared=false isolated=false
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --shared) shared=true ;;
+      --isolated|--isolate|-i) isolated=true ;;
+      --cli|--no-seed) ;;
+      --from)
+        shift
+        [ $# -gt 0 ] && [ -n "$1" ] || return 1
+        ;;
+      *) return 1 ;;
+    esac
+    shift
+  done
+  [ "$shared" != true ] || [ "$isolated" != true ]
+}
+
+json_profile_mutation_summary() {
+  local tool="$1" name="$2" pdir="$3" profile_type=full schema_version=1
+  [ -f "$pdir/.cli" ] && profile_type=cli
+  [ -f "$pdir/.shared" ] && profile_type=shared
+  [ -f "$pdir/.isolated" ] && profile_type=isolated
+  [ -f "$pdir/.profile.json" ] && schema_version=2
+  jq -cn --arg tool "$tool" --arg name "$name" --arg type "$profile_type" \
+    --argjson schemaVersion "$schema_version" \
+    '{tool:$tool,name:$name,type:$type,schemaVersion:$schemaVersion}'
+}
+
+cmd_json_new() {
+  local spec="${1:-}" tool name pdir status state profile data
+  [ $# -gt 0 ] || {
+    cli_json_mutation_error new invalid_identifier 'A valid profile address is required.' not_applied
+    return 2
+  }
+  shift
+  json_mutation_parse_spec "$spec" || {
+    cli_json_mutation_error new invalid_identifier 'A valid profile address is required.' not_applied
+    return 2
+  }
+  tool="$JSON_MUTATION_TOOL"
+  name="$JSON_MUTATION_NAME"
+  json_new_flags_valid "$@" || {
+    cli_json_mutation_error new invalid_arguments 'The new command received invalid arguments.' not_applied
+    return 2
+  }
+  pdir="$BASE/$tool/$name"
+  if [ -e "$pdir" ] || [ -L "$pdir" ]; then
+    cli_json_mutation_error new profile_exists 'The destination profile already exists.' not_applied
+    return 2
+  fi
+
+  set +e
+  ( set -e; cmd_new "$spec" "$@" ) >/dev/null 2>/dev/null
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    state=not_applied
+    if [ -e "$pdir" ] || [ -L "$pdir" ]; then state=partially_applied; fi
+    cli_json_mutation_error new operation_failed 'The profile could not be created.' "$state"
+    return 6
+  fi
+
+  profile="$(json_profile_mutation_summary "$tool" "$name" "$pdir")"
+  data="$(jq -cn --argjson profile "$profile" '{state:"applied",profile:$profile}')"
+  cli_json_success new "$data"
+}
+
+cmd_json_rename() {
+  local old="${1:-}" new="${2:-}" old_tool old_name new_tool new_name
+  local old_dir new_dir status state profile data
+  [ $# -eq 2 ] || {
+    cli_json_mutation_error rename invalid_arguments 'The rename command requires exactly two profile addresses.' not_applied
+    return 2
+  }
+  json_mutation_parse_spec "$old" || {
+    cli_json_mutation_error rename invalid_identifier 'The source profile address is invalid.' not_applied
+    return 2
+  }
+  old_tool="$JSON_MUTATION_TOOL"
+  old_name="$JSON_MUTATION_NAME"
+  json_mutation_parse_spec "$new" || {
+    cli_json_mutation_error rename invalid_identifier 'The destination profile address is invalid.' not_applied
+    return 2
+  }
+  new_tool="$JSON_MUTATION_TOOL"
+  new_name="$JSON_MUTATION_NAME"
+  if [ "$old_tool" != "$new_tool" ]; then
+    cli_json_mutation_error rename cross_tool_rename 'Profiles cannot be renamed across tools.' not_applied
+    return 2
+  fi
+
+  old_dir="$BASE/$old_tool/$old_name"
+  new_dir="$BASE/$new_tool/$new_name"
+  if [ ! -d "$old_dir" ]; then
+    cli_json_mutation_error rename profile_not_found 'The source profile does not exist.' not_applied
+    return 2
+  fi
+  if [ -e "$new_dir" ] || [ -L "$new_dir" ]; then
+    cli_json_mutation_error rename profile_exists 'The destination profile already exists.' not_applied
+    return 2
+  fi
+
+  set +e
+  ( set -e; cmd_rename "$old" "$new" ) >/dev/null 2>/dev/null
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    state=not_applied
+    if [ ! -d "$old_dir" ] && [ -d "$new_dir" ]; then state=partially_applied; fi
+    cli_json_mutation_error rename operation_failed 'The profile could not be renamed.' "$state"
+    return 6
+  fi
+
+  profile="$(json_profile_mutation_summary "$new_tool" "$new_name" "$new_dir")"
+  data="$(jq -cn \
+    --arg oldTool "$old_tool" --arg oldName "$old_name" --argjson profile "$profile" \
+    '{state:"applied",from:{tool:$oldTool,name:$oldName},profile:$profile}')"
+  cli_json_success rename "$data"
+}
+
+cmd_json_delete() {
+  local spec="${1:-}" tool name pdir status data
+  [ $# -gt 0 ] || {
+    cli_json_mutation_error delete invalid_identifier 'A valid profile address is required.' not_applied
+    return 2
+  }
+  json_mutation_parse_spec "$spec" || {
+    cli_json_mutation_error delete invalid_identifier 'A valid profile address is required.' not_applied
+    return 2
+  }
+  tool="$JSON_MUTATION_TOOL"
+  name="$JSON_MUTATION_NAME"
+  if [ $# -ne 3 ] || [ "$2" != --confirm ] || [ "$3" != "$spec" ]; then
+    cli_json_mutation_error delete confirmation_required 'JSON deletion requires --confirm followed by the exact profile address.' not_applied
+    return 2
+  fi
+
+  set +e
+  pdir="$(profile_dir "$tool" "$name" 2>/dev/null)"
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    cli_json_mutation_error delete operation_failed 'The profile could not be safely resolved.' not_applied
+    return 6
+  fi
+  if [ ! -d "$pdir" ]; then
+    cli_json_mutation_error delete profile_not_found 'The profile does not exist.' not_applied
+    return 2
+  fi
+
+  set +e
+  ( set -e; cmd_delete "$spec" true ) >/dev/null 2>/dev/null
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ] || [ -d "$pdir" ]; then
+    cli_json_mutation_error delete operation_failed 'The profile could not be completely deleted.' partially_applied
+    return 6
+  fi
+
+  data="$(jq -cn --arg tool "$tool" --arg name "$name" \
+    '{state:"applied",profile:{tool:$tool,name:$name}}')"
+  cli_json_success delete "$data"
 }
 
 cmd_json_query() {
@@ -2143,6 +2487,7 @@ USAGE
 COMMANDS
   new <tool>/<name> [--shared] [--isolated] [--cli] [--no-seed] [--from <tpl>]   Create a profile
   launch <tool>/<name> [-- args...]                     Launch the profile
+  exec <tool>/<name> [-- args...]                       Run foreground file-overlay profile with clean stdio
   list [<tool>]                                         List profiles
   status                                                Same as list
   rename <tool>/<old> <tool>/<new>                      Rename
@@ -2158,6 +2503,10 @@ COMMANDS
   template list | delete <name>                         Manage templates
   export <tool>/<name> [path]                           Export to .tar.gz
   import <archive> <tool>/<name>                        Import from archive
+  move <tool>/<name> <device> [--dry-run] [--discard-source-backup] [--devices-config <path>]
+                                                        Move one filesystem-credential profile between devices
+  devices list [tool] | status <tool>/<name> | doctor [tool]
+                                                        Inspect the configured device fleet
   tools                                                 List supported tools
   doctor                                                Diagnose environment
   stats                                                 Storage usage
@@ -2165,7 +2514,8 @@ COMMANDS
   help | version                                        This / version
 
 JSON QUERIES
-  --json supports version, list/status, tools, doctor, stats, and template list.
+  --json supports version, list/status, tools, doctor, stats, template list,
+  new, rename, delete, and move.
   See docs/json-cli.md for the versioned envelope and exit codes.
 
 PROFILE SHORTHAND
@@ -2180,6 +2530,7 @@ EXAMPLES
   nini-agents new codex/acme --isolated
   nini-agents new opencode/personal --isolated
   nini-agents launch codex/acme -- exec --search "fix the build"
+  nini-agents exec codex/acme -- app-server --stdio
   nini-agents continue codex acme backup   # resume a rate-limited chat under another profile
   claude-cli-work          # via auto-generated alias on \$PATH
 
@@ -2196,7 +2547,7 @@ _multi_cli_completions() {
   local base="${MULTICLI_HOME:-$HOME/MultiCliProfiles}"
   local script_dir="$(cd "$(dirname "$(command -v nini-agents 2>/dev/null || echo .)")" && pwd)"
   local tools_dir="${MULTICLI_TOOLS_DIR:-$script_dir/ai-tools}"
-  local cmds="new launch list status rename delete clone migrate continue auth permissions template export import tools doctor stats completion help version"
+  local cmds="new launch exec list status rename delete clone migrate continue auth permissions template export import move devices tools doctor stats completion help version"
   local tools="" specs=""
   if [ -d "$tools_dir" ]; then
     for d in "$tools_dir"/*/; do [ -f "$d/adapter.json" ] && tools="$tools $(basename "$d")"; done
@@ -2219,7 +2570,7 @@ COMP
 #compdef nini-agents multi-cli
 _multi_cli() {
   local -a cmds tools specs
-  cmds=(new launch list status rename delete clone migrate continue auth permissions template export import tools doctor stats completion help version)
+  cmds=(new launch exec list status rename delete clone migrate continue auth permissions template export import move devices tools doctor stats completion help version)
   local base="${MULTICLI_HOME:-$HOME/MultiCliProfiles}"
   local script_dir="$(cd "$(dirname "$(command -v nini-agents 2>/dev/null || echo .)")" && pwd)"
   local tools_dir="${MULTICLI_TOOLS_DIR:-$script_dir/ai-tools}"
@@ -2274,6 +2625,43 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 if [ "$CLI_JSON" = true ]; then
+  if [ "${1:-}" = new ]; then
+    set +e
+    cmd_json_new "${@:2}"
+    cli_json_status=$?
+    set -e
+    exit "$cli_json_status"
+  fi
+  if [ "${1:-}" = rename ]; then
+    set +e
+    cmd_json_rename "${@:2}"
+    cli_json_status=$?
+    set -e
+    exit "$cli_json_status"
+  fi
+  if [ "${1:-}" = delete ]; then
+    set +e
+    cmd_json_delete "${@:2}"
+    cli_json_status=$?
+    set -e
+    exit "$cli_json_status"
+  fi
+  if [ "${1:-}" = move ]; then
+    set +e
+    remote_move_execute true "${@:2}" >/dev/null 2>/dev/null
+    cli_json_status=$?
+    set -e
+    if [ "$cli_json_status" -eq 0 ]; then
+      cli_json_move_result true
+      exit 0
+    fi
+    cli_json_move_result false
+    case "${MOVE_RESULT_CODE:-operation_failed}" in
+      invalid_arguments|invalid_identifier|invalid_configuration) exit 2 ;;
+      dependency_missing|remote_health_failed|adapter_mismatch) exit 6 ;;
+      *) exit 1 ;;
+    esac
+  fi
   set +e
   cli_json_output="$(cmd_json_query "${1:-}" "${2:-}" "${3:-}" 2>/dev/null)"
   cli_json_status=$?
@@ -2307,6 +2695,17 @@ case "$cmd" in
     done
     cmd_launch "$spec" "${launch_args[@]+"${launch_args[@]}"}"
     ;;
+  exec)
+    spec="${1:-}"; shift || true
+    exec_args=()
+    saw_delim=false
+    for a in "$@"; do
+      if [ "$saw_delim" = false ] && [ "$a" = "--" ]; then saw_delim=true; continue; fi
+      exec_args+=("$a")
+    done
+    NINI_MACHINE_EXEC=true
+    cmd_launch "$spec" "${exec_args[@]+"${exec_args[@]}"}"
+    ;;
   list)       cmd_list "${1:-}" ;;
   status)     cmd_list "${1:-}" ;;
   rename)     cmd_rename "${1:-}" "${2:-}" ;;
@@ -2317,6 +2716,9 @@ case "$cmd" in
   template)   cmd_template "$@" ;;
   export)     cmd_export "$@" ;;
   import)     cmd_import "$@" ;;
+  move)       cmd_move "$@" ;;
+  devices)    remote_move_devices_command "$@" || { [ -z "$REMOTE_MOVE_MESSAGE" ] || printf 'Error: %s\n' "$REMOTE_MOVE_MESSAGE" >&2; exit 1; } ;;
+  _move-endpoint) remote_move_endpoint "$@" ;;
   tools)      cmd_tools ;;
   doctor)     cmd_doctor "${1:-}" ;;
   stats)      cmd_stats ;;

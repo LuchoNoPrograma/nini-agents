@@ -479,4 +479,28 @@ function Test-AdapterManifest {
     return $errors.ToArray()
 }
 
-Export-ModuleMember -Function Test-AdapterManifest
+# Validate the launch-relevant semantic contract from an adapter object that
+# has already been parsed. This lets the latency-sensitive launcher retain one
+# JSON parse while enforcing path separation and placeholder safety.
+function Test-AdapterLaunchContract {
+    param($Adapter)
+    $errors = New-Object 'System.Collections.Generic.List[string]'
+    $schemaVersion = Get-ObjectProperty -Object $Adapter -Name 'schemaVersion'
+    if ($null -eq $schemaVersion) { $schemaVersion = 1 }
+    if ($schemaVersion -isnot [int] -and $schemaVersion -isnot [long]) {
+        Add-AdapterValidationError -Errors $errors -Message "schemaVersion '$schemaVersion' is not an integer"
+        return $errors.ToArray()
+    }
+    switch ([int]$schemaVersion) {
+        1 { Test-AdapterV1 -Errors $errors -Adapter $Adapter }
+        2 { Test-AdapterV2 -Errors $errors -Adapter $Adapter }
+        default {
+            Add-AdapterValidationError -Errors $errors -Message "schemaVersion '$schemaVersion' is not supported"
+            return $errors.ToArray()
+        }
+    }
+    Test-AdapterPlaceholders -Errors $errors -Json ($Adapter | ConvertTo-Json -Depth 100 -Compress)
+    return $errors.ToArray()
+}
+
+Export-ModuleMember -Function Test-AdapterManifest, Test-AdapterLaunchContract

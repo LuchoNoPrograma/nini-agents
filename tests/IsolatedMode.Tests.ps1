@@ -140,10 +140,11 @@ function New-EnvProbe {
   inherited = $env:GLOBAL_FIXTURE_TOKEN
   profile = $env:MULTICLI_PROFILE_ID
   home = $env:USERPROFILE
+  args = @($args)
 } | ConvertTo-Json | Set-Content -LiteralPath $env:CAPTURE_OUTPUT -Encoding UTF8
 '@ | Set-Content -LiteralPath $probeScript -Encoding UTF8
     $probe = Join-Path $Scratch.Root 'capture.cmd'
-    "@powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$probeScript`"" | Set-Content -LiteralPath $probe -Encoding ASCII
+    "@powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$probeScript`" %*" | Set-Content -LiteralPath $probe -Encoding ASCII
     return $probe
 }
 
@@ -281,6 +282,33 @@ Describe 'schema-v2 isolated mode on Windows' {
             (Test-Path -LiteralPath (Join-Path $profile '.runtime')) | Should Be $false
             (Get-Content -LiteralPath (Join-Path $shared 'canary.txt') -Raw).Trim() | Should Be 'canary'
             (Test-Path -LiteralPath (Join-Path $profile 'history.jsonl')) | Should Be $false
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'applies enforced adapter arguments inside the isolated profile root' {
+        $scratch = New-IsolatedScratch
+        try {
+            Write-FileOverlayAdapter -Scratch $scratch
+            $adapterPath = Join-Path $scratch.Tools 'fixture\adapter.json'
+            $adapter = Get-Content -LiteralPath $adapterPath -Raw | ConvertFrom-Json
+            $adapter.isolation | Add-Member -NotePropertyName args -NotePropertyValue @('-c', 'sqlite_home="{sharedStateRoot}"')
+            $adapter | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $adapterPath -Encoding UTF8
+            $capture = Join-Path $scratch.Root 'capture.json'
+            $probe = New-EnvProbe -Scratch $scratch -Capture $capture
+            $profile = Join-Path $scratch.Profiles 'fixture\iso-args'
+
+            (Invoke-IsolatedLauncher -Scratch $scratch -Arguments @('new', 'fixture/iso-args', '--isolated', '--no-seed')).ExitCode | Should Be 0
+            $result = Invoke-IsolatedLauncher -Scratch $scratch -Arguments @('launch', 'fixture/iso-args', '--user-value') -Probe $probe -Capture $capture
+
+            if ($result.ExitCode -ne 0) { Write-Host $result.Output }
+            $result.ExitCode | Should Be 0
+            $captured = Get-Content -LiteralPath $capture -Raw | ConvertFrom-Json
+            $capturedArgs = @($captured.args)
+            $capturedArgs.Count | Should Be 3
+            $capturedArgs[0] | Should Be '--user-value'
+            $capturedArgs[1] | Should Be '-c'
+            $capturedArgs[2] | Should Be "sqlite_home=`"$profile`""
+            (Test-Path -LiteralPath (Join-Path $profile '.runtime')) | Should Be $false
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 

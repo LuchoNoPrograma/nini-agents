@@ -25,7 +25,7 @@ setup() {
   cat > "$MULTICLI_OVERRIDE_BINARY" <<'PROBE'
 #!/usr/bin/env bash
 set -euo pipefail
-jq -n \
+    jq -n \
   --arg fixture_home "${FIXTURE_HOME:-}" \
   --arg secret_home "${SECRETCLI_HOME:-}" \
   --arg token "${SECRETCLI_TOKEN:-}" \
@@ -33,8 +33,9 @@ jq -n \
   --arg profile "${MULTICLI_PROFILE_ID:-}" \
   --arg home "${HOME:-}" \
   --arg xdg "${XDG_CONFIG_HOME:-}" \
-  '{fixture_home:$fixture_home,secret_home:$secret_home,token:$token,inherited:$inherited,profile:$profile,home:$home,xdg:$xdg}' \
-  > "$CAPTURE_OUTPUT"
+      '{fixture_home:$fixture_home,secret_home:$secret_home,token:$token,inherited:$inherited,profile:$profile,home:$home,xdg:$xdg,args:$ARGS.positional}' \
+    --args -- "$@" \
+      > "$CAPTURE_OUTPUT"
 PROBE
   chmod +x "$MULTICLI_OVERRIDE_BINARY"
   write_file_overlay_adapter
@@ -250,6 +251,23 @@ track_secret_profile() {
   # no runtime overlay was built
   [ ! -e "$pdir/.runtime" ]
   [ ! -e "$pdir"/.runtime.staging.* ]
+}
+
+@test "isolated launch applies enforced adapter arguments inside the profile root" {
+  jq '.isolation.args=["-c", "sqlite_home=\"{sharedStateRoot}\""]' \
+    "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+  run multicli new fixture/iso-args --isolated --no-seed
+  [ "$status" -eq 0 ]
+  local pdir="$MULTICLI_HOME/fixture/iso-args"
+
+  run multicli launch fixture/iso-args --user-value
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  run jq -e --arg root "$pdir" \
+    '.args == ["--user-value", "-c", ("sqlite_home=\"" + $root + "\"")]' "$CAPTURE_OUTPUT"
+  [ "$status" -eq 0 ]
+  [ ! -e "$pdir/.runtime" ]
 }
 
 @test "isolated launch leaves a canary in the native shared root untouched" {

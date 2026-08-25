@@ -343,7 +343,10 @@ function Test-RuntimeOverlayCurrent {
         $expectedSource = if (@($account.credentialFiles) -contains $declaredPath) {
             Join-Path (Join-Path $profileDir 'auth') ($declaredPath -replace '/', '\')
         } elseif ($sharedCredentialRoot -and $sharedCredentialPaths -contains $declaredPath) {
-            Join-Path $sharedCredentialRoot ($declaredPath -replace '/', '\')
+            $source = Join-Path $sharedCredentialRoot ($declaredPath -replace '/', '\')
+            $sourceItem = Get-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue
+            if ($sourceItem -and ($sourceItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
+            $source
         } else {
             Join-Path $sharedRoot ($declaredPath -replace '/', '\')
         }
@@ -365,6 +368,10 @@ function Get-RuntimeMutexName {
 function New-RuntimeOverlay {
     param($Adapter, [string]$ProfileDir)
     $runtimeRoot = Join-Path $ProfileDir '.runtime'
+    $sharedCredentialRoot = Get-RuntimeSharedCredentialRoot -Adapter $Adapter -ProfileDir $ProfileDir
+    if ($sharedCredentialRoot) {
+        New-RuntimeSharedCredentialSources -Adapter $Adapter -ProfileDir $ProfileDir -SharedCredentialRoot $sharedCredentialRoot
+    }
     if (Test-RuntimeOverlayCurrent -Adapter $Adapter -RuntimeRoot $runtimeRoot) { return $runtimeRoot }
     $mutex = New-Object Threading.Mutex($false, (Get-RuntimeMutexName -ProfileDir $ProfileDir))
     $hasLock = $false
@@ -382,13 +389,13 @@ function New-RuntimeOverlay {
 function New-RuntimeOverlayLocked {
     param($Adapter, [string]$ProfileDir)
     $runtimeRoot = Join-Path $ProfileDir '.runtime'
-    if (Test-RuntimeOverlayCurrent -Adapter $Adapter -RuntimeRoot $runtimeRoot) { return $runtimeRoot }
-    $sharedRoot = Get-RuntimePlatformRoot -Adapter $Adapter
-    New-Item -ItemType Directory -Force -Path $sharedRoot | Out-Null
     $sharedCredentialRoot = Get-RuntimeSharedCredentialRoot -Adapter $Adapter -ProfileDir $ProfileDir
     if ($sharedCredentialRoot) {
         New-RuntimeSharedCredentialSources -Adapter $Adapter -ProfileDir $ProfileDir -SharedCredentialRoot $sharedCredentialRoot
     }
+    if (Test-RuntimeOverlayCurrent -Adapter $Adapter -RuntimeRoot $runtimeRoot) { return $runtimeRoot }
+    $sharedRoot = Get-RuntimePlatformRoot -Adapter $Adapter
+    New-Item -ItemType Directory -Force -Path $sharedRoot | Out-Null
     $stagingRoot = "$runtimeRoot.staging.$PID"
     $normalState = Get-RuntimeProperty -Object $Adapter -Name 'normalState'
     $stateSubdir = Get-RuntimeProperty -Object $normalState -Name 'runtimeSubdir'
