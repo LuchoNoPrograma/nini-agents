@@ -64,6 +64,12 @@ Legacy and isolated whole-root profiles may also contain adapter-declared
 runtime paths, shared credential entries, and declared dot-suffix credential
 backups. Undeclared content remains a preflight rejection.
 
+Migrated account-overlay profiles may retain a completed migration journal, an
+empty legacy shared marker, and adapter-declared normal state. A retained
+normal-state link is accepted only when its literal target is exactly the
+adapter-owned shared path; external links still fail closed. Link inventories
+compare the link target text and never hash or traverse linked content.
+
 Schema-v2 `.runtime/` is not transported and is not a credential source. The
 destination reconstructs it from the adapter after activation, then proves
 that every runtime link resolves to the destination's canonical profile or

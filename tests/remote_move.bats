@@ -234,6 +234,46 @@ make_legacy_profile() {
   cmp -s "$MULTICLI_SCRATCH/local/codex/.inactive"/*/auth/auth.json "$MULTICLI_SCRATCH/remote/codex/account-v2/auth/auth.json"
 }
 
+@test "migrated account-overlay state and expected shared links move safely" {
+  local profile="$MULTICLI_SCRATCH/local/codex/account-v2"
+  local shared_root="$HOME/.codex"
+  run env MULTICLI_HOME="$MULTICLI_SCRATCH/local" "$MULTICLI_BIN" new codex/account-v2 --no-seed
+  [ "$status" -eq 0 ]
+  printf '{"tokens":{"access_token":"fixture-v2"}}\n' > "$profile/auth/auth.json"
+  mkdir -p "$profile/sessions" "$shared_root"
+  printf 'session\n' > "$profile/sessions/session.jsonl"
+  printf 'shared config\n' > "$shared_root/config.toml"
+  ln -s "$shared_root/config.toml" "$profile/config.toml"
+  : > "$profile/.shared"
+  printf '{"status":"completed","operations":[]}\n' > "$profile/.migration-journal.json"
+
+  run multicli move codex/account-v2 ubuntu
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [ -f "$MULTICLI_SCRATCH/remote/codex/account-v2/.migration-journal.json" ]
+  [ -f "$MULTICLI_SCRATCH/remote/codex/account-v2/.shared" ]
+  [ -f "$MULTICLI_SCRATCH/remote/codex/account-v2/sessions/session.jsonl" ]
+  [ -L "$MULTICLI_SCRATCH/remote/codex/account-v2/config.toml" ]
+  [ "$(readlink "$MULTICLI_SCRATCH/remote/codex/account-v2/config.toml")" = "$shared_root/config.toml" ]
+}
+
+@test "migrated account-overlay state still rejects an external link" {
+  local profile="$MULTICLI_SCRATCH/local/codex/account-v2"
+  run env MULTICLI_HOME="$MULTICLI_SCRATCH/local" "$MULTICLI_BIN" new codex/account-v2 --no-seed
+  [ "$status" -eq 0 ]
+  printf '{"tokens":{"access_token":"fixture-v2"}}\n' > "$profile/auth/auth.json"
+  mkdir -p "$MULTICLI_SCRATCH/outside"
+  ln -s "$MULTICLI_SCRATCH/outside" "$profile/skills"
+  printf '{"status":"completed","operations":[]}\n' > "$profile/.migration-journal.json"
+
+  run multicli move codex/account-v2 ubuntu --dry-run
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unsafe_link"* ]]
+  [ -d "$profile" ]
+  [ ! -e "$MULTICLI_SCRATCH/remote/codex/.staging" ]
+}
+
 @test "duplicate active owners fail closed before staging" {
   make_legacy_profile "$MULTICLI_SCRATCH/local/codex"
   make_legacy_profile "$MULTICLI_SCRATCH/remote/codex"

@@ -719,6 +719,21 @@ move_relative_matches_shared_credential_backup() {
   return 1
 }
 
+# A completed legacy migration may leave links for already-shared normal state
+# inside an account-overlay profile. Accept only links whose literal target is
+# exactly the adapter-owned native path; arbitrary or nested external links
+# remain unsafe. The literal comparison avoids following the linked content.
+move_expected_shared_state_link() {
+  local manifest="$1" rel="$2" entry="$3" shared_root target
+  [ "$MOVE_PROFILE_FORMAT" = v2 ] && [ "$MOVE_PROFILE_MODE" = accountOverlay ] || return 1
+  move_relative_matches_declaration "$manifest" "$rel" '.normalState.sharedPaths' ||
+    move_relative_matches_declaration "$manifest" "$rel" '.normalState.sessionPaths' || return 1
+  shared_root="$(runtime_platform_root "$manifest")"
+  shared_root="${shared_root//\\//}"
+  target="$(readlink "$entry" 2>/dev/null)" || return 1
+  [ "$target" = "${shared_root%/}/$rel" ]
+}
+
 move_relative_allowed() {
   local manifest="$1" rel="$2" format="$3" mode="$4" state_subdir declared_rel
   case "$rel" in
@@ -727,7 +742,7 @@ move_relative_allowed() {
 
   if [ "$format" = v2 ]; then
     case "$rel" in
-      .profile.json|.cli) return 0 ;;
+      .profile.json|.cli|.migration-journal.json|.shared) return 0 ;;
       auth) return 0 ;;
       auth/*) move_relative_matches_declaration "$manifest" "${rel#auth/}" '.account.credentialFiles'; return ;;
       .runtime|.runtime/*) return 0 ;;
@@ -750,6 +765,14 @@ move_relative_allowed() {
       move_relative_matches_declaration "$manifest" "$declared_rel" '.sharedCredentialState.entries // [] | map(.path)' && return 0
       move_relative_matches_shared_credential_backup "$manifest" "$declared_rel" && return 0
     fi
+    if [ "$mode" = accountOverlay ]; then
+      move_relative_matches_declaration "$manifest" "$rel" '.normalState.sharedPaths' && return 0
+      move_relative_matches_declaration "$manifest" "$rel" '.normalState.sessionPaths' && return 0
+      move_relative_matches_declaration "$manifest" "$rel" '.normalState.runtimePaths' && return 0
+      move_relative_matches_declaration "$manifest" "$rel" '.normalState.unsafePaths' && return 0
+      move_relative_matches_declaration "$manifest" "$rel" '.sharedCredentialState.entries // [] | map(.path)' && return 0
+      move_relative_matches_shared_credential_backup "$manifest" "$rel" && return 0
+    fi
     return 1
   fi
 
@@ -768,7 +791,7 @@ move_relative_allowed() {
 # is accepted only for schema v2 and is excluded from transport: it is rebuilt
 # from the adapter at the destination and never becomes a credential source.
 move_validate_profile() {
-  local manifest="$1" profile="$2" adapter_id mechanism metadata mode relative credential entry rel
+  local manifest="$1" profile="$2" adapter_id mechanism metadata mode relative credential entry rel journal marker
   MOVE_PROFILE_FORMAT=unknown
   MOVE_PROFILE_MODE=unknown
 
@@ -796,6 +819,16 @@ move_validate_profile() {
         jq -e 'type == "object"' "$credential" >/dev/null 2>&1 || return 24
       fi
     done < <(runtime_json_arr '.account.credentialFiles' "$manifest")
+
+    journal="$profile/.migration-journal.json"
+    if [ -e "$journal" ] || [ -L "$journal" ]; then
+      [ -f "$journal" ] && [ ! -L "$journal" ] || return 22
+      jq -e 'type == "object" and .status == "completed" and (.operations | type == "array")' "$journal" >/dev/null 2>&1 || return 22
+    fi
+    marker="$profile/.shared"
+    if [ -e "$marker" ] || [ -L "$marker" ]; then
+      [ -f "$marker" ] && [ ! -L "$marker" ] && [ "$(file_size "$marker")" -eq 0 ] || return 26
+    fi
   else
     MOVE_PROFILE_FORMAT=legacy
     MOVE_PROFILE_MODE=legacy
@@ -818,8 +851,9 @@ move_validate_profile() {
       esac
     fi
     move_relative_allowed "$manifest" "$rel" "$MOVE_PROFILE_FORMAT" "$MOVE_PROFILE_MODE" || return 26
-    [ ! -L "$entry" ] || return 25
-    if [ -f "$entry" ]; then
+    if [ -L "$entry" ]; then
+      move_expected_shared_state_link "$manifest" "$rel" "$entry" || return 25
+    elif [ -f "$entry" ]; then
       if [ "$(file_nlink "$entry")" -gt 1 ]; then
         move_expected_runtime_hardlink "$manifest" "$profile" "$rel" "$entry" || return 27
       fi
@@ -847,12 +881,15 @@ move_validation_failure() {
 # Build a deterministic structure/size/hash inventory, excluding disposable
 # schema-v2 runtime. The inventory contains no file contents.
 move_write_inventory() {
-  local root="$1" output="$2" entry rel digest size
+  local root="$1" output="$2" entry rel digest size target
   : > "$output"
   while IFS= read -r -d '' entry; do
     rel="${entry#"$root"/}"
     case "$rel" in .runtime|.runtime/*) continue ;; esac
-    if [ -d "$entry" ]; then
+    if [ -L "$entry" ]; then
+      target="$(readlink "$entry" 2>/dev/null)" || return 1
+      printf 'l\t%s\t%s\n' "$rel" "$target" >> "$output"
+    elif [ -d "$entry" ]; then
       printf 'd\t%s\n' "$rel" >> "$output"
     elif [ -f "$entry" ]; then
       digest="$(move_sha256 "$entry")" || return 1
