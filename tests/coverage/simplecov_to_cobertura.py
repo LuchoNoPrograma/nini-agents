@@ -76,6 +76,12 @@ def executable_line_numbers(source: Path) -> set[int]:
                 break
             if char == "<" and index + 1 < len(raw_line) and raw_line[index + 1] == "<":
                 saw_code = True
+                if index + 2 < len(raw_line) and raw_line[index + 2] == "<":
+                    # A here-string (`<<< value`) is an ordinary executable
+                    # redirection, not the start of a heredoc body.
+                    saw_unquoted_nonspace = True
+                    index += 3
+                    continue
                 index += 2
                 strip_tabs = False
                 if index < len(raw_line) and raw_line[index] == "-":

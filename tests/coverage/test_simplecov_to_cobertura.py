@@ -95,6 +95,26 @@ class SimpleCovToCoberturaTests(unittest.TestCase):
             [("2", "1"), ("6", "1")],
         )
 
+    def test_build_cobertura_treats_here_string_and_following_lines_as_executable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory)
+            source = repo / "scripts" / "sample.sh"
+            source.parent.mkdir()
+            source.write_text(
+                "#!/usr/bin/env bash\n"
+                "IFS='/' read -r value <<< \"$input\"\n"
+                "echo after\n",
+                encoding="utf-8",
+            )
+            coverage = {str(source): [None, 1, 1]}
+
+            root = MODULE.build_cobertura(coverage, repo, ["scripts/*.sh"]).getroot()
+
+        self.assertEqual(
+            [(node.get("number"), node.get("hits")) for node in root.findall(".//line")],
+            [("2", "1"), ("3", "1")],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
