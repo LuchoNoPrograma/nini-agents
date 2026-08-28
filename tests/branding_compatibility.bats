@@ -26,16 +26,20 @@ load helpers/common
   [[ "$output" == *"complete -F _multi_cli_completions nini-agents multi-cli"* ]]
 }
 
-@test "help and shell completion expose auth and permissions commands" {
+@test "help and shell completion expose auth permissions and portable move commands" {
   run "$MULTICLI_REPO_ROOT/nini-agents" help
   [ "$status" -eq 0 ]
   [[ "$output" == *"auth set|status|clear"* ]]
   [[ "$output" == *"permissions show | set"* ]]
+  [[ "$output" == *"move-export <tool>/<name>"* ]]
+  [[ "$output" == *"move-import <package.zip>"* ]]
 
   run "$MULTICLI_REPO_ROOT/nini-agents" completion bash
   [ "$status" -eq 0 ]
   [[ "$output" == *" auth "* ]]
   [[ "$output" == *" permissions "* ]]
+  [[ "$output" == *" move-export "* ]]
+  [[ "$output" == *" move-import "* ]]
 }
 
 @test "credential target namespace remains backward compatible" {

@@ -117,6 +117,13 @@ Shared root: `%USERPROFILE%\.codex` (Windows), `~/.codex` (macOS/Linux).
   using the locally installed Codex 0.147.0; a future unknown database name
   remains fail-closed instead of being captured by a broad pattern.
 
+Credential-free templates and normal exports continue to exclude sessions.
+The explicit `move-export` offline ZIP instead snapshots all of the declared
+shared and session paths above after proving Codex is stopped. That includes
+global skills and conversations, but not the separate shared MCP OAuth store.
+`move-import` installs missing state, accepts byte-identical existing files,
+and rejects any differing file rather than merging SQLite or text content.
+
 ## Legacy transactional state
 
 Schema-v2 Codex still uses the shared `sqlite_home` and declares
@@ -177,8 +184,9 @@ export, import, clone, or profile move.
 - Codex rules remain subject to upstream changes. Nini Agents shares the user-level `rules/` directory as ordinary configuration; it never treats rules as credentials or session state.
 - Concurrent profiles write to the shared session store; keep simultaneous writers in mind.
 - Bash behavior is executed on Linux. Equivalent Windows PowerShell code and
-  tests are present, but Windows hardlink/junction behavior and macOS have not
-  been executed in the current environment.
+  tests, including portable move ZIP support, are present, but Windows
+  hardlink/junction behavior and macOS have not been executed in the current
+  environment. SSH movement remains Bash-only.
 
 ## Support
 

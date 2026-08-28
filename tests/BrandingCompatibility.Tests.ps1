@@ -29,15 +29,19 @@ Describe 'Nini Agents entrypoint compatibility' {
         $result.Output | Should Match 'CommandName nini-agents,multi-cli'
     }
 
-    It 'exposes auth and permissions in help and PowerShell completion' {
+    It 'exposes auth permissions and portable move commands in help and completion' {
         $help = Invoke-BrandingLauncher -Path $script:CanonicalLauncher -Arguments @('help')
         $completion = Invoke-BrandingLauncher -Path $script:CanonicalLauncher -Arguments @('completion', 'powershell')
 
         $help.ExitCode | Should Be 0
         $help.Output | Should Match 'auth set\|status\|clear'
         $help.Output | Should Match 'permissions show \| set'
+        $help.Output | Should Match 'move-export <tool>/<name>'
+        $help.Output | Should Match 'move-import <package.zip>'
         $completion.ExitCode | Should Be 0
         $completion.Output | Should Match "'auth'"
         $completion.Output | Should Match "'permissions'"
+        $completion.Output | Should Match "'move-export'"
+        $completion.Output | Should Match "'move-import'"
     }
 }

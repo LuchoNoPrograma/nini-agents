@@ -1271,4 +1271,538 @@ function Invoke-MultiCliProfileMove {
     return New-MoveResult -Succeeded $true -Code 'ok' -State 'destination_active' -Format $format
 }
 
-Export-ModuleMember -Function Save-MultiCliTemplate, Export-MultiCliProfile, Import-MultiCliProfile, Assert-TransferTemplateCompatible, Apply-MultiCliTemplate, Invoke-MultiCliProfileMove
+# =============================================================================
+# Credential-bearing portable offline move packages
+# =============================================================================
+
+$script:MovePackageEntry = 'nini-agents-move-package.ndjson'
+$script:MovePackageKind = 'nini-agents-offline-move'
+
+function Test-MovePackageSafeRelativePath {
+    param([string]$RelativePath)
+    if (-not $RelativePath -or $RelativePath.StartsWith('/') -or
+        $RelativePath.Contains('\') -or $RelativePath.Contains(':')) { return $false }
+    foreach ($invalid in @('<', '>', '"', '|', '?', '*')) {
+        if ($RelativePath.Contains($invalid)) { return $false }
+    }
+    foreach ($character in $RelativePath.ToCharArray()) {
+        if ([char]::IsControl($character)) { return $false }
+    }
+    foreach ($component in $RelativePath.Split('/')) {
+        if (-not $component -or $component -in @('.', '..') -or
+            $component.EndsWith('.') -or $component.EndsWith(' ')) { return $false }
+        $stem = $component.Split('.')[0].ToUpperInvariant()
+        if ($stem -in @('CON','PRN','AUX','NUL','COM1','COM2','COM3','COM4','COM5','COM6','COM7','COM8','COM9',
+            'LPT1','LPT2','LPT3','LPT4','LPT5','LPT6','LPT7','LPT8','LPT9')) { return $false }
+    }
+    return $true
+}
+
+function Test-MovePackageStateDeclared {
+    param($Adapter, [string]$RelativePath)
+    if (Test-TransferCredentialPath -Adapter $Adapter -RelativePath $RelativePath) { return $false }
+    $normalState = Get-TransferProperty -Object $Adapter -Name 'normalState'
+    return (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'sharedPaths') -RelativePath $RelativePath) -or
+        (Test-MoveRelativeDeclaration -Values (Get-TransferProperty -Object $normalState -Name 'sessionPaths') -RelativePath $RelativePath)
+}
+
+function Get-MovePackageRelativePath {
+    param([string]$Root, [string]$Path)
+    return $Path.Substring($Root.TrimEnd('\', '/').Length).TrimStart('\', '/').Replace('\', '/')
+}
+
+function Get-MovePackageTreeInventory {
+    param([string]$Root)
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) { throw "package tree is missing: $Root" }
+    $rootItem = Get-Item -LiteralPath $Root -Force
+    if ($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw 'package tree root is linked' }
+    $entries = New-Object 'System.Collections.Generic.List[string]'
+    $stack = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
+    $stack.Push($rootItem)
+    while ($stack.Count -gt 0) {
+        $directory = $stack.Pop()
+        foreach ($item in (Get-ChildItem -LiteralPath $directory.FullName -Force)) {
+            $relative = Get-MovePackageRelativePath -Root $Root -Path $item.FullName
+            if (-not (Test-MovePackageSafeRelativePath -RelativePath $relative)) { throw "unsafe package path: $relative" }
+            if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw "linked package entry: $relative" }
+            $linkType = Get-TransferProperty -Object $item -Name 'LinkType'
+            if ($linkType -eq 'HardLink') { throw "hardlinked package entry: $relative" }
+            if ($item.PSIsContainer) {
+                $entries.Add("d`t$relative")
+                $stack.Push($item)
+            } else {
+                $entries.Add("f`t$relative`t$($item.Length)`t$(Get-MoveFileHash -Path $item.FullName)")
+            }
+        }
+    }
+    return @($entries | Sort-Object)
+}
+
+function Test-MovePackageTreesEqual {
+    param([string]$Left, [string]$Right)
+    try {
+        return ((Get-MovePackageTreeInventory -Root $Left) -join "`n") -ceq
+            ((Get-MovePackageTreeInventory -Root $Right) -join "`n")
+    } catch { return $false }
+}
+
+function Copy-MovePackageStateNode {
+    param([string]$Source, [string]$Destination, [string]$AllowedRoot)
+    if (-not (Test-Path -LiteralPath $Source)) { return }
+    $resolved = (Resolve-Path -LiteralPath $Source -ErrorAction Stop).ProviderPath
+    if (-not (Test-TransferPathWithin -Child $resolved -Root $AllowedRoot)) { throw "state path resolves outside adapter root: $Source" }
+    $item = Get-Item -LiteralPath $Source -Force
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw "state path is linked: $Source" }
+    if ((Get-TransferProperty -Object $item -Name 'LinkType') -eq 'HardLink') { throw "state path is hardlinked: $Source" }
+    if ($item.PSIsContainer) {
+        if (-not (Test-Path -LiteralPath $Destination)) { New-Item -ItemType Directory -Path $Destination | Out-Null }
+        foreach ($child in (Get-ChildItem -LiteralPath $Source -Force)) {
+            Copy-MovePackageStateNode -Source $child.FullName -Destination (Join-Path $Destination $child.Name) -AllowedRoot $AllowedRoot
+        }
+    } else {
+        $parent = Split-Path -Parent $Destination
+        if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+        Copy-Item -LiteralPath $Source -Destination $Destination -Force
+    }
+}
+
+function Copy-MovePackageState {
+    param($Adapter, [string]$Mode, [string]$Destination)
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    if ($Mode -ne 'accountOverlay') { return }
+    $sharedRoot = Get-TransferSharedRoot -Adapter $Adapter
+    if (-not (Test-Path -LiteralPath $sharedRoot)) { return }
+    $sharedItem = Get-Item -LiteralPath $sharedRoot -Force
+    if (-not $sharedItem.PSIsContainer -or ($sharedItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        throw 'Adapter shared-state root is missing, non-directory, or linked.'
+    }
+    $allowedRoot = (Resolve-Path -LiteralPath $sharedRoot).ProviderPath
+    $normalState = Get-TransferProperty -Object $Adapter -Name 'normalState'
+    $declared = @((Get-TransferProperty -Object $normalState -Name 'sharedPaths')) +
+        @((Get-TransferProperty -Object $normalState -Name 'sessionPaths'))
+    foreach ($relative in @($declared | Where-Object { $_ } | Sort-Object -Unique)) {
+        $relative = ([string]$relative).Replace('\', '/')
+        if (-not (Test-MovePackageSafeRelativePath -RelativePath $relative) -or
+            -not (Test-MovePackageStateDeclared -Adapter $Adapter -RelativePath $relative)) {
+            throw "adapter declares an unsafe package state path: $relative"
+        }
+        $source = Join-Path $sharedRoot ($relative -replace '/', '\')
+        if (Test-Path -LiteralPath $source) {
+            Copy-MovePackageStateNode -Source $source -Destination (Join-Path $Destination ($relative -replace '/', '\')) -AllowedRoot $allowedRoot
+        }
+    }
+}
+
+function Write-MovePackageTreeRecords {
+    param([System.IO.StreamWriter]$Writer, [string]$Root, [string]$Scope)
+    $items = @(Get-ChildItem -LiteralPath $Root -Force -Recurse | Sort-Object FullName)
+    foreach ($item in $items) {
+        $relative = Get-MovePackageRelativePath -Root $Root -Path $item.FullName
+        if (-not (Test-MovePackageSafeRelativePath -RelativePath $relative)) { throw "unsafe package path: $relative" }
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw "linked package entry: $relative" }
+        if ((Get-TransferProperty -Object $item -Name 'LinkType') -eq 'HardLink') { throw "hardlinked package entry: $relative" }
+        if ($item.PSIsContainer) {
+            $record = [ordered]@{ type = 'directory'; scope = $Scope; path = $relative }
+            $Writer.WriteLine(($record | ConvertTo-Json -Compress -Depth 8))
+        } else {
+            $record = [ordered]@{
+                type = 'file-start'; scope = $Scope; path = $relative; size = [long]$item.Length
+                sha256 = Get-MoveFileHash -Path $item.FullName
+            }
+            $Writer.WriteLine(($record | ConvertTo-Json -Compress -Depth 8))
+            $input = [System.IO.File]::Open($item.FullName, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+            try {
+                $buffer = New-Object byte[] 49152
+                while (($count = $input.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                    $chunk = [ordered]@{ type = 'chunk'; data = [Convert]::ToBase64String($buffer, 0, $count) }
+                    $Writer.WriteLine(($chunk | ConvertTo-Json -Compress -Depth 4))
+                }
+            } finally { $input.Dispose() }
+            $Writer.WriteLine('{"type":"file-end"}')
+        }
+    }
+}
+
+function Write-MovePackagePayload {
+    param($Adapter, [string]$ProfileName, [string]$Format, [string]$Mode, [string]$PackageId,
+        [string]$ProfileRoot, [string]$StateRoot, [string]$PayloadPath)
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    $writer = New-Object System.IO.StreamWriter($PayloadPath, $false, $encoding)
+    $writer.NewLine = "`n"
+    try {
+        $header = [ordered]@{
+            schemaVersion = 1; kind = $script:MovePackageKind; adapterId = $Adapter.id
+            profileName = $ProfileName; profileFormat = $Format; profileMode = $Mode; packageId = $PackageId
+            includes = [ordered]@{ credentials = $true; chats = $true; globalState = $true }
+            encrypted = $false
+        }
+        $writer.WriteLine(($header | ConvertTo-Json -Compress -Depth 8))
+        Write-MovePackageTreeRecords -Writer $writer -Root $ProfileRoot -Scope 'profile'
+        Write-MovePackageTreeRecords -Writer $writer -Root $StateRoot -Scope 'state'
+    } finally { $writer.Dispose() }
+}
+
+function New-MovePackageZip {
+    param([string]$PayloadPath, [string]$OutPath)
+    $stream = [System.IO.File]::Open($OutPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    $zip = New-Object System.IO.Compression.ZipArchive($stream, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $entry = $zip.CreateEntry($script:MovePackageEntry, [System.IO.Compression.CompressionLevel]::Optimal)
+        $input = [System.IO.File]::OpenRead($PayloadPath)
+        $output = $entry.Open()
+        try { $input.CopyTo($output) } finally { $output.Dispose(); $input.Dispose() }
+    } finally { $zip.Dispose(); $stream.Dispose() }
+}
+
+function Get-MovePackagePropertyNames {
+    param($Object)
+    return @($Object.PSObject.Properties.Name | Sort-Object)
+}
+
+function Test-MovePackagePropertyNames {
+    param($Object, [string[]]$Expected)
+    return ((Get-MovePackagePropertyNames -Object $Object) -join "`n") -ceq (@($Expected | Sort-Object) -join "`n")
+}
+
+function Expand-MovePackageZip {
+    param($Adapter, [string]$ArchivePath, [string]$ProfileStage, [string]$StateStage)
+    if (-not (Test-Path -LiteralPath $ArchivePath -PathType Leaf)) { throw "Move package not found: $ArchivePath" }
+    $archiveItem = Get-Item -LiteralPath $ArchivePath -Force
+    if ($archiveItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw 'Move package archive cannot be a link.' }
+    $tempPayload = Join-Path ([System.IO.Path]::GetTempPath()) ('nini-move-payload-' + [guid]::NewGuid().ToString('N') + '.ndjson')
+    $archiveStream = [System.IO.File]::OpenRead($ArchivePath)
+    $zip = New-Object System.IO.Compression.ZipArchive($archiveStream, [System.IO.Compression.ZipArchiveMode]::Read)
+    try {
+        if ($zip.Entries.Count -ne 1 -or $zip.Entries[0].FullName -cne $script:MovePackageEntry) {
+            throw "Refusing move package: ZIP must contain exactly '$($script:MovePackageEntry)'."
+        }
+        $entryStream = $zip.Entries[0].Open()
+        $payloadStream = [System.IO.File]::Open($tempPayload, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        try { $entryStream.CopyTo($payloadStream) } finally { $payloadStream.Dispose(); $entryStream.Dispose() }
+    } finally { $zip.Dispose(); $archiveStream.Dispose() }
+
+    New-Item -ItemType Directory -Path $ProfileStage | Out-Null
+    New-Item -ItemType Directory -Path $StateStage | Out-Null
+    $encoding = New-Object System.Text.UTF8Encoding($false, $true)
+    $reader = New-Object System.IO.StreamReader($tempPayload, $encoding, $true)
+    $currentStream = $null
+    $currentTarget = $null
+    $currentSize = [long]0
+    $currentWritten = [long]0
+    $currentDigest = $null
+    try {
+        $headerLine = $reader.ReadLine()
+        if (-not $headerLine) { throw 'Move package payload is empty.' }
+        $header = $headerLine | ConvertFrom-Json
+        if (-not (Test-MovePackagePropertyNames -Object $header -Expected @('schemaVersion','kind','adapterId','profileName','profileFormat','profileMode','packageId','includes','encrypted')) -or
+            $header.schemaVersion -ne 1 -or $header.kind -cne $script:MovePackageKind -or
+            $header.adapterId -isnot [string] -or $header.profileName -isnot [string] -or
+            $header.profileFormat -isnot [string] -or $header.profileMode -isnot [string] -or
+            $header.packageId -isnot [string] -or $header.encrypted -isnot [bool] -or
+            $header.adapterId -cne $Adapter.id -or $header.encrypted -ne $false -or
+            ($header.profileFormat -cne 'v2' -and $header.profileFormat -cne 'legacy') -or
+            ($header.profileMode -cne 'accountOverlay' -and $header.profileMode -cne 'isolated' -and $header.profileMode -cne 'legacy') -or
+            -not $header.profileName -or -not $header.packageId -or
+            $header.profileName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$' -or
+            $header.packageId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$' -or
+            -not (Test-MovePackagePropertyNames -Object $header.includes -Expected @('credentials','chats','globalState')) -or
+            -not $header.includes.credentials -or -not $header.includes.chats -or -not $header.includes.globalState) {
+            throw 'Move package header is invalid.'
+        }
+        $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+        while (($line = $reader.ReadLine()) -ne $null) {
+            if (-not $line) { throw 'Move package contains an empty record.' }
+            try { $record = $line | ConvertFrom-Json } catch { throw 'Move package record is not valid JSON.' }
+            $recordType = Get-TransferProperty -Object $record -Name 'type'
+
+            if ($null -ne $currentStream) {
+                if ($recordType -ceq 'chunk') {
+                    if (-not (Test-MovePackagePropertyNames -Object $record -Expected @('type','data')) -or
+                        $record.data -isnot [string] -or -not $record.data -or $record.data.Length -gt 65536) {
+                        throw 'Move package chunk record is invalid.'
+                    }
+                    try { $bytes = [Convert]::FromBase64String([string]$record.data) } catch { throw 'Move package chunk data is not valid base64.' }
+                    if ($currentWritten -gt ($currentSize - $bytes.LongLength)) { throw 'Move package file exceeds its declared size.' }
+                    $currentStream.Write($bytes, 0, $bytes.Length)
+                    $currentWritten += $bytes.LongLength
+                    continue
+                }
+                if ($recordType -cne 'file-end' -or
+                    -not (Test-MovePackagePropertyNames -Object $record -Expected @('type'))) {
+                    throw 'Move package file is missing its end record.'
+                }
+                $currentStream.Dispose()
+                $currentStream = $null
+                if ($currentWritten -ne $currentSize -or
+                    (Get-Item -LiteralPath $currentTarget -Force).Length -ne $currentSize) {
+                    throw 'Move package file size does not match its record.'
+                }
+                if ((Get-MoveFileHash -Path $currentTarget) -cne $currentDigest) {
+                    throw 'Move package file hash does not match its record.'
+                }
+                $currentTarget = $null
+                $currentSize = [long]0
+                $currentWritten = [long]0
+                $currentDigest = $null
+                continue
+            }
+
+            if ($recordType -cne 'directory' -and $recordType -cne 'file-start') { throw 'Move package record order is invalid.' }
+            $expectedProperties = if ($recordType -ceq 'directory') {
+                @('type','scope','path')
+            } else {
+                @('type','scope','path','size','sha256')
+            }
+            if (-not (Test-MovePackagePropertyNames -Object $record -Expected $expectedProperties) -or
+                $record.scope -isnot [string] -or $record.path -isnot [string] -or
+                ($record.scope -cne 'profile' -and $record.scope -cne 'state') -or
+                -not (Test-MovePackageSafeRelativePath -RelativePath $record.path)) {
+                throw 'Move package record has an unsafe scope or path.'
+            }
+            if ($record.scope -ceq 'state' -and -not (Test-MovePackageStateDeclared -Adapter $Adapter -RelativePath $record.path)) {
+                throw "Move package state path is not declared: $($record.path)"
+            }
+            if (-not $seen.Add("$($record.scope)`t$($record.path)")) { throw 'Move package contains a duplicate path.' }
+            $base = if ($record.scope -ceq 'profile') { $ProfileStage } else { $StateStage }
+            $target = Join-Path $base ($record.path -replace '/', '\')
+            if ($recordType -ceq 'directory') {
+                if (Test-Path -LiteralPath $target -PathType Leaf) { throw 'Move package directory conflicts with a file.' }
+                New-Item -ItemType Directory -Force -Path $target | Out-Null
+                continue
+            }
+            if ($record.sha256 -isnot [string] -or $record.size -isnot [ValueType] -or
+                $record.size -lt 0 -or [double]$record.size -gt [long]::MaxValue -or
+                [Math]::Floor([double]$record.size) -ne [double]$record.size -or
+                $record.sha256 -notmatch '^[0-9a-f]{64}$' -or (Test-Path -LiteralPath $target)) {
+                throw 'Move package file-start record is invalid.'
+            }
+            $parent = Split-Path -Parent $target
+            if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+            $currentStream = [System.IO.File]::Open($target, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+            $currentTarget = $target
+            $currentSize = [long]$record.size
+            $currentWritten = [long]0
+            $currentDigest = [string]$record.sha256
+        }
+        if ($null -ne $currentStream) { throw 'Move package ended before the current file was complete.' }
+        $validation = Test-MoveProfile -Adapter $Adapter -ProfilePath $ProfileStage
+        if (-not $validation.Valid -or $validation.Format -cne $header.profileFormat -or $validation.Mode -cne $header.profileMode) {
+            throw "Move package profile failed validation: $($validation.Code)"
+        }
+        return [pscustomobject]@{ PackageId = $header.packageId; SourceName = $header.profileName; Format = $header.profileFormat; Mode = $header.profileMode }
+    } finally {
+        if ($null -ne $currentStream) { $currentStream.Dispose() }
+        $reader.Dispose()
+        Remove-Item -LiteralPath $tempPayload -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-MovePackageProcessState {
+    param($Adapter, [string]$ProfilePath, [scriptblock]$ProcessProbe)
+    if ($ProcessProbe) {
+        try { $state = [string](& $ProcessProbe $ProfilePath | Select-Object -Last 1) } catch { return 'unknown' }
+        $state = $state.ToLowerInvariant()
+        if ($state -in @('idle','busy','unknown')) { return $state }
+        return 'unknown'
+    }
+    try { $processes = @(Get-Process -ErrorAction Stop) } catch { return 'unknown' }
+    $binary = Get-TransferProperty -Object $Adapter -Name 'binary'
+    foreach ($candidate in @((Get-TransferProperty -Object $binary -Name 'windows'))) {
+        if (-not $candidate -or $candidate -like 'appx:*' -or $candidate -match '^https?://') { continue }
+        $processName = [System.IO.Path]::GetFileName(([string]$candidate).Replace('/', '\')) -replace '(?i)\.(cmd|exe)$', ''
+        foreach ($process in $processes) {
+            if ($processName -and $process.ProcessName.Equals($processName, [StringComparison]::OrdinalIgnoreCase)) { return 'busy' }
+        }
+    }
+    return 'idle'
+}
+
+function Assert-MovePackageIdle {
+    param($Adapter, [string]$ProfilePath, [scriptblock]$ProcessProbe)
+    $state = Get-MovePackageProcessState -Adapter $Adapter -ProfilePath $ProfilePath -ProcessProbe $ProcessProbe
+    if ($state -eq 'busy') { throw 'An active tool process is using this profile. Close it and retry.' }
+    if ($state -ne 'idle') { throw 'Could not prove that the tool is stopped. No ownership change was made.' }
+}
+
+function Test-MovePackageStatePreflight {
+    param([string]$StagedRoot, [string]$SharedRoot)
+    if (Test-Path -LiteralPath $SharedRoot) {
+        $rootItem = Get-Item -LiteralPath $SharedRoot -Force
+        if (-not $rootItem.PSIsContainer -or ($rootItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return $false }
+    }
+    foreach ($item in @(Get-ChildItem -LiteralPath $StagedRoot -Force -Recurse)) {
+        $relative = Get-MovePackageRelativePath -Root $StagedRoot -Path $item.FullName
+        $destination = Join-Path $SharedRoot ($relative -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $destination)) { continue }
+        $existing = Get-Item -LiteralPath $destination -Force
+        if ($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $false }
+        if ($item.PSIsContainer) { if (-not $existing.PSIsContainer) { return $false }; continue }
+        if ($existing.PSIsContainer -or $existing.Length -ne $item.Length -or
+            (Get-MoveFileHash -Path $existing.FullName) -cne (Get-MoveFileHash -Path $item.FullName)) { return $false }
+    }
+    return $true
+}
+
+function Install-MovePackageState {
+    param([string]$StagedRoot, [string]$SharedRoot)
+    $created = New-Object 'System.Collections.Generic.List[object]'
+    try {
+        if (-not (Test-Path -LiteralPath $SharedRoot)) {
+            New-Item -ItemType Directory -Force -Path $SharedRoot | Out-Null
+            $created.Add([pscustomobject]@{ Type = 'root'; Path = $SharedRoot })
+        }
+        foreach ($item in @(Get-ChildItem -LiteralPath $StagedRoot -Force -Recurse | Sort-Object { $_.FullName.Length })) {
+            $relative = Get-MovePackageRelativePath -Root $StagedRoot -Path $item.FullName
+            $destination = Join-Path $SharedRoot ($relative -replace '/', '\')
+            if (Test-Path -LiteralPath $destination) { continue }
+            if ($item.PSIsContainer) {
+                New-Item -ItemType Directory -Path $destination | Out-Null
+                $created.Add([pscustomobject]@{ Type = 'directory'; Path = $destination })
+            } else {
+                $parent = Split-Path -Parent $destination
+                if (-not (Test-Path -LiteralPath $parent)) { throw 'State installation plan omitted a parent directory.' }
+                $temporary = Join-Path $parent ('.nini-move-package-' + [guid]::NewGuid().ToString('N') + '.tmp')
+                Copy-Item -LiteralPath $item.FullName -Destination $temporary
+                Move-Item -LiteralPath $temporary -Destination $destination
+                $created.Add([pscustomobject]@{ Type = 'file'; Path = $destination })
+            }
+        }
+    } catch {
+        Undo-MovePackageState -Created $created
+        throw
+    }
+    Write-Output -NoEnumerate $created
+}
+
+function Undo-MovePackageState {
+    param($Created)
+    for ($index = $Created.Count - 1; $index -ge 0; $index--) {
+        $entry = $Created[$index]
+        if ($entry.Type -eq 'file') { Remove-Item -LiteralPath $entry.Path -Force -ErrorAction SilentlyContinue }
+        else { Remove-Item -LiteralPath $entry.Path -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Export-MultiCliMovePackage {
+    param($Adapter, [string]$ProfileDir, [string]$OutPath, [string]$ProfileName, [scriptblock]$ProcessProbe)
+    if ($Adapter.account.mechanism -ne 'fileOverlay') { throw "Adapter '$($Adapter.id)' cannot be moved in a credential-bearing package." }
+    if ($ProfileName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Invalid profile name '$ProfileName'." }
+    if (-not (Test-Path -LiteralPath $ProfileDir -PathType Container)) { throw "Profile '$ProfileName' does not exist." }
+    $profileItem = Get-Item -LiteralPath $ProfileDir -Force
+    if ($profileItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw 'Profile source cannot be a link.' }
+    if (Test-Path -LiteralPath $OutPath) { throw "Refusing to overwrite existing package '$OutPath'." }
+    Assert-MovePackageIdle -Adapter $Adapter -ProfilePath $ProfileDir -ProcessProbe $ProcessProbe
+    $validation = Test-MoveProfile -Adapter $Adapter -ProfilePath $ProfileDir
+    if (-not $validation.Valid) { throw "Profile failed credential and structure validation: $($validation.Code)" }
+    $outFull = [System.IO.Path]::GetFullPath($OutPath)
+    $profileFull = [System.IO.Path]::GetFullPath($ProfileDir)
+    if (Test-TransferPathWithin -Child $outFull -Root $profileFull) { throw 'Move package cannot be written inside the source profile.' }
+    $outParent = Split-Path -Parent $outFull
+    if ($outParent -and -not (Test-Path -LiteralPath $outParent)) { New-Item -ItemType Directory -Force -Path $outParent | Out-Null }
+    $packageId = [guid]::NewGuid().ToString()
+    $temp = Join-Path ([System.IO.Path]::GetTempPath()) ('nini-move-export-' + [guid]::NewGuid().ToString('N'))
+    $profileStage = Join-Path $temp 'profile'; $stateStage = Join-Path $temp 'state'
+    $verifyProfile = Join-Path $temp 'verify-profile'; $verifyState = Join-Path $temp 'verify-state'
+    New-Item -ItemType Directory -Path $temp, $profileStage | Out-Null
+    try {
+        Copy-MoveCandidateLocal -Source $ProfileDir -Staging $profileStage
+        $stagedValidation = Test-MoveProfile -Adapter $Adapter -ProfilePath $profileStage
+        if (-not $stagedValidation.Valid) { throw "Staged profile failed validation: $($stagedValidation.Code)" }
+        if (-not (Remove-MoveStagingLinks -Adapter $Adapter -ProfilePath $profileStage -Format $stagedValidation.Format -Mode $stagedValidation.Mode) -or
+            -not (Test-MoveTreesEqual -Adapter $Adapter -Left $ProfileDir -Right $profileStage)) { throw 'Staged profile differs from source.' }
+        Copy-MovePackageState -Adapter $Adapter -Mode $validation.Mode -Destination $stateStage
+        $payload = Join-Path $temp $script:MovePackageEntry
+        Write-MovePackagePayload -Adapter $Adapter -ProfileName $ProfileName -Format $validation.Format -Mode $validation.Mode -PackageId $packageId -ProfileRoot $profileStage -StateRoot $stateStage -PayloadPath $payload
+        New-MovePackageZip -PayloadPath $payload -OutPath $outFull
+        $package = Expand-MovePackageZip -Adapter $Adapter -ArchivePath $outFull -ProfileStage $verifyProfile -StateStage $verifyState
+        if ($package.PackageId -cne $packageId -or
+            -not (Test-MoveTreesEqual -Adapter $Adapter -Left $profileStage -Right $verifyProfile) -or
+            -not (Test-MovePackageTreesEqual -Left $stateStage -Right $verifyState)) {
+            throw 'ZIP self-verification failed.'
+        }
+        $parent = Split-Path -Parent $ProfileDir
+        $lock = Join-Path $parent ".move-lock.$ProfileName"
+        $backup = Join-Path (Join-Path $parent '.inactive') "$ProfileName.$packageId"
+        if (Test-Path -LiteralPath $backup) { throw 'Inactive recovery destination already exists.' }
+        New-Item -ItemType Directory -Path $lock -ErrorAction Stop | Out-Null
+        try {
+            Assert-MovePackageIdle -Adapter $Adapter -ProfilePath $ProfileDir -ProcessProbe $ProcessProbe
+            if (-not (Test-MoveTreesEqual -Adapter $Adapter -Left $ProfileDir -Right $profileStage)) { throw 'Profile changed while packaging.' }
+            $currentState = Join-Path $temp 'current-state'
+            Copy-MovePackageState -Adapter $Adapter -Mode $validation.Mode -Destination $currentState
+            if (-not (Test-MovePackageTreesEqual -Left $stateStage -Right $currentState)) { throw 'Shared state changed while packaging.' }
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
+            Move-Item -LiteralPath $ProfileDir -Destination $backup
+        } finally {
+            Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $lock) { throw "Source is inactive and ZIP is valid, but the movement lock could not be released: $lock" }
+        return [pscustomobject]@{ PackageId = $packageId; BackupPath = $backup; ArchivePath = $outFull }
+    } catch {
+        if (Test-Path -LiteralPath $ProfileDir) { Remove-Item -LiteralPath $outFull -Force -ErrorAction SilentlyContinue }
+        throw
+    } finally { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+function Import-MultiCliMovePackage {
+    param($Adapter, [string]$ArchivePath, [string]$DestinationDir, [scriptblock]$ProcessProbe)
+    if ($Adapter.account.mechanism -ne 'fileOverlay') { throw "Adapter '$($Adapter.id)' cannot import a credential-bearing package." }
+    if (Test-Path -LiteralPath $DestinationDir) { throw "Profile destination '$DestinationDir' already exists." }
+    $parent = Split-Path -Parent $DestinationDir
+    if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+    $name = Split-Path -Leaf $DestinationDir
+    if ($name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Invalid profile name '$name'." }
+    $temp = Join-Path $parent ('.move-package-import.' + [guid]::NewGuid().ToString('N'))
+    $profileStage = Join-Path $temp 'profile'; $stateStage = Join-Path $temp 'state'
+    New-Item -ItemType Directory -Path $temp | Out-Null
+    $preserveTemp = $false
+    try {
+        $package = Expand-MovePackageZip -Adapter $Adapter -ArchivePath $ArchivePath -ProfileStage $profileStage -StateStage $stateStage
+        $sharedRoot = Get-TransferSharedRoot -Adapter $Adapter
+        if ($package.Mode -eq 'accountOverlay' -and -not (Test-MovePackageStatePreflight -StagedRoot $stateStage -SharedRoot $sharedRoot)) {
+            throw 'Destination shared state has a conflicting file; nothing was imported.'
+        }
+        Assert-MovePackageIdle -Adapter $Adapter -ProfilePath $DestinationDir -ProcessProbe $ProcessProbe
+        $lock = Join-Path $parent ".move-lock.$name"
+        New-Item -ItemType Directory -Path $lock -ErrorAction Stop | Out-Null
+        $created = New-Object 'System.Collections.Generic.List[object]'
+        try {
+            if (Test-Path -LiteralPath $DestinationDir) { throw 'Destination appeared while acquiring the lock.' }
+            Assert-MovePackageIdle -Adapter $Adapter -ProfilePath $DestinationDir -ProcessProbe $ProcessProbe
+            if ($package.Mode -eq 'accountOverlay') {
+                if (-not (Test-MovePackageStatePreflight -StagedRoot $stateStage -SharedRoot $sharedRoot)) { throw 'Shared-state conflict appeared while acquiring the lock.' }
+                $created = Install-MovePackageState -StagedRoot $stateStage -SharedRoot $sharedRoot
+                if (-not (Test-MovePackageStatePreflight -StagedRoot $stateStage -SharedRoot $sharedRoot)) { throw 'Installed shared state failed integrity verification.' }
+            }
+            Move-Item -LiteralPath $profileStage -Destination $DestinationDir
+            $validation = Test-MoveProfile -Adapter $Adapter -ProfilePath $DestinationDir
+            if (-not $validation.Valid) { throw "Destination profile failed validation: $($validation.Code)" }
+            if ($package.Mode -eq 'accountOverlay' -and -not (New-MoveRuntimeOverlay -Adapter $Adapter -ProfilePath $DestinationDir)) {
+                throw 'Destination runtime reconstruction failed.'
+            }
+        } catch {
+            if (Test-Path -LiteralPath $DestinationDir) {
+                Remove-Item -LiteralPath (Join-Path $DestinationDir '.runtime') -Recurse -Force -ErrorAction SilentlyContinue
+                try { Move-Item -LiteralPath $DestinationDir -Destination $profileStage -ErrorAction Stop }
+                catch { $preserveTemp = $true; throw 'Destination validation failed and ownership is indeterminate; preserve destination and import staging.' }
+            }
+            Undo-MovePackageState -Created $created
+            throw
+        } finally { Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $lock) { throw "Profile is active but the movement lock could not be released: $lock" }
+        return [pscustomobject]@{ PackageId = $package.PackageId; SourceName = $package.SourceName; DestinationPath = $DestinationDir }
+    } finally {
+        if (-not $preserveTemp) { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Export-ModuleMember -Function @(
+    'Save-MultiCliTemplate',
+    'Export-MultiCliProfile',
+    'Import-MultiCliProfile',
+    'Assert-TransferTemplateCompatible',
+    'Apply-MultiCliTemplate',
+    'Invoke-MultiCliProfileMove',
+    'Export-MultiCliMovePackage',
+    'Import-MultiCliMovePackage'
+)

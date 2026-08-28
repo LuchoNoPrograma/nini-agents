@@ -214,7 +214,7 @@ remote_move_process_probe() {
       [ -r "$proc/environ" ] || continue
       while IFS= read -r -d '' environment; do
         for candidate in "${probes[@]}"; do [ "$environment" != "$candidate" ] || return 0; done
-      done < "$proc/environ" 2>/dev/null || true
+      done 2>/dev/null < "$proc/environ" || true
     done
     return 1
   fi

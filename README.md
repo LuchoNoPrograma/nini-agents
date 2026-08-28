@@ -8,9 +8,9 @@
 > Nini Agents is currently evolving from the Multi-CLI `6efb0d2` engine base.
 > Cross-machine movement for filesystem-credential profiles is public on the
 > Bash launcher (Linux verified; macOS transport implemented but not yet
-> exercised here). Windows PowerShell fails explicitly until transport parity
-> is implemented. Read-only queries, profile `new`/`rename`/`delete`, and Bash
-> `move` use the stable JSON v1 envelope.
+> exercised here). Windows PowerShell still rejects SSH transport, but supports
+> portable offline `move-export`/`move-import` ZIPs. Read-only queries, profile
+> `new`/`rename`/`delete`, and Bash `move` use the stable JSON v1 envelope.
 
 <p align="center">
   <a href="#supported-ai-tools"><img src="https://img.shields.io/badge/support-17%20AI%20tools-255C60?style=flat-square&labelColor=14101F" alt="17 supported AI tools"/></a>
@@ -42,6 +42,8 @@
 - One of the [supported AI tools](#supported-ai-tools)
 - Cross-device movement additionally requires SSH, rsync, and the same Nini
   Agents adapter version on each device
+- Portable move ZIPs additionally require `zip`, `unzip`, `base64`, and `dd` on
+  macOS/Linux; Windows uses the built-in .NET ZIP implementation
 
 ### Install from source
 
@@ -124,6 +126,8 @@ See platform limits in the [support matrix](docs/support-matrix.md). Run `nini-a
 | `nini-agents template list \| delete <name>` | List or delete templates |
 | `nini-agents export <tool>/<name> [path]` | Export a schema-v2 profile |
 | `nini-agents import <archive> <tool>/<name>` | Import a schema-v2 archive |
+| `nini-agents move-export <tool>/<name> [package.zip]` | Create an unencrypted portable ZIP with credentials, chats, and adapter-declared global state; deactivate the source after verification |
+| `nini-agents move-import <package.zip> <tool>/<name>` | Verify and install a portable move ZIP on Linux, macOS, or Windows |
 | `nini-agents move <tool>/<name> <device> [--dry-run] [--discard-source-backup] [--devices-config <path>]` | Move a legacy or schema-v2 filesystem-credential profile to one configured device |
 | `nini-agents devices list [tool]` | List active local profiles through the device registry |
 | `nini-agents devices status <tool>/<name>` | Show active/absent/inaccessible state on every configured device |
@@ -202,6 +206,37 @@ fail closed before ownership changes. Expected shared-state links and exact
 link residue recorded by an older completed migration are never followed: the
 link objects are omitted from destination staging, while the original objects
 remain in the source backup until any requested backup discard succeeds.
+
+### Portable offline move ZIPs
+
+Use the separate offline movement commands when SSH is unavailable or the
+destination is Windows:
+
+```bash
+nini-agents move-export codex/work ./codex-work-move.zip
+# Copy the ZIP by USB, file share, SCP, etc.
+nini-agents move-import ./codex-work-move.zip codex/work
+```
+
+The ZIP contract is intentionally different from normal `export`/`import`.
+Normal exports remain credential- and session-free. A move ZIP includes the
+validated profile credentials plus adapter-declared `sharedPaths` and
+`sessionPaths`; for Codex this includes shared chats and global `skills` (as
+well as the other paths declared by the Codex adapter).
+
+The archive is **not encrypted** and must be protected like a password. It has
+one fixed NDJSON payload whose file records carry size and SHA-256 integrity;
+import reconstructs only validated relative regular files in private staging.
+Existing destination state is merged only when missing or byte-identical. Any
+different file is a conflict and aborts before profile activation.
+
+After a successful export, the active source profile moves to
+`.inactive/<name>.<package-id>` and the verified ZIP is kept. Shared global
+state is not deleted because other local profiles may still use it. After a
+successful import, the ZIP is also retained as a recovery copy. Offline media
+cannot enforce a single destination if the same ZIP is replayed, so delete or
+secure every extra copy once ownership is confirmed. Windows implementation is
+present but was not executed in this Linux checkout.
 
 ### Shared Codex permissions
 

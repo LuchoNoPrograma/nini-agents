@@ -26,6 +26,8 @@ source "$SCRIPT_DIR/lib/credential-store.sh"
 source "$SCRIPT_DIR/lib/transfer.sh"
 # shellcheck source=lib/remote-move.sh
 source "$SCRIPT_DIR/lib/remote-move.sh"
+# shellcheck source=lib/move-package.sh
+source "$SCRIPT_DIR/lib/move-package.sh"
 # shellcheck source=lib/migration.sh
 source "$SCRIPT_DIR/lib/migration.sh"
 # shellcheck source=lib/multicli-osuser.sh
@@ -2446,6 +2448,41 @@ cmd_import() {
   echo "Imported '$spec'"
 }
 
+cmd_move_export() {
+  local spec="${1:-}" out="${2:-}"
+  [ -n "$spec" ] || abort "Usage: nini-agents move-export <tool>/<name> [package.zip]"
+  split_profile_spec "$spec"
+  validate_name "$NAME"
+  local manifest="$(adapter_path "$TOOL")" source="$(profile_dir "$TOOL" "$NAME")"
+  [ -f "$manifest" ] || abort "Unknown tool '$TOOL'"
+  [ -d "$source" ] || abort "Profile '$spec' does not exist"
+  [ -n "$out" ] || out="./$TOOL-$NAME-move.zip"
+  if ! move_package_export "$manifest" "$source" "$out" "$NAME" remote_move_process_probe; then
+    abort "${MOVE_PACKAGE_ERROR:-Portable move export failed.}"
+  fi
+  echo "Moved '$spec' into unencrypted package '$out'."
+  echo "Source profile is inactive; recovery backup: $(tool_profiles_dir "$TOOL")/.inactive/$NAME.$MOVE_PACKAGE_ID"
+  echo "Warning: the ZIP contains credentials, chats, and declared global state. Protect it like a password."
+}
+
+cmd_move_import() {
+  local archive="${1:-}" spec="${2:-}"
+  [ -n "$archive" ] && [ -n "$spec" ] || abort "Usage: nini-agents move-import <package.zip> <tool>/<name>"
+  [ -f "$archive" ] || abort "File not found: $archive"
+  split_profile_spec "$spec"
+  validate_name "$NAME"
+  local manifest="$(adapter_path "$TOOL")" destination="$(profile_dir "$TOOL" "$NAME")"
+  [ -f "$manifest" ] || abort "Unknown tool '$TOOL'"
+  mkdir -p "$(tool_profiles_dir "$TOOL")"
+  if ! move_package_import "$archive" "$manifest" "$destination" "$NAME" remote_move_process_probe; then
+    abort "${MOVE_PACKAGE_ERROR:-Portable move import failed.}"
+  fi
+  create_shell_alias "$TOOL" "$NAME"
+  create_shortcut "$TOOL" "$NAME"
+  echo "Imported move package as '$spec'."
+  echo "The ZIP was retained as a recovery copy."
+}
+
 # Read or update the user-level Codex defaults shared by every Nini Agents
 # Codex profile. An active Codex process keeps its current session policy;
 # persisted values apply when a new session starts.
@@ -2503,6 +2540,8 @@ COMMANDS
   template list | delete <name>                         Manage templates
   export <tool>/<name> [path]                           Export to .tar.gz
   import <archive> <tool>/<name>                        Import from archive
+  move-export <tool>/<name> [package.zip]               Create an unencrypted credential/chat/state ZIP and deactivate source
+  move-import <package.zip> <tool>/<name>               Verify and install a portable move ZIP
   move <tool>/<name> <device> [--dry-run] [--discard-source-backup] [--devices-config <path>]
                                                         Move one filesystem-credential profile between devices
   devices list [tool] | status <tool>/<name> | doctor [tool]
@@ -2547,7 +2586,7 @@ _multi_cli_completions() {
   local base="${MULTICLI_HOME:-$HOME/MultiCliProfiles}"
   local script_dir="$(cd "$(dirname "$(command -v nini-agents 2>/dev/null || echo .)")" && pwd)"
   local tools_dir="${MULTICLI_TOOLS_DIR:-$script_dir/ai-tools}"
-  local cmds="new launch exec list status rename delete clone migrate continue auth permissions template export import move devices tools doctor stats completion help version"
+  local cmds="new launch exec list status rename delete clone migrate continue auth permissions template export import move-export move-import move devices tools doctor stats completion help version"
   local tools="" specs=""
   if [ -d "$tools_dir" ]; then
     for d in "$tools_dir"/*/; do [ -f "$d/adapter.json" ] && tools="$tools $(basename "$d")"; done
@@ -2570,7 +2609,7 @@ COMP
 #compdef nini-agents multi-cli
 _multi_cli() {
   local -a cmds tools specs
-  cmds=(new launch exec list status rename delete clone migrate continue auth permissions template export import move devices tools doctor stats completion help version)
+  cmds=(new launch exec list status rename delete clone migrate continue auth permissions template export import move-export move-import move devices tools doctor stats completion help version)
   local base="${MULTICLI_HOME:-$HOME/MultiCliProfiles}"
   local script_dir="$(cd "$(dirname "$(command -v nini-agents 2>/dev/null || echo .)")" && pwd)"
   local tools_dir="${MULTICLI_TOOLS_DIR:-$script_dir/ai-tools}"
@@ -2716,6 +2755,8 @@ case "$cmd" in
   template)   cmd_template "$@" ;;
   export)     cmd_export "$@" ;;
   import)     cmd_import "$@" ;;
+  move-export) cmd_move_export "$@" ;;
+  move-import) cmd_move_import "$@" ;;
   move)       cmd_move "$@" ;;
   devices)    remote_move_devices_command "$@" || { [ -z "$REMOTE_MOVE_MESSAGE" ] || printf 'Error: %s\n' "$REMOTE_MOVE_MESSAGE" >&2; exit 1; } ;;
   _move-endpoint) remote_move_endpoint "$@" ;;

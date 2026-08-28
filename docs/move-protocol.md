@@ -4,6 +4,18 @@ Nini Agents contains a credential-bearing movement engine that is separate
 from `export`, `import`, templates, and session continuation. Those existing
 flows remain credential-free.
 
+It also exposes a portable offline package contract on Bash and PowerShell:
+
+```text
+nini-agents move-export <tool>/<profile> [package.zip]
+nini-agents move-import <package.zip> <tool>/<profile>
+```
+
+The package is an explicitly unencrypted, credential-bearing ZIP. It includes
+the validated profile plus adapter-declared shared and session state so chats
+and global skills can follow the profile between Linux/macOS and Windows.
+Normal `export`/`import` are unchanged and remain credential-free.
+
 The local engine remains available as an internal API. The Bash launcher also
 exposes a public coordinator:
 
@@ -130,6 +142,35 @@ by the current operation, after destination activation, runtime reconstruction,
 and the final source/destination inventory comparison succeed. Earlier backups
 are never selected. A cleanup failure leaves the destination active, releases
 the ownership locks, and reports `backup_cleanup_failed`.
+
+## Offline ZIP transaction
+
+The ZIP contains exactly one `nini-agents-move-package.ndjson` entry. Its header
+binds package schema v1 to the adapter, source profile format/mode, package ID,
+and the explicit `encrypted: false` contract. Directory and `file-start`
+records use validated relative paths; file metadata carries byte length and
+SHA-256, followed by bounded base64 `chunk` records and `file-end`. Import
+streams these records and creates only regular files
+inside reserved staging, rather than extracting archive-controlled paths.
+
+Export validates the profile and idle process state, stages the profile without
+derived runtime/link residue, snapshots adapter-declared shared and session
+paths, writes the ZIP, re-imports it into private staging, and compares both
+profile and state inventories. Under the profile lock it rechecks idle state
+and both snapshots, then atomically moves the source profile to its unique
+inactive backup. Global shared state remains because other profiles may own it.
+
+Import validates and reconstructs the package in private staging. Destination
+shared state accepts missing files and byte-identical files only; a differing
+file or unsafe object fails before activation. New state entries are tracked
+and removed in reverse order if installation or profile activation fails. After
+activation, schema-v2 account overlays rebuild and validate their runtime. The
+archive is retained by default.
+
+The offline package cannot prevent replay to multiple disconnected machines.
+The operator must secure or delete extra package copies after confirming the
+destination. Windows uses the same format through PowerShell/.NET; this checkout
+does not claim executed Windows validation.
 
 ## Public result inventory
 

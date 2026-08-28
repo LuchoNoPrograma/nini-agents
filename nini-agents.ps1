@@ -2270,6 +2270,43 @@ function Invoke-Import {
     Write-Host "Imported '$Spec'"
 }
 
+# Credential-bearing portable ZIP movement. Unlike export/import, this keeps
+# the original profile identity, includes declared chats/global state, and
+# deactivates the source only after ZIP self-verification.
+function Invoke-MoveExport {
+    param([string]$Spec, [string]$OutPath)
+    if (-not $Spec) { throw 'Usage: nini-agents move-export <tool>/<name> [package.zip]' }
+    $p = Split-ProfileSpec $Spec
+    Test-ProfileName $p.Name
+    $adapter = Get-Adapter $p.Tool
+    $source = Get-ProfileDir $p.Tool $p.Name
+    if (-not (Test-Path -LiteralPath $source -PathType Container)) { throw "Profile '$Spec' does not exist" }
+    if (-not $OutPath) { $OutPath = ".\$($p.Tool)-$($p.Name)-move.zip" }
+    Import-Module (Resolve-MultiCliModulePath 'MultiCli.Transfer.psm1') -Force
+    $result = Export-MultiCliMovePackage -Adapter $adapter -ProfileDir $source -OutPath $OutPath -ProfileName $p.Name
+    Write-Host "Moved '$Spec' into unencrypted package '$($result.ArchivePath)'."
+    Write-Host "Source profile is inactive; recovery backup: $($result.BackupPath)"
+    Write-Warning 'The ZIP contains credentials, chats, and declared global state. Protect it like a password.'
+}
+
+function Invoke-MoveImport {
+    param([string]$ArchivePath, [string]$Spec)
+    if (-not $ArchivePath -or -not $Spec) { throw 'Usage: nini-agents move-import <package.zip> <tool>/<name>' }
+    if (-not (Test-Path -LiteralPath $ArchivePath -PathType Leaf)) { throw "File not found: $ArchivePath" }
+    $p = Split-ProfileSpec $Spec
+    Test-ProfileName $p.Name
+    $adapter = Get-Adapter $p.Tool
+    $destination = Get-ProfileDir $p.Tool $p.Name
+    if (Test-Path -LiteralPath $destination) { throw "Profile '$Spec' already exists" }
+    New-Item -ItemType Directory -Force -Path (Get-ToolProfilesDir $p.Tool) | Out-Null
+    Import-Module (Resolve-MultiCliModulePath 'MultiCli.Transfer.psm1') -Force
+    Import-MultiCliMovePackage -Adapter $adapter -ArchivePath $ArchivePath -DestinationDir $destination | Out-Null
+    New-AliasScript -Tool $p.Tool -Name $p.Name
+    New-StartMenuShortcut -Tool $p.Tool -Name $p.Name -Adapter $adapter | Out-Null
+    Write-Host "Imported move package as '$Spec'."
+    Write-Host 'The ZIP was retained as a recovery copy.'
+}
+
 # =============================================================================
 # Legacy -> schema-v2 migration
 # =============================================================================
@@ -2354,6 +2391,8 @@ COMMANDS
   template list | delete <name>                         Manage templates
   export <tool>/<name> [path]                           Export to .zip
   import <archive> <tool>/<name>                        Import from .zip
+  move-export <tool>/<name> [package.zip]               Create an unencrypted credential/chat/state ZIP and deactivate source
+  move-import <package.zip> <tool>/<name>               Verify and install a portable move ZIP
   move <tool>/<name> <device> [--dry-run]               Cross-device move (Bash transport only)
   devices list|status|doctor                            Device fleet commands (Bash transport only)
   tools                                                 List supported tools
@@ -2397,7 +2436,7 @@ Register-ArgumentCompleter -Native -CommandName nini-agents,multi-cli -ScriptBlo
     param(`$wordToComplete, `$commandAst, `$cursorPosition)
     `$base = if (`$env:MULTICLI_HOME) { `$env:MULTICLI_HOME } else { Join-Path `$env:USERPROFILE 'MultiCliProfiles' }
     `$tools = (Get-ChildItem -Directory '$ToolsDir' -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path `$_.FullName 'adapter.json') }).Name
-    `$cmds = @('new','launch','exec','continue','migrate','list','status','rename','delete','clone','auth','permissions','template','export','import','move','devices','tools','doctor','stats','completion','help','version')
+    `$cmds = @('new','launch','exec','continue','migrate','list','status','rename','delete','clone','auth','permissions','template','export','import','move-export','move-import','move','devices','tools','doctor','stats','completion','help','version')
     `$specs = @()
     foreach (`$t in `$tools) {
         `$dir = Join-Path `$base `$t
@@ -2570,6 +2609,8 @@ try {
         }
         'export'  { Invoke-Export $Arg1 $Arg2 }
         'import'  { Invoke-Import $Arg1 $Arg2 }
+        'move-export' { Invoke-MoveExport $Arg1 $Arg2 }
+        'move-import' { Invoke-MoveImport $Arg1 $Arg2 }
         'move'    { throw 'Cross-device SSH movement is currently supported by the Bash launcher on Linux and macOS.' }
         'devices' { throw 'Device fleet commands are currently supported by the Bash launcher on Linux and macOS.' }
         'tools'   { Show-Tools }
