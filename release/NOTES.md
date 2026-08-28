@@ -9,6 +9,10 @@ published from this fork yet.
 - Keep each account's credentials separate.
 - Create, launch, inspect, rename, clone, migrate, export, import, and remove profiles from one CLI.
 - Move supported sessions between profiles without copying credentials.
+- Move complete Codex profiles between machines in verified portable ZIPs,
+  including credentials, chats, and declared global skills/state.
+- Persist profile login/logout updates safely after foreground launches and
+  load repository-local Codex MCP declarations without changing global config.
 - Install on Windows, macOS, and Linux with platform-native scripts.
 
 ### Downloads

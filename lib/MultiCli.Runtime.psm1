@@ -6,9 +6,10 @@ Set-StrictMode -Version Latest
 # junctioned/hardlinked from the adapter's native root, and the launch
 # environment is expanded from adapter placeholders.
 #
-# Exported surface: Initialize-RuntimeProfile (profile creation) and
-# Get-AccountOverlayLaunchPlan (launch planning). Everything else is
-# module-internal; tests drive internals via Invoke-ModuleInternal.
+# Exported surface: Initialize-RuntimeProfile (profile creation),
+# Get-AccountOverlayLaunchPlan (launch planning), and
+# Complete-RuntimeProfileCredentialUpdates (foreground write-back). Everything
+# else is module-internal; tests drive internals via Invoke-ModuleInternal.
 
 function Get-RuntimeProperty {
     param($Object, [string]$Name)
@@ -363,6 +364,150 @@ function Get-RuntimeMutexName {
     return "Local\MultiCliRuntime_$hash"
 }
 
+function Invoke-WithRuntimeMutex {
+    param([string]$ProfileDir, [scriptblock]$Action, [object[]]$ActionArguments = @())
+    $mutex = New-Object Threading.Mutex($false, (Get-RuntimeMutexName -ProfileDir $ProfileDir))
+    $hasLock = $false
+    try {
+        try { $hasLock = $mutex.WaitOne([TimeSpan]::FromSeconds(30)) }
+        catch [Threading.AbandonedMutexException] { $hasLock = $true }
+        if (-not $hasLock) { throw 'Timed out waiting for the profile runtime lock. Close a stuck nini-agents launch and retry.' }
+        return & $Action @ActionArguments
+    } finally {
+        if ($hasLock) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+
+function Test-RuntimeOverlayManifestMatches {
+    param($Adapter, [string]$RuntimeRoot)
+    $runtimeItem = Get-Item -LiteralPath $RuntimeRoot -Force -ErrorAction SilentlyContinue
+    if (-not $runtimeItem -or -not $runtimeItem.PSIsContainer -or
+        ($runtimeItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
+    $manifestPath = Join-Path $RuntimeRoot '.runtime-manifest'
+    $manifestItem = Get-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
+    if (-not $manifestItem -or $manifestItem.PSIsContainer -or
+        ($manifestItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        (Get-RuntimeProperty -Object $manifestItem -Name 'LinkType')) { return $false }
+    $expected = @(Get-RuntimeManifestLines -Adapter $Adapter)
+    $actual = @(Get-Content -LiteralPath $manifestPath)
+    return (($expected -join "`n") -eq ($actual -join "`n"))
+}
+
+# Validate (and optionally create) a real directory chain without traversing a
+# junction or symbolic link. Re-reading each component closes the race between
+# creation and validation before a credential file is moved or linked.
+function Assert-RuntimeDirectoryTree {
+    param([string]$Base, [string]$RelativePath, [string]$Label, [switch]$AllowCreate)
+    $current = $Base
+    $baseItem = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+    if (-not $baseItem -or -not $baseItem.PSIsContainer -or
+        ($baseItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "Refusing to reconcile profile credentials: $Label root '$Base' is missing or linked."
+    }
+    foreach ($component in @($RelativePath -split '[\\/]')) {
+        if (-not $component -or $component -eq '.') { continue }
+        $current = Join-Path $current $component
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+        if (-not $item -and $AllowCreate) {
+            try { New-Item -ItemType Directory -Path $current -ErrorAction Stop | Out-Null } catch { }
+            $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+        }
+        if (-not $item -or -not $item.PSIsContainer -or
+            ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Refusing to reconcile profile credentials: $Label directory '$current' is missing or linked."
+        }
+    }
+}
+
+# Codex and similar CLIs persist credentials with temp+rename. On Windows that
+# replaces the managed runtime hardlink. Promote a plain replacement into the
+# profile backing file and recreate the hardlink; reject any unexpected link.
+function Complete-RuntimeProfileCredentialUpdatesLocked {
+    param(
+        $Adapter,
+        [string]$ProfileDir,
+        [ValidateSet('recover', 'post')][string]$Phase,
+        [int]$ChildExitCode = 0
+    )
+    $runtimeRoot = Join-Path $ProfileDir '.runtime'
+    if (-not (Test-RuntimeOverlayManifestMatches -Adapter $Adapter -RuntimeRoot $runtimeRoot)) {
+        throw 'Refusing to reconcile profile credentials: runtime manifest does not match the adapter or is linked.'
+    }
+    $authRoot = Join-Path $ProfileDir 'auth'
+    Assert-RuntimeDirectoryTree -Base $authRoot -RelativePath '' -Label 'auth'
+    $normalState = Get-RuntimeProperty -Object $Adapter -Name 'normalState'
+    $stateSubdir = Get-RuntimeProperty -Object $normalState -Name 'runtimeSubdir'
+    if ($stateSubdir) {
+        Assert-RuntimeRelativePath -RelativePath $stateSubdir -Label 'runtime subdirectory' -AdapterId $Adapter.id
+    }
+    foreach ($relativePath in @($Adapter.account.credentialFiles)) {
+        if (-not $relativePath) { continue }
+        Assert-RuntimeRelativePath -RelativePath $relativePath -Label 'credential' -AdapterId $Adapter.id
+        $nativeRelative = $relativePath -replace '/', '\'
+        $relativeParent = Split-Path -Parent $nativeRelative
+        Assert-RuntimeDirectoryTree -Base $authRoot -RelativePath $relativeParent -Label 'auth'
+        $authPath = Join-Path $authRoot $nativeRelative
+        $authItem = Get-Item -LiteralPath $authPath -Force -ErrorAction SilentlyContinue
+        if (-not $authItem -or $authItem.PSIsContainer -or
+            ($authItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Refusing to reconcile credential path ${relativePath}: the profile backing file is missing or linked."
+        }
+        $runtimeRelative = if ($stateSubdir) { Join-Path ($stateSubdir -replace '/', '\') $nativeRelative } else { $nativeRelative }
+        $runtimeParent = Split-Path -Parent $runtimeRelative
+        Assert-RuntimeDirectoryTree -Base $runtimeRoot -RelativePath $runtimeParent -Label 'runtime' -AllowCreate
+        $runtimePath = Join-Path $runtimeRoot $runtimeRelative
+        $runtimeItem = Get-Item -LiteralPath $runtimePath -Force -ErrorAction SilentlyContinue
+        if ($runtimeItem) {
+            if (Test-RuntimePathTarget -Path $runtimePath -ExpectedSource $authPath) { continue }
+            $linkType = [string](Get-RuntimeProperty -Object $runtimeItem -Name 'LinkType')
+            if (($runtimeItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $linkType) {
+                throw "Refusing to reconcile runtime credential ${relativePath}: unexpected link or hardlink."
+            }
+            if ($runtimeItem.PSIsContainer) {
+                throw "Refusing to reconcile runtime credential ${relativePath}: expected a regular file."
+            }
+            try {
+                Move-Item -LiteralPath $runtimePath -Destination $authPath -Force -ErrorAction Stop
+            } catch {
+                throw "Cannot persist updated credential path ${relativePath}: $($_.Exception.Message)"
+            }
+            New-RuntimeLink -Source $authPath -Destination $runtimePath -Label 'profile credential'
+            continue
+        }
+        if ($Phase -ne 'post') { continue }
+        if ($ChildExitCode -eq 0) {
+            $temporaryPath = Join-Path (Split-Path -Parent $authPath) ('.credential-logout.' + $PID + '.tmp')
+            if (Test-Path -LiteralPath $temporaryPath) {
+                throw "Refusing to replace existing credential staging file '$temporaryPath'."
+            }
+            try {
+                $stream = [IO.File]::Open($temporaryPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+                try { $stream.Flush($true) } finally { $stream.Dispose() }
+                Move-Item -LiteralPath $temporaryPath -Destination $authPath -Force -ErrorAction Stop
+            } catch {
+                throw "Cannot persist logged-out credential path ${relativePath}: $($_.Exception.Message)"
+            } finally {
+                Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+        New-RuntimeLink -Source $authPath -Destination $runtimePath -Label 'profile credential'
+    }
+}
+
+function Complete-RuntimeProfileCredentialUpdates {
+    param(
+        $Adapter,
+        [string]$ProfileDir,
+        [ValidateSet('recover', 'post')][string]$Phase = 'post',
+        [int]$ChildExitCode = 0
+    )
+    Invoke-WithRuntimeMutex -ProfileDir $ProfileDir -Action {
+        param($runtimeAdapter, $runtimeProfileDir, $runtimePhase, $runtimeChildExitCode)
+        Complete-RuntimeProfileCredentialUpdatesLocked -Adapter $runtimeAdapter -ProfileDir $runtimeProfileDir -Phase $runtimePhase -ChildExitCode $runtimeChildExitCode
+    } -ActionArguments @($Adapter, $ProfileDir, $Phase, $ChildExitCode) | Out-Null
+}
+
 # Serialize builds across processes. A current overlay is reused so launching a
 # second process never removes the runtime tree from beneath the first.
 function New-RuntimeOverlay {
@@ -373,17 +518,10 @@ function New-RuntimeOverlay {
         New-RuntimeSharedCredentialSources -Adapter $Adapter -ProfileDir $ProfileDir -SharedCredentialRoot $sharedCredentialRoot
     }
     if (Test-RuntimeOverlayCurrent -Adapter $Adapter -RuntimeRoot $runtimeRoot) { return $runtimeRoot }
-    $mutex = New-Object Threading.Mutex($false, (Get-RuntimeMutexName -ProfileDir $ProfileDir))
-    $hasLock = $false
-    try {
-        try { $hasLock = $mutex.WaitOne([TimeSpan]::FromSeconds(30)) }
-        catch [Threading.AbandonedMutexException] { $hasLock = $true }
-        if (-not $hasLock) { throw "Timed out waiting for the profile runtime lock. Close a stuck nini-agents launch and retry." }
-        return New-RuntimeOverlayLocked -Adapter $Adapter -ProfileDir $ProfileDir
-    } finally {
-        if ($hasLock) { $mutex.ReleaseMutex() }
-        $mutex.Dispose()
-    }
+    return Invoke-WithRuntimeMutex -ProfileDir $ProfileDir -Action {
+        param($runtimeAdapter, $runtimeProfileDir)
+        New-RuntimeOverlayLocked -Adapter $runtimeAdapter -ProfileDir $runtimeProfileDir
+    } -ActionArguments @($Adapter, $ProfileDir)
 }
 
 function New-RuntimeOverlayLocked {
@@ -394,6 +532,10 @@ function New-RuntimeOverlayLocked {
         New-RuntimeSharedCredentialSources -Adapter $Adapter -ProfileDir $ProfileDir -SharedCredentialRoot $sharedCredentialRoot
     }
     if (Test-RuntimeOverlayCurrent -Adapter $Adapter -RuntimeRoot $runtimeRoot) { return $runtimeRoot }
+    if (Test-RuntimeOverlayManifestMatches -Adapter $Adapter -RuntimeRoot $runtimeRoot) {
+        Complete-RuntimeProfileCredentialUpdatesLocked -Adapter $Adapter -ProfileDir $ProfileDir -Phase recover -ChildExitCode 0
+        if (Test-RuntimeOverlayCurrent -Adapter $Adapter -RuntimeRoot $runtimeRoot) { return $runtimeRoot }
+    }
     $sharedRoot = Get-RuntimePlatformRoot -Adapter $Adapter
     New-Item -ItemType Directory -Force -Path $sharedRoot | Out-Null
     $stagingRoot = "$runtimeRoot.staging.$PID"
@@ -541,4 +683,4 @@ function Get-AccountOverlayLaunchPlan {
     }
 }
 
-Export-ModuleMember -Function Initialize-RuntimeProfile, Get-AccountOverlayLaunchPlan
+Export-ModuleMember -Function Initialize-RuntimeProfile, Get-AccountOverlayLaunchPlan, Complete-RuntimeProfileCredentialUpdates

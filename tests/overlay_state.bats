@@ -156,6 +156,207 @@ JSON
   [ "$runtime_a" != "$runtime_b" ]
 }
 
+@test "foreground launch persists an atomically replaced profile credential" {
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  cat > "$MULTICLI_OVERRIDE_BINARY" <<'PROBE'
+#!/usr/bin/env bash
+set -euo pipefail
+replacement="${FIXTURE_HOME}/.auth.json.replacement.$$"
+printf '%s\n' '{"synthetic":"fresh-login"}' > "$replacement"
+chmod 600 "$replacement"
+mv -f "$replacement" "${FIXTURE_HOME}/auth.json"
+PROBE
+  chmod +x "$MULTICLI_OVERRIDE_BINARY"
+
+  run multicli launch fixture/account-a
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  local profile_auth="$MULTICLI_HOME/fixture/account-a/auth/auth.json"
+  local runtime_auth="$MULTICLI_HOME/fixture/account-a/.runtime/auth.json"
+  run jq -er '.synthetic' "$profile_auth"
+  [ "$status" -eq 0 ]
+  [ "$output" = "fresh-login" ]
+  [ -L "$runtime_auth" ]
+  [ "$runtime_auth" -ef "$profile_auth" ]
+}
+
+@test "foreground launch persists a successful credential deletion as logout" {
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  local profile_auth="$MULTICLI_HOME/fixture/account-a/auth/auth.json"
+  local runtime_auth="$MULTICLI_HOME/fixture/account-a/.runtime/auth.json"
+  printf '%s\n' '{"synthetic":"signed-in"}' > "$profile_auth"
+  cat > "$MULTICLI_OVERRIDE_BINARY" <<'PROBE'
+#!/usr/bin/env bash
+set -euo pipefail
+rm -f "${FIXTURE_HOME}/auth.json"
+PROBE
+  chmod +x "$MULTICLI_OVERRIDE_BINARY"
+
+  run multicli launch fixture/account-a
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [ -f "$profile_auth" ]
+  [ ! -s "$profile_auth" ]
+  [ -L "$runtime_auth" ]
+  [ "$runtime_auth" -ef "$profile_auth" ]
+}
+
+@test "foreground launch reconciles credentials while preserving a child failure status" {
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  cat > "$MULTICLI_OVERRIDE_BINARY" <<'PROBE'
+#!/usr/bin/env bash
+set -euo pipefail
+replacement="${FIXTURE_HOME}/.auth.json.replacement.$$"
+printf '%s\n' '{"synthetic":"written-before-failure"}' > "$replacement"
+chmod 600 "$replacement"
+mv -f "$replacement" "${FIXTURE_HOME}/auth.json"
+exit 37
+PROBE
+  chmod +x "$MULTICLI_OVERRIDE_BINARY"
+
+  run multicli launch fixture/account-a
+
+  [ "$status" -eq 37 ]
+  local profile_auth="$MULTICLI_HOME/fixture/account-a/auth/auth.json"
+  local runtime_auth="$MULTICLI_HOME/fixture/account-a/.runtime/auth.json"
+  [ "$(jq -r '.synthetic' "$profile_auth")" = "written-before-failure" ]
+  [ -L "$runtime_auth" ]
+  [ "$runtime_auth" -ef "$profile_auth" ]
+}
+
+@test "credential reconciliation fails closed for an unexpected runtime symlink" {
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  run multicli launch fixture/account-a
+  [ "$status" -eq 0 ]
+  local profile_auth="$MULTICLI_HOME/fixture/account-a/auth/auth.json"
+  local runtime_auth="$MULTICLI_HOME/fixture/account-a/.runtime/auth.json"
+  local outside="$MULTICLI_SCRATCH/outside-auth.json"
+  printf '%s\n' '{"synthetic":"profile"}' > "$profile_auth"
+  printf '%s\n' '{"synthetic":"outside"}' > "$outside"
+  rm "$runtime_auth"
+  ln -s "$outside" "$runtime_auth"
+
+  run multicli launch fixture/account-a
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"credential path auth.json is an unexpected link"* ]]
+  [ "$(jq -r '.synthetic' "$profile_auth")" = "profile" ]
+  [ "$(jq -r '.synthetic' "$outside")" = "outside" ]
+}
+
+@test "credential reconciliation fails closed for an unexpected runtime directory" {
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  run multicli launch fixture/account-a
+  [ "$status" -eq 0 ]
+  local profile_auth="$MULTICLI_HOME/fixture/account-a/auth/auth.json"
+  local runtime_auth="$MULTICLI_HOME/fixture/account-a/.runtime/auth.json"
+  printf '%s\n' '{"synthetic":"profile"}' > "$profile_auth"
+  rm "$runtime_auth"
+  mkdir "$runtime_auth"
+
+  run multicli launch fixture/account-a
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"runtime entry is not a regular file"* ]]
+  [ "$(jq -r '.synthetic' "$profile_auth")" = "profile" ]
+  [ -d "$runtime_auth" ]
+}
+
+@test "credential reconciliation fails closed for an unexpected POSIX hardlink" {
+  case "$(uname -s 2>/dev/null || echo unknown)" in
+    MINGW*|MSYS*|CYGWIN*|Windows*) skip "Windows uses a separate hardlink-target regression" ;;
+  esac
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  run multicli launch fixture/account-a
+  [ "$status" -eq 0 ]
+  local profile_auth="$MULTICLI_HOME/fixture/account-a/auth/auth.json"
+  local runtime_auth="$MULTICLI_HOME/fixture/account-a/.runtime/auth.json"
+  local outside="$MULTICLI_SCRATCH/outside-auth.json"
+  local alias="$MULTICLI_SCRATCH/outside-auth.alias"
+  printf '%s\n' '{"synthetic":"profile"}' > "$profile_auth"
+  printf '%s\n' '{"synthetic":"outside"}' > "$outside"
+  ln "$outside" "$alias"
+  rm "$runtime_auth"
+  ln "$outside" "$runtime_auth"
+
+  run multicli launch fixture/account-a
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"runtime replacement has unexpected hardlinks"* ]]
+  [ "$(jq -r '.synthetic' "$profile_auth")" = "profile" ]
+  [ "$(jq -r '.synthetic' "$outside")" = "outside" ]
+  [ "$outside" -ef "$alias" ]
+}
+
+@test "credential reconciliation refuses a linked parent of a nested runtime credential" {
+  jq '.account.credentialFiles=["tokens/auth.json"] | .account.credentialPrecedence=["tokens/auth.json"]' \
+    "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  run multicli launch fixture/account-a
+  [ "$status" -eq 0 ]
+  local profile_auth="$MULTICLI_HOME/fixture/account-a/auth/tokens/auth.json"
+  local runtime_parent="$MULTICLI_HOME/fixture/account-a/.runtime/tokens"
+  local outside="$MULTICLI_SCRATCH/outside-tokens"
+  printf '%s\n' '{"synthetic":"profile"}' > "$profile_auth"
+  mkdir "$outside"
+  rm "$runtime_parent/auth.json"
+  rmdir "$runtime_parent"
+  ln -s "$outside" "$runtime_parent"
+
+  run multicli launch fixture/account-a
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"runtime credential"*"component"*"is a link"* ]]
+  [ "$(jq -r '.synthetic' "$profile_auth")" = "profile" ]
+  [ ! -e "$outside/auth.json" ]
+}
+
+@test "direct reconciliation rejects missing control roots and recovers a warm overlay" {
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  run multicli launch fixture/account-a
+  [ "$status" -eq 0 ]
+  local manifest="$TOOLS_ROOT/fixture/adapter.json"
+  local profile="$MULTICLI_HOME/fixture/account-a"
+  local runtime="$profile/.runtime"
+  local profile_auth="$profile/auth/auth.json"
+  local runtime_auth="$runtime/auth.json"
+  set -- help
+  source "$MULTICLI_BIN" >/dev/null 2>&1
+
+  rm "$runtime/.runtime-manifest"
+  run runtime_reconcile_profile_credentials_locked "$manifest" "$profile" post 0
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"runtime manifest is missing or linked"* ]]
+  runtime_expected_manifest "$manifest" > "$runtime/.runtime-manifest"
+
+  rm "$runtime_auth"
+  mv "$profile/auth" "$profile/auth-away"
+  run runtime_reconcile_profile_credentials_locked "$manifest" "$profile" post 0
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"auth root"*"is missing or linked"* ]]
+  mv "$profile/auth-away" "$profile/auth"
+  runtime_link_path "$profile_auth" "$runtime_auth" "profile credential"
+
+  local replacement="$runtime/.auth.json.replacement"
+  printf '%s\n' '{"synthetic":"warm-recovery"}' > "$replacement"
+  mv -f "$replacement" "$runtime_auth"
+  run runtime_build_overlay_locked "$manifest" "$profile"
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [ "$(jq -r '.synthetic' "$profile_auth")" = "warm-recovery" ]
+  [ -L "$runtime_auth" ]
+  [ "$runtime_auth" -ef "$profile_auth" ]
+}
+
 @test "two profiles share one credential store while main auth remains profile-local" {
   jq '.sharedCredentialState={
     root:".shared/fixture/oauth",

@@ -1310,7 +1310,7 @@ function Quote-ProcessArgument {
 # and propagate the child exit code as the launcher exit code; detached plans
 # return immediately.
 function Start-LaunchPlan {
-    param($Plan)
+    param($Plan, [switch]$ReturnExitCode)
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $Plan.Binary
     $startInfo.Arguments = (@($Plan.Arguments) | ForEach-Object { Quote-ProcessArgument ([string]$_) }) -join ' '
@@ -1322,8 +1322,12 @@ function Start-LaunchPlan {
         $startInfo.EnvironmentVariables[$name] = [string]$Plan.Environment[$name]
     }
     $process = [System.Diagnostics.Process]::Start($startInfo)
-    if ($Plan.Mode -eq 'detached') { return }
+    if ($Plan.Mode -eq 'detached') {
+        if ($ReturnExitCode) { return 0 }
+        return
+    }
     $process.WaitForExit()
+    if ($ReturnExitCode) { return $process.ExitCode }
     if ($process.ExitCode -ne 0) {
         $global:LASTEXITCODE = $process.ExitCode
         exit $process.ExitCode
@@ -1345,7 +1349,14 @@ function Invoke-LaunchAccountOverlay {
     }
     Import-RuntimeModule
     $plan = Get-AccountOverlayLaunchPlan -Adapter $Adapter -ProfileDir $ProfileDir -Binary $Binary -BinaryArgs $BinaryArgs
-    Start-LaunchPlan -Plan $plan
+    $exitCode = Start-LaunchPlan -Plan $plan -ReturnExitCode
+    if ($Adapter.account.mechanism -eq 'fileOverlay' -and $plan.Mode -ne 'detached') {
+        Complete-RuntimeProfileCredentialUpdates -Adapter $Adapter -ProfileDir $ProfileDir -Phase post -ChildExitCode $exitCode
+    }
+    if ($exitCode -ne 0) {
+        $global:LASTEXITCODE = $exitCode
+        exit $exitCode
+    }
 }
 
 # Whole-root launch for schema-v2 profiles created with --isolated and legacy

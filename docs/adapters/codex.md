@@ -10,6 +10,14 @@ the native shared root, MCP OAuth links to one store below `MULTICLI_HOME`, and
 the SQLite database family is accessed directly through an enforced
 `sqlite_home` configuration.
 
+Codex persists `auth.json` with an atomic replacement. After a foreground
+launch exits, Nini Agents promotes that replacement back into the profile's
+`auth/auth.json` and recreates the managed runtime link. A successful deletion
+is persisted as a profile logout. The same recovery runs before rebuilding a
+warm overlay, which covers a prior process-replacing `nini-agents exec` launch.
+Unexpected links, directories, or hardlinks fail closed without overwriting the
+profile credential.
+
 ## Install
 
 ```bash
@@ -79,6 +87,9 @@ the other profiles; it does not change their primary Codex accounts.
   boundaries, while live SQLite files are not linked into the reconstructible
   runtime.
 - Logout scope: profile.
+- Login/logout writes are reconciled only for the adapter-declared
+  profile-local credential path. Nini Agents does not parse or print the
+  credential value during reconciliation.
 
 ## Shared MCP OAuth credential state
 

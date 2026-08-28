@@ -271,7 +271,10 @@ runtime_ensure_shared_credential_sources() {
   while ! mkdir "$lock_dir" 2>/dev/null; do
     [ ! -L "$lock_dir" ] || abort "Refusing to initialize shared credentials: '$lock_dir' is a link."
     [ -d "$lock_dir" ] || abort "Refusing to initialize shared credentials: '$lock_dir' is not a directory."
-    owner="$(tr -dc '0-9' < "$lock_dir/pid" 2>/dev/null || true)"
+    owner=""
+    if [ -f "$lock_dir/pid" ]; then
+      owner="$(tr -dc '0-9' < "$lock_dir/pid" 2>/dev/null || true)"
+    fi
     if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
       rm -f "$lock_dir/pid" 2>/dev/null || true
       rmdir "$lock_dir" 2>/dev/null || true
@@ -472,22 +475,15 @@ runtime_overlay_is_current() {
   done <<< "$expected"
 }
 
-# Serialize builds across processes. A current overlay is reused so launching a
-# second process never removes the runtime tree from beneath the first.
-runtime_build_overlay() {
-  local manifest="$1" profile_dir="$2" lock_dir owner attempts=0 runtime_root shared_credential_root
-  runtime_root="$profile_dir/.runtime"
-  shared_credential_root="$(runtime_shared_credential_root "$manifest" "$profile_dir" 2>/dev/null || true)"
-  if [ -n "$shared_credential_root" ]; then
-    runtime_ensure_shared_credential_sources "$manifest" "$profile_dir" "$shared_credential_root" || return $?
-  fi
-  if runtime_overlay_is_current "$manifest" "$runtime_root"; then
-    printf '%s\n' "$runtime_root"
-    return
-  fi
-  lock_dir="$profile_dir/.runtime.lock"
+# Run one profile-runtime mutation while holding the same lock used by overlay
+# builds. The child CLI never inherits this lock: it is acquired only for the
+# short reconciliation/build transaction so concurrent launches can proceed.
+runtime_with_profile_lock() {
+  local profile_dir="$1" operation="$2" callback="$3"; shift 3
+  local lock_dir="$profile_dir/.runtime.lock" owner attempts=0
   while ! mkdir "$lock_dir" 2>/dev/null; do
-    [ ! -L "$lock_dir" ] || abort "Refusing to build overlay: '$lock_dir' is a symlink."
+    [ ! -L "$lock_dir" ] || abort "Refusing to $operation: '$lock_dir' is a symlink."
+    [ -d "$lock_dir" ] || abort "Refusing to $operation: '$lock_dir' is not a directory."
     owner="$(tr -dc '0-9' < "$lock_dir/pid" 2>/dev/null || true)"
     if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
       rm -f "$lock_dir/pid" 2>/dev/null || true
@@ -498,11 +494,131 @@ runtime_build_overlay() {
     [ "$attempts" -lt 600 ] || abort "Timed out waiting for profile runtime lock '$lock_dir'. Close a stuck nini-agents launch and retry."
     sleep 0.05
   done
+  runtime_is_windows_shell || chmod 700 "$lock_dir" 2>/dev/null || true
   printf '%s\n' "${BASHPID:-$$}" > "$lock_dir/pid"
   (
     trap 'rm -f "$lock_dir/pid" 2>/dev/null || true; rmdir "$lock_dir" 2>/dev/null || true' EXIT
-    runtime_build_overlay_locked "$manifest" "$profile_dir"
+    "$callback" "$@"
   )
+}
+
+runtime_file_link_count() {
+  stat -c '%h' "$1" 2>/dev/null || stat -f '%l' "$1" 2>/dev/null || printf '1\n'
+}
+
+# True only for an intact overlay layout generated from the current adapter.
+# A changed adapter legitimately causes a rebuild; an intact manifest lets us
+# distinguish a credential atomically replaced by the child from stale state.
+runtime_overlay_manifest_matches() {
+  local manifest="$1" runtime_root="$2" expected actual
+  [ ! -L "$runtime_root" ] || return 1
+  [ -d "$runtime_root" ] || return 1
+  [ -f "$runtime_root/.runtime-manifest" ] || return 1
+  [ ! -L "$runtime_root/.runtime-manifest" ] || return 1
+  expected="$(runtime_expected_manifest "$manifest")"
+  actual="$(tr -d '\r' < "$runtime_root/.runtime-manifest")"
+  [ "$actual" = "$expected" ]
+}
+
+# Reconcile adapter-declared profile credentials after a foreground child (or
+# before rebuilding a warm overlay left behind by process-replacing `exec`).
+# Codex writes auth.json with temp+rename, which replaces the runtime link. A
+# regular single-link replacement is promoted into <profile>/auth and the
+# managed link is restored. Unexpected links, directories, and POSIX hardlinks
+# fail closed without overwriting profile credentials.
+runtime_reconcile_profile_credentials_locked() {
+  local manifest="$1" profile_dir="$2" phase="$3" child_status="${4:-0}"
+  local runtime_root="$profile_dir/.runtime" state_subdir relative relative_parent runtime_relative runtime_path
+  local auth_root="$profile_dir/auth" auth_path link_count expected actual tmp
+  [ ! -L "$runtime_root" ] || abort "Refusing to reconcile profile credentials: runtime root '$runtime_root' is a link."
+  [ -d "$runtime_root" ] || abort "Refusing to reconcile profile credentials: runtime root '$runtime_root' is not a directory."
+  [ -f "$runtime_root/.runtime-manifest" ] && [ ! -L "$runtime_root/.runtime-manifest" ] || \
+    abort "Refusing to reconcile profile credentials: runtime manifest is missing or linked."
+  expected="$(runtime_expected_manifest "$manifest")"
+  actual="$(tr -d '\r' < "$runtime_root/.runtime-manifest")"
+  [ "$actual" = "$expected" ] || abort "Refusing to reconcile profile credentials: runtime manifest does not match the adapter."
+  [ ! -L "$auth_root" ] && [ -d "$auth_root" ] || \
+    abort "Refusing to reconcile profile credentials: auth root '$auth_root' is missing or linked."
+  if runtime_contract_is_preloaded "$manifest"; then
+    state_subdir="$ADAPTER_LAUNCH_STATE_SUBDIR"
+  else
+    state_subdir="$(runtime_json_str '.normalState.runtimeSubdir' "$manifest")"
+  fi
+  [ -z "$state_subdir" ] || runtime_assert_safe_relative "$state_subdir" "runtime subdirectory"
+
+  local paths=()
+  if runtime_contract_is_preloaded "$manifest"; then
+    paths=("${ADAPTER_LAUNCH_CREDENTIAL_PATHS[@]}")
+  else
+    while IFS= read -r relative; do [ -n "$relative" ] && paths+=("$relative"); done < <(runtime_json_arr '.account.credentialFiles' "$manifest")
+  fi
+  for relative in "${paths[@]}"; do
+    [ -n "$relative" ] || continue
+    runtime_assert_safe_relative "$relative" "credential"
+    relative_parent="$(dirname "$relative")"
+    [ "$relative_parent" = . ] || runtime_ensure_owned_directory "$auth_root" "$relative_parent" "profile credential"
+    auth_path="$auth_root/$relative"
+    [ ! -L "$auth_path" ] || abort "Refusing to reconcile credential path $relative: the profile backing file is a link."
+    [ -f "$auth_path" ] || abort "Refusing to reconcile credential path $relative: the profile backing file is not regular."
+    if ! runtime_is_windows_shell; then
+      link_count="$(runtime_file_link_count "$auth_path")"
+      [ "$link_count" -le 1 ] || abort "Refusing to reconcile credential path $relative: the profile backing file has unexpected hardlinks."
+    fi
+    runtime_relative="$relative"
+    [ -z "$state_subdir" ] || runtime_relative="$state_subdir/$relative"
+    relative_parent="$(dirname "$runtime_relative")"
+    [ "$relative_parent" = . ] || runtime_ensure_owned_directory "$runtime_root" "$relative_parent" "runtime credential"
+    runtime_path="$runtime_root/$runtime_relative"
+    if [ -L "$runtime_path" ]; then
+      [ "$runtime_path" -ef "$auth_path" ] || abort "Refusing to reconcile credential path $relative: credential path $relative is an unexpected link."
+      continue
+    fi
+    if [ -e "$runtime_path" ]; then
+      [ -f "$runtime_path" ] || abort "Refusing to reconcile credential path $relative: the runtime entry is not a regular file."
+      if [ "$runtime_path" -ef "$auth_path" ]; then
+        continue
+      fi
+      if ! runtime_is_windows_shell; then
+        link_count="$(runtime_file_link_count "$runtime_path")"
+        [ "$link_count" -le 1 ] || abort "Refusing to reconcile credential path $relative: the runtime replacement has unexpected hardlinks."
+      fi
+      mv -f "$runtime_path" "$auth_path" || abort "Cannot persist updated credential path $relative."
+      runtime_is_windows_shell || chmod 600 "$auth_path" 2>/dev/null || true
+      runtime_link_path "$auth_path" "$runtime_path" "profile credential"
+      continue
+    fi
+    [ "$phase" = post ] || continue
+    if [ "$child_status" -eq 0 ]; then
+      tmp="$(dirname "$auth_path")/.credential-logout.${BASHPID:-$$}.tmp"
+      [ ! -e "$tmp" ] && [ ! -L "$tmp" ] || abort "Refusing to replace existing credential staging file '$tmp'."
+      (set -C; umask 077; : > "$tmp") 2>/dev/null || abort "Cannot stage logged-out credential path $relative."
+      mv -f "$tmp" "$auth_path" || abort "Cannot persist logged-out credential path $relative."
+      runtime_is_windows_shell || chmod 600 "$auth_path" 2>/dev/null || true
+    fi
+    runtime_link_path "$auth_path" "$runtime_path" "profile credential"
+  done
+}
+
+runtime_reconcile_profile_credentials() {
+  local manifest="$1" profile_dir="$2" phase="$3" child_status="${4:-0}"
+  runtime_with_profile_lock "$profile_dir" "reconcile profile credentials" \
+    runtime_reconcile_profile_credentials_locked "$manifest" "$profile_dir" "$phase" "$child_status"
+}
+
+# Serialize builds across processes. A current overlay is reused so launching a
+# second process never removes the runtime tree from beneath the first.
+runtime_build_overlay() {
+  local manifest="$1" profile_dir="$2" runtime_root shared_credential_root
+  runtime_root="$profile_dir/.runtime"
+  shared_credential_root="$(runtime_shared_credential_root "$manifest" "$profile_dir" 2>/dev/null || true)"
+  if [ -n "$shared_credential_root" ]; then
+    runtime_ensure_shared_credential_sources "$manifest" "$profile_dir" "$shared_credential_root" || return $?
+  fi
+  if runtime_overlay_is_current "$manifest" "$runtime_root"; then
+    printf '%s\n' "$runtime_root"
+    return
+  fi
+  runtime_with_profile_lock "$profile_dir" "build overlay" runtime_build_overlay_locked "$manifest" "$profile_dir"
 }
 
 # Build in a PID-unique staging dir and swap it into place while holding the
@@ -517,6 +633,13 @@ runtime_build_overlay_locked() {
   if runtime_overlay_is_current "$manifest" "$runtime_root"; then
     printf '%s\n' "$runtime_root"
     return
+  fi
+  if runtime_overlay_manifest_matches "$manifest" "$runtime_root"; then
+    runtime_reconcile_profile_credentials_locked "$manifest" "$profile_dir" recover 0
+    if runtime_overlay_is_current "$manifest" "$runtime_root"; then
+      printf '%s\n' "$runtime_root"
+      return
+    fi
   fi
   shared_credential_root="$(runtime_shared_credential_root "$manifest" "$profile_dir" 2>/dev/null || true)"
   if [ -n "$shared_credential_root" ]; then
@@ -568,11 +691,54 @@ runtime_expand_value() {
 # a literal `--`, so adapter-owned security settings win without becoming
 # positional input. The result is returned in RUNTIME_LAUNCH_ARGS.
 RUNTIME_LAUNCH_ARGS=()
+RUNTIME_PROJECT_MCP_ARGS=()
+
+# Codex does not discover a repository's .mcp.json on its own. Translate the
+# project declaration into -c overrides at launch time, keeping the shared
+# ~/.codex/config.toml untouched and allowing each working directory to bring
+# its own MCP servers. Only the nearest .mcp.json in the current directory's
+# ancestor chain is considered.
+runtime_prepare_project_mcp_args() {
+  local tool="$1" directory config server server_key server_type value
+  RUNTIME_PROJECT_MCP_ARGS=()
+  [ "$tool" = codex ] || return 0
+  directory="$PWD"
+  while :; do
+    config="$directory/.mcp.json"
+    if [ -f "$config" ]; then break; fi
+    [ "$directory" = / ] && return 0
+    directory="$(dirname "$directory")"
+  done
+  jq -e '.mcpServers | type == "object"' "$config" >/dev/null 2>&1 || return 0
+  while IFS= read -r server; do
+    [ -n "$server" ] || continue
+    server_key="${server//\\/\\\\}"
+    server_key="${server_key//\"/\\\"}"
+    server_type="$(jq -r --arg name "$server" '.mcpServers[$name].type // "stdio"' "$config")"
+    case "$server_type" in
+      stdio)
+        value="$(jq -cn --arg value "$(jq -r --arg name "$server" '.mcpServers[$name].command // empty' "$config")" '$value')"
+        [ "$value" != '""' ] && RUNTIME_PROJECT_MCP_ARGS+=("-c" "mcp_servers.${server_key}.command=${value}")
+        value="$(jq -c --arg name "$server" '.mcpServers[$name].args // []' "$config")"
+        RUNTIME_PROJECT_MCP_ARGS+=("-c" "mcp_servers.${server_key}.args=${value}")
+        value="$(jq -c --arg name "$server" '.mcpServers[$name].env // {}' "$config")"
+        RUNTIME_PROJECT_MCP_ARGS+=("-c" "mcp_servers.${server_key}.env=${value}")
+        ;;
+      http|sse)
+        value="$(jq -cn --arg value "$(jq -r --arg name "$server" '.mcpServers[$name].url // empty' "$config")" '$value')"
+        [ "$value" != '""' ] && RUNTIME_PROJECT_MCP_ARGS+=("-c" "mcp_servers.${server_key}.url=${value}")
+        ;;
+    esac
+  done < <(jq -r '.mcpServers | keys[]' "$config")
+}
+
 runtime_prepare_launch_args() {
   local manifest="$1" profile_dir="$2" profile_id="$3" auth_dir="$4" runtime_root="$5" shared_root="$6" adapter_arg user_arg
   shift 6
   local adapter_args=()
   RUNTIME_LAUNCH_ARGS=()
+  runtime_prepare_project_mcp_args "${ADAPTER_LAUNCH_TOOL:-}"
+  [ "${#RUNTIME_PROJECT_MCP_ARGS[@]}" -eq 0 ] || adapter_args+=("${RUNTIME_PROJECT_MCP_ARGS[@]}")
   if runtime_contract_is_preloaded "$manifest"; then
     for adapter_arg in "${ADAPTER_LAUNCH_ARGS[@]}"; do
       [ -z "$adapter_arg" ] || adapter_args+=("$(runtime_expand_value "$adapter_arg" "$profile_dir" "$profile_id" "$auth_dir" "$runtime_root" "$shared_root")")
@@ -671,5 +837,11 @@ runtime_launch_account_overlay() {
   if [ "${NINI_MACHINE_EXEC:-false}" = true ]; then
     exec env "${unset_args[@]+"${unset_args[@]}"}" "${env_args[@]+"${env_args[@]}"}" "$binary" "${RUNTIME_LAUNCH_ARGS[@]+"${RUNTIME_LAUNCH_ARGS[@]}"}"
   fi
-  env "${unset_args[@]+"${unset_args[@]}"}" "${env_args[@]+"${env_args[@]}"}" "$binary" "${RUNTIME_LAUNCH_ARGS[@]+"${RUNTIME_LAUNCH_ARGS[@]}"}"
+  local child_status=0 reconcile_status=0
+  env "${unset_args[@]+"${unset_args[@]}"}" "${env_args[@]+"${env_args[@]}"}" "$binary" "${RUNTIME_LAUNCH_ARGS[@]+"${RUNTIME_LAUNCH_ARGS[@]}"}" || child_status=$?
+  if [ "$mechanism" = fileOverlay ]; then
+    runtime_reconcile_profile_credentials "$manifest" "$profile_dir" post "$child_status" || reconcile_status=$?
+    [ "$reconcile_status" -eq 0 ] || return "$reconcile_status"
+  fi
+  return "$child_status"
 }

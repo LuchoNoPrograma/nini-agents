@@ -108,6 +108,38 @@ PROBE
   [ "$(cat "$MULTICLI_SCRATCH/exit-stderr")" = "child-stderr" ]
 }
 
+@test "the next launch recovers a credential atomically replaced during exec" {
+  local atomic_probe="$MULTICLI_SCRATCH/atomic-auth-probe"
+  cat > "$atomic_probe" <<'PROBE'
+#!/usr/bin/env bash
+set -euo pipefail
+replacement="${FIXTURE_HOME}/.auth.json.replacement.$$"
+printf '%s\n' '{"synthetic":"exec-login"}' > "$replacement"
+chmod 600 "$replacement"
+mv -f "$replacement" "${FIXTURE_HOME}/auth.json"
+PROBE
+  chmod +x "$atomic_probe"
+  export MULTICLI_OVERRIDE_BINARY="$atomic_probe"
+
+  "$MULTICLI_BIN" exec fixture/account-a
+
+  local noop_probe="$MULTICLI_SCRATCH/noop-probe"
+  cat > "$noop_probe" <<'PROBE'
+#!/usr/bin/env bash
+exit 0
+PROBE
+  chmod +x "$noop_probe"
+  export MULTICLI_OVERRIDE_BINARY="$noop_probe"
+  run multicli launch fixture/account-a
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  local profile_auth="$MULTICLI_HOME/fixture/account-a/auth/auth.json"
+  local runtime_auth="$MULTICLI_HOME/fixture/account-a/.runtime/auth.json"
+  [ "$(jq -r '.synthetic' "$profile_auth")" = "exec-login" ]
+  [ -L "$runtime_auth" ]
+  [ "$runtime_auth" -ef "$profile_auth" ]
+}
+
 @test "exec rejects detached or non-file-overlay adapters before spawning" {
   jq '.isolation.mode="detached"' "$MULTICLI_TOOLS_DIR/fixture/adapter.json" \
     > "$MULTICLI_TOOLS_DIR/fixture/updated.json"

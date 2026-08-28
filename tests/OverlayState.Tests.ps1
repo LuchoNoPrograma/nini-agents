@@ -214,6 +214,130 @@ Describe 'schema-v2 account overlay on Windows' {
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
+    It 'persists an atomically replaced profile credential after a foreground launch' {
+        $scratch = New-OverlayScratch
+        try {
+            Write-OverlayAdapter -Scratch $scratch
+            $probeScript = Join-Path $scratch.Root 'atomic-login.ps1'
+            @'
+$replacement = Join-Path $env:FIXTURE_HOME ('.auth.json.replacement.' + $PID)
+[IO.File]::WriteAllText($replacement, '{"synthetic":"fresh-login"}')
+Move-Item -LiteralPath $replacement -Destination (Join-Path $env:FIXTURE_HOME 'auth.json') -Force
+'@ | Set-Content -LiteralPath $probeScript -Encoding UTF8
+            $probe = Join-Path $scratch.Root 'atomic-login.cmd'
+            "@powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$probeScript`"" | Set-Content -LiteralPath $probe -Encoding ASCII
+
+            (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('new', 'fixture/account-a', '--no-seed')).ExitCode | Should Be 0
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'fixture/account-a') -Probe $probe
+
+            if ($result.ExitCode -ne 0) { Write-Host $result.Output }
+            $result.ExitCode | Should Be 0
+            $profileAuth = Join-Path $scratch.Profiles 'fixture\account-a\auth\auth.json'
+            $runtimeAuth = Join-Path $scratch.Profiles 'fixture\account-a\.runtime\auth.json'
+            ((Get-Content -LiteralPath $profileAuth -Raw | ConvertFrom-Json).synthetic) | Should Be 'fresh-login'
+            (Get-Item -LiteralPath $runtimeAuth).LinkType | Should Be 'HardLink'
+            [IO.File]::WriteAllText($runtimeAuth, '{"synthetic":"same-file"}')
+            ((Get-Content -LiteralPath $profileAuth -Raw | ConvertFrom-Json).synthetic) | Should Be 'same-file'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'persists a successful profile credential deletion as logout' {
+        $scratch = New-OverlayScratch
+        try {
+            Write-OverlayAdapter -Scratch $scratch
+            $probeScript = Join-Path $scratch.Root 'logout.ps1'
+            "Remove-Item -LiteralPath (Join-Path `$env:FIXTURE_HOME 'auth.json') -Force" | Set-Content -LiteralPath $probeScript -Encoding UTF8
+            $probe = Join-Path $scratch.Root 'logout.cmd'
+            "@powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$probeScript`"" | Set-Content -LiteralPath $probe -Encoding ASCII
+            (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('new', 'fixture/account-a', '--no-seed')).ExitCode | Should Be 0
+            $profileAuth = Join-Path $scratch.Profiles 'fixture\account-a\auth\auth.json'
+            $runtimeAuth = Join-Path $scratch.Profiles 'fixture\account-a\.runtime\auth.json'
+            [IO.File]::WriteAllText($profileAuth, '{"synthetic":"signed-in"}')
+
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'fixture/account-a') -Probe $probe
+
+            if ($result.ExitCode -ne 0) { Write-Host $result.Output }
+            $result.ExitCode | Should Be 0
+            (Get-Item -LiteralPath $profileAuth).Length | Should Be 0
+            (Get-Item -LiteralPath $runtimeAuth).LinkType | Should Be 'HardLink'
+            [IO.File]::WriteAllText($runtimeAuth, '{"synthetic":"same-file"}')
+            ((Get-Content -LiteralPath $profileAuth -Raw | ConvertFrom-Json).synthetic) | Should Be 'same-file'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'reconciles profile credentials while preserving the child failure status' {
+        $scratch = New-OverlayScratch
+        try {
+            Write-OverlayAdapter -Scratch $scratch
+            $probeScript = Join-Path $scratch.Root 'atomic-failure.ps1'
+            @'
+$replacement = Join-Path $env:FIXTURE_HOME ('.auth.json.replacement.' + $PID)
+[IO.File]::WriteAllText($replacement, '{"synthetic":"written-before-failure"}')
+Move-Item -LiteralPath $replacement -Destination (Join-Path $env:FIXTURE_HOME 'auth.json') -Force
+exit 37
+'@ | Set-Content -LiteralPath $probeScript -Encoding UTF8
+            $probe = Join-Path $scratch.Root 'atomic-failure.cmd'
+            "@powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$probeScript`"" | Set-Content -LiteralPath $probe -Encoding ASCII
+            (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('new', 'fixture/account-a', '--no-seed')).ExitCode | Should Be 0
+
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'fixture/account-a') -Probe $probe
+
+            $result.ExitCode | Should Be 37
+            $profileAuth = Join-Path $scratch.Profiles 'fixture\account-a\auth\auth.json'
+            $runtimeAuth = Join-Path $scratch.Profiles 'fixture\account-a\.runtime\auth.json'
+            ((Get-Content -LiteralPath $profileAuth -Raw | ConvertFrom-Json).synthetic) | Should Be 'written-before-failure'
+            (Get-Item -LiteralPath $runtimeAuth).LinkType | Should Be 'HardLink'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'fails closed for an unexpected runtime credential hardlink' {
+        $scratch = New-OverlayScratch
+        try {
+            Write-OverlayAdapter -Scratch $scratch
+            $probe = Join-Path $scratch.Root 'noop.cmd'
+            '@exit /b 0' | Set-Content -LiteralPath $probe -Encoding ASCII
+            (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('new', 'fixture/account-a', '--no-seed')).ExitCode | Should Be 0
+            (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'fixture/account-a') -Probe $probe).ExitCode | Should Be 0
+            $profileAuth = Join-Path $scratch.Profiles 'fixture\account-a\auth\auth.json'
+            $runtimeAuth = Join-Path $scratch.Profiles 'fixture\account-a\.runtime\auth.json'
+            $outside = Join-Path $scratch.Root 'outside-auth.json'
+            [IO.File]::WriteAllText($profileAuth, '{"synthetic":"profile"}')
+            [IO.File]::WriteAllText($outside, '{"synthetic":"outside"}')
+            Remove-Item -LiteralPath $runtimeAuth -Force
+            New-Item -ItemType HardLink -Path $runtimeAuth -Target $outside | Out-Null
+
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'fixture/account-a') -Probe $probe
+
+            $result.ExitCode | Should Not Be 0
+            $result.Output | Should Match 'runtime credential.*unexpected .*hardlink'
+            ((Get-Content -LiteralPath $profileAuth -Raw | ConvertFrom-Json).synthetic) | Should Be 'profile'
+            ((Get-Content -LiteralPath $outside -Raw | ConvertFrom-Json).synthetic) | Should Be 'outside'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'fails closed for an unexpected runtime credential directory' {
+        $scratch = New-OverlayScratch
+        try {
+            Write-OverlayAdapter -Scratch $scratch
+            $probe = Join-Path $scratch.Root 'noop.cmd'
+            '@exit /b 0' | Set-Content -LiteralPath $probe -Encoding ASCII
+            (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('new', 'fixture/account-a', '--no-seed')).ExitCode | Should Be 0
+            (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'fixture/account-a') -Probe $probe).ExitCode | Should Be 0
+            $profileAuth = Join-Path $scratch.Profiles 'fixture\account-a\auth\auth.json'
+            $runtimeAuth = Join-Path $scratch.Profiles 'fixture\account-a\.runtime\auth.json'
+            [IO.File]::WriteAllText($profileAuth, '{"synthetic":"profile"}')
+            Remove-Item -LiteralPath $runtimeAuth -Force
+            New-Item -ItemType Directory -Path $runtimeAuth | Out-Null
+
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'fixture/account-a') -Probe $probe
+
+            $result.ExitCode | Should Not Be 0
+            $result.Output | Should Match 'runtime credential.*expected a regular file'
+            ((Get-Content -LiteralPath $profileAuth -Raw | ConvertFrom-Json).synthetic) | Should Be 'profile'
+            (Test-Path -LiteralPath $runtimeAuth -PathType Container) | Should Be $true
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
     It 'shares one credential store across profiles while main auth remains profile-local' {
         $scratch = New-OverlayScratch
         try {

@@ -643,6 +643,175 @@ Import-Module '$modulePath' -Force
         }
     }
 
+    It 'reconciles atomic credential replacement, logout, failure, and warm-overlay recovery' {
+        $scratch = New-RuntimeScratch
+        $previousHome = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = $scratch.Home
+            $adapter = Get-ValidV2Adapter
+            Initialize-RuntimeProfile -Adapter $adapter -ProfileDir $scratch.ProfileDir
+            $runtimeRoot = Invoke-ModuleInternal 'MultiCli.Runtime' { param($a, $p) New-RuntimeOverlay -Adapter $a -ProfileDir $p } @($adapter, $scratch.ProfileDir)
+            $profileAuth = Join-Path $scratch.ProfileDir 'auth\auth.json'
+            $runtimeAuth = Join-Path $runtimeRoot 'auth.json'
+
+            $replacement = Join-Path $runtimeRoot '.auth.login.tmp'
+            [IO.File]::WriteAllText($replacement, '{"synthetic":"fresh-login"}')
+            Move-Item -LiteralPath $replacement -Destination $runtimeAuth -Force
+            Complete-RuntimeProfileCredentialUpdates -Adapter $adapter -ProfileDir $scratch.ProfileDir -Phase post -ChildExitCode 37
+            ((Get-Content -LiteralPath $profileAuth -Raw | ConvertFrom-Json).synthetic) | Should Be 'fresh-login'
+            (Get-Item -LiteralPath $runtimeAuth).LinkType | Should Be 'HardLink'
+
+            Remove-Item -LiteralPath $runtimeAuth -Force
+            Complete-RuntimeProfileCredentialUpdates -Adapter $adapter -ProfileDir $scratch.ProfileDir -Phase post -ChildExitCode 0
+            (Get-Item -LiteralPath $profileAuth).Length | Should Be 0
+            (Get-Item -LiteralPath $runtimeAuth).LinkType | Should Be 'HardLink'
+
+            [IO.File]::WriteAllText($profileAuth, '{"synthetic":"keep-after-failure"}')
+            Remove-Item -LiteralPath $runtimeAuth -Force
+            Complete-RuntimeProfileCredentialUpdates -Adapter $adapter -ProfileDir $scratch.ProfileDir -Phase post -ChildExitCode 23
+            ((Get-Content -LiteralPath $profileAuth -Raw | ConvertFrom-Json).synthetic) | Should Be 'keep-after-failure'
+
+            $replacement = Join-Path $runtimeRoot '.auth.exec.tmp'
+            [IO.File]::WriteAllText($replacement, '{"synthetic":"exec-login"}')
+            Move-Item -LiteralPath $replacement -Destination $runtimeAuth -Force
+            $recoveredRoot = Invoke-ModuleInternal 'MultiCli.Runtime' { param($a, $p) New-RuntimeOverlay -Adapter $a -ProfileDir $p } @($adapter, $scratch.ProfileDir)
+            $recoveredRoot | Should Be $runtimeRoot
+            ((Get-Content -LiteralPath $profileAuth -Raw | ConvertFrom-Json).synthetic) | Should Be 'exec-login'
+            (Get-Item -LiteralPath $runtimeAuth).LinkType | Should Be 'HardLink'
+        } finally {
+            $env:USERPROFILE = $previousHome
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'credential reconciliation fails closed for malformed manifests, backing paths, links, and directories' {
+        $scratch = New-RuntimeScratch
+        $previousHome = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = $scratch.Home
+            $adapter = Get-ValidV2Adapter
+            Initialize-RuntimeProfile -Adapter $adapter -ProfileDir $scratch.ProfileDir
+            $runtimeRoot = Join-Path $scratch.ProfileDir '.runtime'
+            (Invoke-ModuleInternal 'MultiCli.Runtime' { param($a, $r) Test-RuntimeOverlayManifestMatches -Adapter $a -RuntimeRoot $r } @($adapter, $runtimeRoot)) | Should Be $false
+            New-Item -ItemType Directory -Path $runtimeRoot | Out-Null
+            Set-Content -LiteralPath (Join-Path $runtimeRoot '.runtime-manifest') -Value 'wrong' -Encoding ASCII
+            (Invoke-ModuleInternal 'MultiCli.Runtime' { param($a, $r) Test-RuntimeOverlayManifestMatches -Adapter $a -RuntimeRoot $r } @($adapter, $runtimeRoot)) | Should Be $false
+            $caught = $null
+            try { Complete-RuntimeProfileCredentialUpdates -Adapter $adapter -ProfileDir $scratch.ProfileDir -Phase post }
+            catch { $caught = $_.Exception.Message }
+            $caught | Should Match 'runtime manifest does not match'
+            Remove-Item -LiteralPath $runtimeRoot -Recurse -Force
+
+            $runtimeRoot = Invoke-ModuleInternal 'MultiCli.Runtime' { param($a, $p) New-RuntimeOverlay -Adapter $a -ProfileDir $p } @($adapter, $scratch.ProfileDir)
+            (Invoke-ModuleInternal 'MultiCli.Runtime' { param($a, $r) Test-RuntimeOverlayManifestMatches -Adapter $a -RuntimeRoot $r } @($adapter, $runtimeRoot)) | Should Be $true
+            $profileAuth = Join-Path $scratch.ProfileDir 'auth\auth.json'
+            $runtimeAuth = Join-Path $runtimeRoot 'auth.json'
+            $outside = Join-Path $scratch.Root 'outside-auth.json'
+            [IO.File]::WriteAllText($outside, '{"synthetic":"outside"}')
+
+            Remove-Item -LiteralPath $runtimeAuth -Force
+            New-Item -ItemType HardLink -Path $runtimeAuth -Target $outside | Out-Null
+            $caught = $null
+            try { Complete-RuntimeProfileCredentialUpdates -Adapter $adapter -ProfileDir $scratch.ProfileDir -Phase post }
+            catch { $caught = $_.Exception.Message }
+            $caught | Should Match 'unexpected link or hardlink'
+            Remove-Item -LiteralPath $runtimeAuth -Force
+            New-Item -ItemType HardLink -Path $runtimeAuth -Target $profileAuth | Out-Null
+
+            Remove-Item -LiteralPath $runtimeAuth -Force
+            New-Item -ItemType Directory -Path $runtimeAuth | Out-Null
+            $caught = $null
+            try { Complete-RuntimeProfileCredentialUpdates -Adapter $adapter -ProfileDir $scratch.ProfileDir -Phase post }
+            catch { $caught = $_.Exception.Message }
+            $caught | Should Match 'expected a regular file'
+            Remove-Item -LiteralPath $runtimeAuth -Recurse -Force
+
+            Remove-Item -LiteralPath $profileAuth -Force
+            New-Item -ItemType Directory -Path $profileAuth | Out-Null
+            $caught = $null
+            try { Complete-RuntimeProfileCredentialUpdates -Adapter $adapter -ProfileDir $scratch.ProfileDir -Phase post }
+            catch { $caught = $_.Exception.Message }
+            $caught | Should Match 'profile backing file is missing or linked'
+            Remove-Item -LiteralPath $profileAuth -Recurse -Force
+            New-Item -ItemType File -Path $profileAuth | Out-Null
+            New-Item -ItemType HardLink -Path $runtimeAuth -Target $profileAuth | Out-Null
+        } finally {
+            $env:USERPROFILE = $previousHome
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'credential reconciliation validates directory trees and reports staging or activation failures' {
+        $scratch = New-RuntimeScratch
+        $previousHome = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = $scratch.Home
+            $adapter = Get-ValidV2Adapter
+            Initialize-RuntimeProfile -Adapter $adapter -ProfileDir $scratch.ProfileDir
+            $runtimeRoot = Invoke-ModuleInternal 'MultiCli.Runtime' { param($a, $p) New-RuntimeOverlay -Adapter $a -ProfileDir $p } @($adapter, $scratch.ProfileDir)
+            $profileAuth = Join-Path $scratch.ProfileDir 'auth\auth.json'
+            $runtimeAuth = Join-Path $runtimeRoot 'auth.json'
+
+            $missingRoot = Join-Path $scratch.Root 'missing-root'
+            $caught = $null
+            try {
+                Invoke-ModuleInternal 'MultiCli.Runtime' { param($b) Assert-RuntimeDirectoryTree -Base $b -RelativePath '' -Label 'fixture' } @($missingRoot)
+            } catch { $caught = $_.Exception.Message }
+            $caught | Should Match 'fixture root.*missing or linked'
+
+            $directoryBase = Join-Path $scratch.Root 'directory-tree'
+            New-Item -ItemType Directory -Path $directoryBase | Out-Null
+            Set-Content -LiteralPath (Join-Path $directoryBase 'blocked') -Value 'file' -Encoding ASCII
+            $caught = $null
+            try {
+                Invoke-ModuleInternal 'MultiCli.Runtime' { param($b) Assert-RuntimeDirectoryTree -Base $b -RelativePath 'blocked/child' -Label 'fixture' -AllowCreate } @($directoryBase)
+            } catch { $caught = $_.Exception.Message }
+            $caught | Should Match 'fixture directory.*missing or linked'
+            Invoke-ModuleInternal 'MultiCli.Runtime' { param($b) Assert-RuntimeDirectoryTree -Base $b -RelativePath 'created/child' -Label 'fixture' -AllowCreate } @($directoryBase)
+            (Test-Path -LiteralPath (Join-Path $directoryBase 'created\child') -PathType Container) | Should Be $true
+
+            Remove-Item -LiteralPath $runtimeAuth -Force
+            $staging = Join-Path (Split-Path -Parent $profileAuth) ('.credential-logout.' + $PID + '.tmp')
+            Set-Content -LiteralPath $staging -Value 'occupied' -Encoding ASCII
+            $caught = $null
+            try { Complete-RuntimeProfileCredentialUpdates -Adapter $adapter -ProfileDir $scratch.ProfileDir -Phase post -ChildExitCode 0 }
+            catch { $caught = $_.Exception.Message }
+            $caught | Should Match 'existing credential staging file'
+            Remove-Item -LiteralPath $staging -Force
+            New-Item -ItemType HardLink -Path $runtimeAuth -Target $profileAuth | Out-Null
+
+            $replacement = Join-Path $runtimeRoot '.auth.failure.tmp'
+            [IO.File]::WriteAllText($replacement, '{"synthetic":"replacement"}')
+            Remove-Item -LiteralPath $runtimeAuth -Force
+            Move-Item -LiteralPath $replacement -Destination $runtimeAuth
+            $caught = Invoke-ModuleInternal 'MultiCli.Runtime' {
+                param($a, $p)
+                function script:Move-Item { throw 'synthetic activation failure' }
+                try {
+                    Complete-RuntimeProfileCredentialUpdatesLocked -Adapter $a -ProfileDir $p -Phase post -ChildExitCode 0
+                } catch { return $_.Exception.Message }
+                finally { Remove-Item -LiteralPath function:Move-Item -Force -ErrorAction SilentlyContinue }
+            } @($adapter, $scratch.ProfileDir)
+            $caught | Should Match 'Cannot persist updated credential path'
+            Remove-Item -LiteralPath $runtimeAuth -Force
+            New-Item -ItemType HardLink -Path $runtimeAuth -Target $profileAuth | Out-Null
+
+            Remove-Item -LiteralPath $runtimeAuth -Force
+            $caught = Invoke-ModuleInternal 'MultiCli.Runtime' {
+                param($a, $p)
+                function script:Move-Item { throw 'synthetic logout failure' }
+                try {
+                    Complete-RuntimeProfileCredentialUpdatesLocked -Adapter $a -ProfileDir $p -Phase post -ChildExitCode 0
+                } catch { return $_.Exception.Message }
+                finally { Remove-Item -LiteralPath function:Move-Item -Force -ErrorAction SilentlyContinue }
+            } @($adapter, $scratch.ProfileDir)
+            $caught | Should Match 'Cannot persist logged-out credential path'
+        } finally {
+            $env:USERPROFILE = $previousHome
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     It 'New-RuntimeOverlay honors runtimeSubdir, recreates missing credential sources, and writes a prefixed manifest' {
         $scratch = New-RuntimeScratch
         $previousHome = $env:USERPROFILE
