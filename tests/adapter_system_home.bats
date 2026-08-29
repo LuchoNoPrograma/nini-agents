@@ -27,7 +27,8 @@ run_system_home() {
 }
 
 # Declared share.systemHome wins and $HOME is expanded.
-@test "adapter_system_home resolves declared share.systemHome with HOME expansion" {
+@test "matrix: adapter_system_home resolves declared share.systemHome with HOME expansion (+1 related)" {
+  # Case 1: adapter_system_home resolves declared share.systemHome with HOME expansion
   local toolsdir="$MULTICLI_SCRATCH/tools"
   mkdir -p "$toolsdir/declared"
   cat > "$toolsdir/declared/adapter.json" <<'JSON'
@@ -36,11 +37,13 @@ JSON
   run run_system_home "$toolsdir" declared
   [ "$status" -eq 0 ]
   [[ "$output" == "$HOME/.declared" ]]
-}
 
 # No systemHome: derive the home from the first isolation.env value, stripping
 # the {profileDir} placeholder.
-@test "adapter_system_home derives home from isolation.env when systemHome absent" {
+  teardown
+  setup
+
+  # Case 2: adapter_system_home derives home from isolation.env when systemHome absent
   local toolsdir="$MULTICLI_SCRATCH/tools"
   mkdir -p "$toolsdir/derived"
   cat > "$toolsdir/derived/adapter.json" <<'JSON'

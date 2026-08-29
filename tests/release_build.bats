@@ -37,9 +37,7 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Build the portable Nini Agents archive."* ]]
   [[ "$output" == *"Usage: release/build.sh"* ]]
-}
 
-@test "release build rejects unknown options and prints usage" {
   run "$GIT_BASH_BIN" "$RELEASE_SCRIPT" --wat
 
   [ "$status" -eq 2 ]
@@ -47,14 +45,17 @@ teardown() {
   [[ "$output" == *"Usage: release/build.sh"* ]]
 }
 
-@test "release build rejects version mismatches" {
+@test "matrix: release build rejects version mismatches (+1 related)" {
+  # Case 1: release build rejects version mismatches
   run "$GIT_BASH_BIN" "$RELEASE_SCRIPT" --check --version 9.9.9
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"Expected version 9.9.9, found 1.0.0"* ]]
-}
 
-@test "release build rejects an invalid release version file" {
+  teardown
+  setup
+
+  # Case 2: release build rejects an invalid release version file
   printf '1.0\n' > "$MULTICLI_REPO_ROOT/release/VERSION"
 
   run "$GIT_BASH_BIN" "$RELEASE_SCRIPT" --check
@@ -64,7 +65,8 @@ teardown() {
   [[ "$output" == *"release/VERSION must contain X.Y.Z"* ]]
 }
 
-@test "release build rejects a mismatched Bash launcher version" {
+@test "matrix: release build rejects a mismatched Bash launcher version (+1 related)" {
+  # Case 1: release build rejects a mismatched Bash launcher version
   printf 'VERSION=\"9.9.9\"\n' > "$MULTICLI_REPO_ROOT/nini-agents"
 
   run "$GIT_BASH_BIN" "$RELEASE_SCRIPT" --check
@@ -72,9 +74,11 @@ teardown() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"nini-agents does not embed version 1.0.0"* ]]
-}
 
-@test "release build rejects a mismatched PowerShell launcher version" {
+  teardown
+  setup
+
+  # Case 2: release build rejects a mismatched PowerShell launcher version
   printf "\$VERSION = '9.9.9'\n" > "$MULTICLI_REPO_ROOT/nini-agents.ps1"
 
   run "$GIT_BASH_BIN" "$RELEASE_SCRIPT" --check
@@ -84,14 +88,17 @@ teardown() {
   [[ "$output" == *"nini-agents.ps1 does not embed version 1.0.0"* ]]
 }
 
-@test "release build rejects unsafe output directories" {
+@test "matrix: release build rejects unsafe output directories (+1 related)" {
+  # Case 1: release build rejects unsafe output directories
   run "$GIT_BASH_BIN" "$RELEASE_SCRIPT" --output /
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"Refusing unsafe output directory: /"* ]]
-}
 
-@test "release build creates the portable archive with the documented assets" {
+  teardown
+  setup
+
+  # Case 2: release build creates the portable archive with the documented assets
   local out_dir="$MULTICLI_SCRATCH/release"
   local archive="$out_dir/nini-agents-v1.0.0-linux-macos.tar.gz"
 

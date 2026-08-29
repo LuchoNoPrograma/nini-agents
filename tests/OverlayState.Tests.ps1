@@ -90,6 +90,7 @@ Describe 'schema-v2 account overlay on Windows' {
             $log = Join-Path $codexHome 'log'
             New-Item -ItemType Directory -Force -Path $rules, $log | Out-Null
             Set-Content -LiteralPath (Join-Path $codexHome 'AGENTS.md') -Value 'global guidance' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $codexHome 'AGENTS.override.md') -Value 'global override' -Encoding ASCII
             Set-Content -LiteralPath (Join-Path $rules 'default.rules') -Value 'prefix_rule(pattern=["git", "status"], decision="allow")' -Encoding ASCII
             Set-Content -LiteralPath (Join-Path $log 'codex.log') -Value 'shared log' -Encoding ASCII
             $probe = Join-Path $scratch.Root 'noop.cmd'
@@ -102,17 +103,21 @@ Describe 'schema-v2 account overlay on Windows' {
             $result.ExitCode | Should Be 0
             $runtimeRules = Join-Path $scratch.Profiles 'codex\account-a\.runtime\rules'
             $runtimeAgents = Join-Path $scratch.Profiles 'codex\account-a\.runtime\AGENTS.md'
+            $runtimeAgentsOverride = Join-Path $scratch.Profiles 'codex\account-a\.runtime\AGENTS.override.md'
             $runtimeLog = Join-Path $scratch.Profiles 'codex\account-a\.runtime\log'
             (Test-Path -LiteralPath $runtimeRules -PathType Container) | Should Be $true
             (((Get-Item -LiteralPath $runtimeRules).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) | Should Be $true
             (Test-Path -LiteralPath $runtimeAgents -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath $runtimeAgentsOverride -PathType Leaf) | Should Be $true
             (Test-Path -LiteralPath $runtimeLog -PathType Container) | Should Be $true
             (((Get-Item -LiteralPath $runtimeLog).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) | Should Be $true
             (Get-Content -LiteralPath $runtimeAgents -Raw).Trim() | Should Be 'global guidance'
+            (Get-Content -LiteralPath $runtimeAgentsOverride -Raw).Trim() | Should Be 'global override'
             (Get-Content -LiteralPath (Join-Path $runtimeRules 'default.rules') -Raw).Trim() | Should Be 'prefix_rule(pattern=["git", "status"], decision="allow")'
             (Get-Content -LiteralPath (Join-Path $runtimeLog 'codex.log') -Raw).Trim() | Should Be 'shared log'
             (Test-Path -LiteralPath (Join-Path $scratch.Profiles 'codex\account-a\auth\rules')) | Should Be $false
             (Test-Path -LiteralPath (Join-Path $scratch.Profiles 'codex\account-a\auth\AGENTS.md')) | Should Be $false
+            (Test-Path -LiteralPath (Join-Path $scratch.Profiles 'codex\account-a\auth\AGENTS.override.md')) | Should Be $false
             (Test-Path -LiteralPath (Join-Path $scratch.Profiles 'codex\account-a\auth\log')) | Should Be $false
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }

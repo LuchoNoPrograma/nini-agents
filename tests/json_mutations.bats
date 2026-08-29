@@ -26,7 +26,8 @@ assert_no_private_data() {
   [[ "$output" != *"auth.json"* ]]
 }
 
-@test "new JSON creates one schema-v2 profile and returns its public summary" {
+@test "matrix: new JSON creates one schema-v2 profile and returns its public summary (+1 related)" {
+  # Case 1: new JSON creates one schema-v2 profile and returns its public summary
   run multicli new codex/work --no-seed --json
 
   [ "$status" -eq 0 ]
@@ -40,9 +41,11 @@ assert_no_private_data() {
   ' >/dev/null
   [ -f "$MULTICLI_HOME/codex/work/.profile.json" ]
   assert_no_private_data
-}
 
-@test "new JSON accepts prefix form and preserves isolated profile type" {
+  teardown
+  setup
+
+  # Case 2: new JSON accepts prefix form and preserves isolated profile type
   run multicli --json new codex/private --isolated --cli --no-seed
 
   [ "$status" -eq 0 ]
@@ -56,7 +59,8 @@ assert_no_private_data() {
   assert_no_private_data
 }
 
-@test "new JSON rejects invalid addresses and occupied destinations before writing" {
+@test "matrix: new JSON rejects invalid addresses and occupied destinations before writing (+1 related)" {
+  # Case 1: new JSON rejects invalid addresses and occupied destinations before writing
   run multicli new ../outside --no-seed --json
   [ "$status" -eq 2 ]
   assert_envelope new
@@ -77,9 +81,11 @@ assert_no_private_data() {
     .error.details.state == "not_applied"
   ' >/dev/null
   assert_no_private_data
-}
 
-@test "new JSON reports a partial application when alias creation fails" {
+  teardown
+  setup
+
+  # Case 2: new JSON reports a partial application when alias creation fails
   printf '%s\n' blocked > "$MULTICLI_HOME/bin"
 
   run multicli new codex/work --no-seed --json
@@ -95,7 +101,8 @@ assert_no_private_data() {
   assert_no_private_data
 }
 
-@test "rename JSON preserves profile identity and returns both public addresses" {
+@test "matrix: rename JSON preserves profile identity and returns both public addresses (+1 related)" {
+  # Case 1: rename JSON preserves profile identity and returns both public addresses
   run multicli new codex/old --no-seed --json
   [ "$status" -eq 0 ]
   profile_id="$(jq -r '.profileId' "$MULTICLI_HOME/codex/old/.profile.json")"
@@ -112,9 +119,11 @@ assert_no_private_data() {
   [ ! -e "$MULTICLI_HOME/codex/old" ]
   [ "$(jq -r '.profileId' "$MULTICLI_HOME/codex/new/.profile.json")" = "$profile_id" ]
   assert_no_private_data
-}
 
-@test "human rename completes for a CLI profile without a desktop shortcut" {
+  teardown
+  setup
+
+  # Case 2: human rename completes for a CLI profile without a desktop shortcut
   run multicli new codex/old --no-seed
   [ "$status" -eq 0 ]
   [ ! -e "$HOME/.local/share/applications/multicli-codex-old.desktop" ]
@@ -128,7 +137,8 @@ assert_no_private_data() {
   [ -x "$MULTICLI_HOME/bin/codex-new" ]
 }
 
-@test "rename JSON rejects missing, occupied, and cross-tool destinations" {
+@test "matrix: rename JSON rejects missing, occupied, and cross-tool destinations (+1 related)" {
+  # Case 1: rename JSON rejects missing, occupied, and cross-tool destinations
   run multicli rename codex/missing codex/new --json
   [ "$status" -eq 2 ]
   printf '%s' "$output" | jq -e '
@@ -152,9 +162,11 @@ assert_no_private_data() {
   ' >/dev/null
   [ -d "$MULTICLI_HOME/codex/old" ]
   assert_no_private_data
-}
 
-@test "rename JSON reports a partial application when alias recreation fails" {
+  teardown
+  setup
+
+  # Case 2: rename JSON reports a partial application when alias recreation fails
   run multicli new codex/old --no-seed --json
   [ "$status" -eq 0 ]
   rm -r "$MULTICLI_HOME/bin"
@@ -174,7 +186,8 @@ assert_no_private_data() {
   assert_no_private_data
 }
 
-@test "delete JSON requires an exact confirmation before writing" {
+@test "matrix: delete JSON requires an exact confirmation before writing (+1 related)" {
+  # Case 1: delete JSON requires an exact confirmation before writing
   run multicli new codex/work --no-seed --json
   [ "$status" -eq 0 ]
 
@@ -214,9 +227,11 @@ assert_no_private_data() {
   ' >/dev/null
   [ -d "$MULTICLI_HOME/codex/work" ]
   assert_no_private_data
-}
 
-@test "delete JSON removes a profile and returns only its public address" {
+  teardown
+  setup
+
+  # Case 2: delete JSON removes a profile and returns only its public address
   run multicli new codex/work --no-seed --json
   [ "$status" -eq 0 ]
 
@@ -232,7 +247,8 @@ assert_no_private_data() {
   assert_no_private_data
 }
 
-@test "delete JSON rejects a missing profile before mutation" {
+@test "matrix: delete JSON rejects a missing profile before mutation (+1 related)" {
+  # Case 1: delete JSON rejects a missing profile before mutation
   run multicli delete codex/missing --confirm codex/missing --json
 
   [ "$status" -eq 2 ]
@@ -243,9 +259,11 @@ assert_no_private_data() {
     .error.details.state == "not_applied"
   ' >/dev/null
   assert_no_private_data
-}
 
-@test "delete JSON reports a conservative partial state after cleanup starts" {
+  teardown
+  setup
+
+  # Case 2: delete JSON reports a conservative partial state after cleanup starts
   mkdir -p "$MULTICLI_TOOLS_DIR/cursor-cli" "$MULTICLI_HOME/cursor-cli/broken"
   cp "$MULTICLI_REPO_ROOT/ai-tools/cursor-cli/adapter.json" \
     "$MULTICLI_TOOLS_DIR/cursor-cli/adapter.json"

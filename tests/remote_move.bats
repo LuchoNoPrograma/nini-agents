@@ -68,7 +68,8 @@ make_legacy_profile() {
   printf 'model = "fixture"\n' > "$root/$name/config.toml"
 }
 
-@test "public move dry-run proves one owner without creating transaction artifacts" {
+@test "matrix: public move dry-run proves one owner without creating transaction artifacts (+1 related)" {
+  # Case 1: public move dry-run proves one owner without creating transaction artifacts
   make_legacy_profile "$MULTICLI_SCRATCH/local/codex"
 
   run multicli move codex/account-a ubuntu --dry-run
@@ -78,9 +79,11 @@ make_legacy_profile() {
   [ -d "$MULTICLI_SCRATCH/local/codex/account-a" ]
   [ ! -e "$MULTICLI_SCRATCH/remote/codex/account-a" ]
   [ ! -e "$MULTICLI_SCRATCH/remote/codex/.staging" ]
-}
 
-@test "device registry list status and doctor use the same Nini endpoint" {
+  teardown
+  setup
+
+  # Case 2: device registry list status and doctor use the same Nini endpoint
   make_legacy_profile "$MULTICLI_SCRATCH/local/codex"
 
   run multicli devices list codex
@@ -107,7 +110,8 @@ make_legacy_profile() {
   [[ "$output" == *"ubuntu: ready"* ]]
 }
 
-@test "public move performs a verified round trip and never prunes prior backups" {
+@test "matrix: public move performs a verified round trip and never prunes prior backups (+2 related)" {
+  # Case 1: public move performs a verified round trip and never prunes prior backups
   make_legacy_profile "$MULTICLI_SCRATCH/local/codex"
   printf '{}\n' > "$MULTICLI_SCRATCH/local/codex/account-a/.credentials.json.before-migration"
 
@@ -127,9 +131,11 @@ make_legacy_profile() {
   [ "$(find "$MULTICLI_SCRATCH/local/codex/.inactive" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" -eq 1 ]
   [ "$(find "$MULTICLI_SCRATCH/remote/codex/.inactive" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" -eq 1 ]
   cmp -s "$MULTICLI_SCRATCH/local/codex/account-a/auth.json" "$MULTICLI_SCRATCH/remote/codex/.inactive"/*/auth.json
-}
 
-@test "public move can discard only its verified source backup" {
+  teardown
+  setup
+
+  # Case 2: public move can discard only its verified source backup
   make_legacy_profile "$MULTICLI_SCRATCH/local/codex"
   mkdir -p "$MULTICLI_SCRATCH/local/codex/.inactive/prior.keep"
   printf 'keep\n' > "$MULTICLI_SCRATCH/local/codex/.inactive/prior.keep/sentinel"
@@ -155,9 +161,11 @@ make_legacy_profile() {
   [ ! -e "$MULTICLI_SCRATCH/local/codex/.staging" ]
   [ -f "$MULTICLI_SCRATCH/remote/codex/.inactive/prior.keep/sentinel" ]
   [ -z "$(find "$MULTICLI_SCRATCH/remote/codex/.inactive" -mindepth 1 -maxdepth 1 -type d -name 'account-a.*' -print -quit)" ]
-}
 
-@test "backup discard failure reports an active destination and keeps recovery" {
+  teardown
+  setup
+
+  # Case 3: backup discard failure reports an active destination and keeps recovery
   make_legacy_profile "$MULTICLI_SCRATCH/local/codex"
   export NINI_AGENTS_TEST_FAIL_BACKUP_DISCARD=1
 
@@ -190,7 +198,8 @@ make_legacy_profile() {
   [[ "$output" != *"$MULTICLI_SCRATCH"* ]]
 }
 
-@test "integrity mismatch preserves the active source and rejected staging" {
+@test "matrix: integrity mismatch preserves the active source and rejected staging (+1 related)" {
+  # Case 1: integrity mismatch preserves the active source and rejected staging
   make_legacy_profile "$MULTICLI_SCRATCH/local/codex"
   export NINI_AGENTS_TEST_TAMPER_COPY=1
 
@@ -201,9 +210,11 @@ make_legacy_profile() {
   [ -d "$MULTICLI_SCRATCH/local/codex/account-a" ]
   [ ! -e "$MULTICLI_SCRATCH/remote/codex/account-a" ]
   [ "$(find "$MULTICLI_SCRATCH/remote/codex/.staging" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" -eq 1 ]
-}
 
-@test "a live Codex profile process blocks movement before staging" {
+  teardown
+  setup
+
+  # Case 2: a live Codex profile process blocks movement before staging
   make_legacy_profile "$MULTICLI_SCRATCH/local/codex"
   env CODEX_HOME="$MULTICLI_SCRATCH/local/codex/account-a" sleep 30 &
   local busy_pid=$!
@@ -217,7 +228,8 @@ make_legacy_profile() {
   [ ! -e "$MULTICLI_SCRATCH/remote/codex/.staging" ]
 }
 
-@test "schema-v2 movement excludes and rebuilds runtime on the destination" {
+@test "matrix: schema-v2 movement excludes and rebuilds runtime on the destination (+1 related)" {
+  # Case 1: schema-v2 movement excludes and rebuilds runtime on the destination
   run env MULTICLI_HOME="$MULTICLI_SCRATCH/local" "$MULTICLI_BIN" new codex/account-v2 --no-seed
   [ "$status" -eq 0 ]
   printf '{"tokens":{"access_token":"fixture-v2"}}\n' > "$MULTICLI_SCRATCH/local/codex/account-v2/auth/auth.json"
@@ -232,9 +244,11 @@ make_legacy_profile() {
   [ -d "$MULTICLI_SCRATCH/remote/codex/account-v2/.runtime" ]
   [ -f "$MULTICLI_SCRATCH/remote/codex/account-v2/.runtime/.runtime-manifest" ]
   cmp -s "$MULTICLI_SCRATCH/local/codex/.inactive"/*/auth/auth.json "$MULTICLI_SCRATCH/remote/codex/account-v2/auth/auth.json"
-}
 
-@test "migrated account-overlay state and expected shared links move safely" {
+  teardown
+  setup
+
+  # Case 2: migrated account-overlay state and expected shared links move safely
   local profile="$MULTICLI_SCRATCH/local/codex/account-v2"
   local shared_root="$HOME/.codex"
   run env MULTICLI_HOME="$MULTICLI_SCRATCH/local" "$MULTICLI_BIN" new codex/account-v2 --no-seed
@@ -261,7 +275,8 @@ make_legacy_profile() {
   [ "$(cat "$shared_root/config.toml" | tr -d '\r')" = "shared config" ]
 }
 
-@test "migrated account-overlay state still rejects an external link" {
+@test "matrix: migrated account-overlay state still rejects an external link (+1 related)" {
+  # Case 1: migrated account-overlay state still rejects an external link
   local profile="$MULTICLI_SCRATCH/local/codex/account-v2"
   run env MULTICLI_HOME="$MULTICLI_SCRATCH/local" "$MULTICLI_BIN" new codex/account-v2 --no-seed
   [ "$status" -eq 0 ]
@@ -276,9 +291,11 @@ make_legacy_profile() {
   [[ "$output" == *"unsafe_link"* ]]
   [ -d "$profile" ]
   [ ! -e "$MULTICLI_SCRATCH/remote/codex/.staging" ]
-}
 
-@test "completed migration journal permits pruning its exact nested external link" {
+  teardown
+  setup
+
+  # Case 2: completed migration journal permits pruning its exact nested external link
   local profile="$MULTICLI_SCRATCH/local/codex/account-v2"
   local outside="$MULTICLI_SCRATCH/outside-skill"
   run env MULTICLI_HOME="$MULTICLI_SCRATCH/local" "$MULTICLI_BIN" new codex/account-v2 --no-seed

@@ -134,7 +134,8 @@ move_run() {
   ' move-run "$MULTICLI_REPO_ROOT" "$MOVE_MANIFEST" "$MOVE_SOURCE_ROOT" "$MOVE_DESTINATION_ROOT" "$scenario" "$dry_run"
 }
 
-@test "legacy move stages, verifies, activates exactly one copy, and keeps an inactive backup" {
+@test "matrix: legacy move stages, verifies, activates exactly one copy, and keeps an inactive backup (+1 related)" {
+  # Case 1: legacy move stages, verifies, activates exactly one copy, and keeps an inactive backup
   make_legacy_move_profile
   cp "$MOVE_SOURCE_ROOT/account-a/auth.json" "$MULTICLI_SCRATCH/auth.before"
 
@@ -147,9 +148,11 @@ move_run() {
   [ -d "$MOVE_SOURCE_ROOT/.inactive/account-a.fixture-op" ]
   cmp -s "$MULTICLI_SCRATCH/auth.before" "$MOVE_DESTINATION_ROOT/account-a/auth.json"
   cmp -s "$MULTICLI_SCRATCH/auth.before" "$MOVE_SOURCE_ROOT/.inactive/account-a.fixture-op/auth.json"
-}
 
-@test "schema-v2 move treats runtime as reconstructible and preserves credential bytes" {
+  teardown
+  setup
+
+  # Case 2: schema-v2 move treats runtime as reconstructible and preserves credential bytes
   make_v2_move_profile
   cp "$MOVE_SOURCE_ROOT/account-a/auth/auth.json" "$MULTICLI_SCRATCH/auth.before"
 
@@ -176,7 +179,8 @@ move_run() {
   [ ! -e "$MOVE_SOURCE_ROOT/.inactive" ]
 }
 
-@test "an active destination rejects the move before any copy" {
+@test "matrix: an active destination rejects the move before any copy (+2 related)" {
+  # Case 1: an active destination rejects the move before any copy
   make_v2_move_profile
   mkdir -p "$MOVE_DESTINATION_ROOT/account-a"
 
@@ -186,9 +190,11 @@ move_run() {
   [ "$output" = "destination_active|preflight_rejected|unknown" ]
   [ -d "$MOVE_SOURCE_ROOT/account-a" ]
   [ ! -e "$MOVE_DESTINATION_ROOT/.staging" ]
-}
 
-@test "malformed authentication JSON rejects both legacy and schema-v2 profiles" {
+  teardown
+  setup
+
+  # Case 2: malformed authentication JSON rejects both legacy and schema-v2 profiles
   make_legacy_move_profile
   printf 'not-json\n' > "$MOVE_SOURCE_ROOT/account-a/auth.json"
   run move_run
@@ -203,9 +209,11 @@ move_run() {
   [ "$status" -ne 0 ]
   [ "$output" = "invalid_auth_json|preflight_rejected|v2" ]
   [ -d "$MOVE_SOURCE_ROOT/account-a" ]
-}
 
-@test "metadata mismatch and unknown content fail closed" {
+  teardown
+  setup
+
+  # Case 3: metadata mismatch and unknown content fail closed
   make_v2_move_profile
   printf '%s\n' '{"schemaVersion":2,"adapterId":"other","profileId":"fixture-profile","mode":"accountOverlay"}' > "$MOVE_SOURCE_ROOT/account-a/.profile.json"
   run move_run
@@ -220,7 +228,8 @@ move_run() {
   [ -d "$MOVE_SOURCE_ROOT/account-a" ]
 }
 
-@test "links and unexpected hardlinks are rejected without following them" {
+@test "matrix: links and unexpected hardlinks are rejected without following them (+1 related)" {
+  # Case 1: links and unexpected hardlinks are rejected without following them
   make_legacy_move_profile
   printf 'outside\n' > "$MULTICLI_SCRATCH/outside"
   ln -s "$MULTICLI_SCRATCH/outside" "$MOVE_SOURCE_ROOT/account-a/rules/external"
@@ -234,9 +243,11 @@ move_run() {
   [ "$status" -ne 0 ]
   [ "$output" = "unsafe_hardlink|preflight_rejected|legacy" ]
   [ -f "$MULTICLI_SCRATCH/outside" ]
-}
 
-@test "completed migration residue is removed from staging but retained in the source backup" {
+  teardown
+  setup
+
+  # Case 2: completed migration residue is removed from staging but retained in the source backup
   make_v2_move_profile
   local profile="$MOVE_SOURCE_ROOT/account-a"
   local outside="$MULTICLI_SCRATCH/outside-skill"
@@ -255,7 +266,8 @@ move_run() {
   [ "$(cat "$outside/SKILL.md" | tr -d '\r')" = "external sentinel" ]
 }
 
-@test "an active process blocks the move before staging" {
+@test "matrix: an active process blocks the move before staging (+1 related)" {
+  # Case 1: an active process blocks the move before staging
   make_v2_move_profile
 
   run move_run busy
@@ -264,9 +276,11 @@ move_run() {
   [ "$output" = "process_active|preflight_rejected|v2" ]
   [ -d "$MOVE_SOURCE_ROOT/account-a" ]
   [ ! -e "$MOVE_DESTINATION_ROOT/.staging" ]
-}
 
-@test "a pre-existing staging or backup path is never overwritten" {
+  teardown
+  setup
+
+  # Case 2: a pre-existing staging or backup path is never overwritten
   make_v2_move_profile
   mkdir -p "$MOVE_DESTINATION_ROOT/.staging/account-a.fixture-op"
   run move_run
@@ -287,7 +301,8 @@ move_run() {
   [ "$output" = "transaction_locked|preflight_rejected|v2" ]
 }
 
-@test "an integrity mismatch leaves the source active and staging recoverable" {
+@test "matrix: an integrity mismatch leaves the source active and staging recoverable (+2 related)" {
+  # Case 1: an integrity mismatch leaves the source active and staging recoverable
   make_v2_move_profile
 
   run move_run tamper
@@ -297,9 +312,11 @@ move_run() {
   [ -d "$MOVE_SOURCE_ROOT/account-a" ]
   [ ! -e "$MOVE_DESTINATION_ROOT/account-a" ]
   [ -d "$MOVE_DESTINATION_ROOT/.staging/account-a.fixture-op" ]
-}
 
-@test "activation failure restores the source and preserves staging" {
+  teardown
+  setup
+
+  # Case 2: activation failure restores the source and preserves staging
   make_v2_move_profile
 
   run move_run activate-fail
@@ -310,9 +327,11 @@ move_run() {
   [ ! -e "$MOVE_DESTINATION_ROOT/account-a" ]
   [ -d "$MOVE_DESTINATION_ROOT/.staging/account-a.fixture-op" ]
   [ ! -e "$MOVE_SOURCE_ROOT/.inactive/account-a.fixture-op" ]
-}
 
-@test "post-activation tampering is quarantined and the source is restored" {
+  teardown
+  setup
+
+  # Case 3: post-activation tampering is quarantined and the source is restored
   make_v2_move_profile
 
   run move_run post-activate-tamper
@@ -339,7 +358,8 @@ move_run() {
   [ -d "$MOVE_DESTINATION_ROOT/.staging/account-a.fixture-op" ]
 }
 
-@test "transport and source deactivation failures never activate the destination" {
+@test "matrix: transport and source deactivation failures never activate the destination (+1 related)" {
+  # Case 1: transport and source deactivation failures never activate the destination
   make_v2_move_profile
 
   run move_run transport-fail
@@ -354,9 +374,11 @@ move_run() {
   [ "$output" = "source_deactivation_failed|source_active|v2" ]
   [ -d "$MOVE_SOURCE_ROOT/account-a" ]
   [ -d "$MOVE_DESTINATION_ROOT/.staging/account-a.fixture-op" ]
-}
 
-@test "runtime reconstruction failure quarantines destination and restores source" {
+  teardown
+  setup
+
+  # Case 2: runtime reconstruction failure quarantines destination and restores source
   make_v2_move_profile
 
   run move_run runtime-fail

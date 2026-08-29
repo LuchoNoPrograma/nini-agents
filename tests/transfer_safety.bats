@@ -236,7 +236,8 @@ archive_entries() {
   [ "$status" -eq 0 ]
 }
 
-@test "template save excludes a nested junction into the shared root without following it" {
+@test "matrix: template save excludes a nested junction into the shared root without following it (+1 related)" {
+  # Case 1: template save excludes a nested junction into the shared root without following it
   seed_transfer_shared_root
   make_overlay_profile account-a
   local profile_dir="$TRANSFER_PROFILE_DIR"
@@ -249,9 +250,11 @@ archive_entries() {
   [ -f "$tpl/agents/reviewer.md" ]
   [ ! -e "$tpl/agents/loop" ]
   [ -z "$(find "$tpl" -type l -print -quit)" ]
-}
 
-@test "template save refuses an overlay link pointing outside the profile shared state" {
+  teardown
+  setup
+
+  # Case 2: template save refuses an overlay link pointing outside the profile shared state
   seed_transfer_shared_root
   make_overlay_profile account-a
   local profile_dir="$TRANSFER_PROFILE_DIR"
@@ -269,7 +272,8 @@ archive_entries() {
   [ ! -e "$TEMPLATES_ROOT/mytpl" ]
 }
 
-@test "template save refuses shared content that matches secret patterns" {
+@test "matrix: template save refuses shared content that matches secret patterns (+1 related)" {
+  # Case 1: template save refuses shared content that matches secret patterns
   seed_transfer_shared_root
   make_overlay_profile account-a
   local profile_dir="$TRANSFER_PROFILE_DIR"
@@ -280,9 +284,11 @@ archive_entries() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"secret"* ]]
   [ ! -e "$TEMPLATES_ROOT/mytpl" ]
-}
 
-@test "template save refuses oversized and binary files it cannot scan" {
+  teardown
+  setup
+
+  # Case 2: template save refuses oversized and binary files it cannot scan
   seed_transfer_shared_root
   make_overlay_profile account-a
   local profile_dir="$TRANSFER_PROFILE_DIR"
@@ -305,7 +311,8 @@ PY
   [[ "$output" == *"binary"*"secret-scanned safely"* ]]
 }
 
-@test "template save dry-run reports the plan and writes nothing" {
+@test "matrix: template save dry-run reports the plan and writes nothing (+1 related)" {
+  # Case 1: template save dry-run reports the plan and writes nothing
   seed_transfer_shared_root
   make_overlay_profile account-a
   local profile_dir="$TRANSFER_PROFILE_DIR"
@@ -316,9 +323,11 @@ PY
   [[ "$output" == *"config.toml"* ]]
   [[ "$output" == *"agents/reviewer.md"* ]]
   [ ! -e "$TEMPLATES_ROOT" ]
-}
 
-@test "template from another adapter is refused at apply time" {
+  teardown
+  setup
+
+  # Case 2: template from another adapter is refused at apply time
   seed_transfer_shared_root
   make_overlay_profile account-a
   local profile_dir="$TRANSFER_PROFILE_DIR"
@@ -378,7 +387,8 @@ PY
   [ ! -s "$dest/auth/auth.json" ]
 }
 
-@test "import rejects archive entries that escape, qualify, stream, or duplicate paths" {
+@test "matrix: import rejects archive entries that escape, qualify, stream, or duplicate paths (+1 related)" {
+  # Case 1: import rejects archive entries that escape, qualify, stream, or duplicate paths
   need_gnu_tar
   seed_transfer_shared_root
   local kind expected archive dest
@@ -400,9 +410,11 @@ PY
     }
     [ ! -e "$dest" ]
   done
-}
 
-@test "import rejects link entries inside archives" {
+  teardown
+  setup
+
+  # Case 2: import rejects link entries inside archives
   seed_transfer_shared_root
   local kind archive dest expected
   for kind in symlink hardlink; do
@@ -418,7 +430,8 @@ PY
   done
 }
 
-@test "import rejects credential entries at root and nested" {
+@test "matrix: import rejects credential entries at root and nested (+1 related)" {
+  # Case 1: import rejects credential entries at root and nested
   seed_transfer_shared_root
   local staging archive dest
   staging="$(mktemp -d "$MULTICLI_SCRATCH/staged.XXXXXX")"
@@ -449,9 +462,11 @@ PY
   [ "$status" -eq 1 ]
   [[ "$output" == *"credential"* ]]
   [ ! -e "$dest2" ]
-}
 
-@test "shared credential state stays outside exports and is rejected on import" {
+  teardown
+  setup
+
+  # Case 2: shared credential state stays outside exports and is rejected on import
   jq '.sharedCredentialState={
     root:".shared/fixture/oauth",
     entries:[{path:"oauth-store",kind:"directory"}],
@@ -489,7 +504,8 @@ PY
   [ ! -e "$dest" ]
 }
 
-@test "import refuses archives with a foreign or missing adapter manifest" {
+@test "matrix: import refuses archives with a foreign or missing adapter manifest (+2 related)" {
+  # Case 1: import refuses archives with a foreign or missing adapter manifest
   seed_transfer_shared_root
   local staging archive dest
   staging="$(mktemp -d "$MULTICLI_SCRATCH/staged.XXXXXX")"
@@ -517,9 +533,11 @@ PY
   [ "$status" -eq 1 ]
   [[ "$output" == *"no nini-agents manifest"* ]]
   [ ! -e "$dest2" ]
-}
 
-@test "import refuses staged content that matches secret patterns" {
+  teardown
+  setup
+
+  # Case 2: import refuses staged content that matches secret patterns
   seed_transfer_shared_root
   local staging archive dest
   staging="$(mktemp -d "$MULTICLI_SCRATCH/staged.XXXXXX")"
@@ -536,9 +554,11 @@ PY
   [ "$status" -eq 1 ]
   [[ "$output" == *"secret"* ]]
   [ ! -e "$dest" ]
-}
 
-@test "export refuses shared content that matches secret patterns and writes no archive" {
+  teardown
+  setup
+
+  # Case 3: export refuses shared content that matches secret patterns and writes no archive
   seed_transfer_shared_root
   local profile_dir archive
   make_overlay_profile account-a
@@ -553,7 +573,8 @@ PY
   [ ! -e "$archive" ]
 }
 
-@test "new --from with an incompatible template refuses before creating the profile" {
+@test "matrix: new --from with an incompatible template refuses before creating the profile (+1 related)" {
+  # Case 1: new --from with an incompatible template refuses before creating the profile
   seed_transfer_shared_root
   make_overlay_profile account-a
   run transfer_run transfer_save_template "$FIXTURE_MANIFEST" "$TRANSFER_PROFILE_DIR" "$TEMPLATES_ROOT" tpl false
@@ -563,9 +584,11 @@ PY
   [ "$status" -eq 1 ]
   [[ "$output" == *"cannot be applied to 'fixture2'"* ]]
   [ ! -e "$MULTICLI_HOME/fixture2/wrong" ]
-}
 
-@test "ordinary template and import install state where account-overlay launch reads it" {
+  teardown
+  setup
+
+  # Case 2: ordinary template and import install state where account-overlay launch reads it
   seed_transfer_shared_root
   make_overlay_profile account-a
   local profile_dir="$TRANSFER_PROFILE_DIR"

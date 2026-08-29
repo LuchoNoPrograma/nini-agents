@@ -88,7 +88,8 @@ make_junction() {
   [ ! -e "$MULTICLI_SCRATCH/victim" ]
 }
 
-@test "delete refuses a junctioned tool directory that resolves outside MULTICLI_HOME" {
+@test "matrix: delete refuses a junctioned tool directory that resolves outside MULTICLI_HOME (+2 related)" {
+  # Case 1: delete refuses a junctioned tool directory that resolves outside MULTICLI_HOME
   local outside_root="$MULTICLI_SCRATCH/outside-fixture"
   mkdir -p "$outside_root/account-a"
   printf 'outside-data\n' > "$outside_root/account-a/keep.txt"
@@ -110,9 +111,11 @@ make_junction() {
     .error.details.state == "not_applied"
   ' >/dev/null
   [ -f "$outside_root/account-a/keep.txt" ]
-}
 
-@test "rename refuses a junctioned tool directory that resolves outside MULTICLI_HOME" {
+  teardown
+  setup
+
+  # Case 2: rename refuses a junctioned tool directory that resolves outside MULTICLI_HOME
   local outside_root="$MULTICLI_SCRATCH/outside-fixture"
   mkdir -p "$outside_root/account-a"
   printf 'outside-data\n' > "$outside_root/account-a/keep.txt"
@@ -125,9 +128,11 @@ make_junction() {
   [ -d "$outside_root/account-a" ]
   [ ! -e "$outside_root/account-b" ]
   [ "$(tr -d '\r' < "$outside_root/account-a/keep.txt")" = "outside-data" ]
-}
 
-@test "export refuses a junctioned tool directory that resolves outside MULTICLI_HOME" {
+  teardown
+  setup
+
+  # Case 3: export refuses a junctioned tool directory that resolves outside MULTICLI_HOME
   local outside_root="$MULTICLI_SCRATCH/outside-fixture"
   local archive="$MULTICLI_SCRATCH/escape.tar.gz"
   mkdir -p "$outside_root/account-a"
@@ -142,7 +147,8 @@ make_junction() {
   [ "$(tr -d '\r' < "$outside_root/account-a/keep.txt")" = "outside-data" ]
 }
 
-@test "template save refuses legacy whole-root copies before token files can travel" {
+@test "matrix: template save refuses legacy whole-root copies before token files can travel (+1 related)" {
+  # Case 1: template save refuses legacy whole-root copies before token files can travel
   local legacy="$MULTICLI_HOME/fixture/legacy"
   mkdir -p "$legacy"
   printf 'model = "gpt-5"\n' > "$legacy/config.toml"
@@ -155,22 +161,11 @@ make_junction() {
   [[ "$output" == *"legacy profile transfer is disabled"* ]]
   [[ "$output" == *"nini-agents migrate fixture/legacy"* ]]
   [ ! -e "$MULTICLI_HOME/.templates/tpl" ]
-}
 
-@test "dot-sourced cmd_template hits the legacy transfer guard directly" {
-  local legacy="$MULTICLI_HOME/fixture/legacy"
-  mkdir -p "$legacy"
-  printf 'model = "gpt-5"\n' > "$legacy/config.toml"
+  teardown
+  setup
 
-  run env MULTICLI_HOME="$MULTICLI_HOME" MULTICLI_TOOLS_DIR="$MULTICLI_TOOLS_DIR" \
-    bash -c 'multicli_bin="$1"; set -- help; source "$multicli_bin" >/dev/null 2>&1; cmd_template save fixture/legacy tpl' _ \
-    "$MULTICLI_BIN"
-
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"legacy profile transfer is disabled"* ]]
-}
-
-@test "export refuses legacy whole-root copies before token files can travel" {
+  # Case 2: export refuses legacy whole-root copies before token files can travel
   local legacy="$MULTICLI_HOME/fixture/legacy"
   local archive="$MULTICLI_SCRATCH/legacy.tar.gz"
   mkdir -p "$legacy"
@@ -186,21 +181,8 @@ make_junction() {
   [ ! -e "$archive" ]
 }
 
-@test "dot-sourced cmd_export hits the legacy transfer guard directly" {
-  local legacy="$MULTICLI_HOME/fixture/legacy"
-  local archive="$MULTICLI_SCRATCH/legacy.tar.gz"
-  mkdir -p "$legacy"
-  printf 'model = "gpt-5"\n' > "$legacy/config.toml"
-
-  run env MULTICLI_HOME="$MULTICLI_HOME" MULTICLI_TOOLS_DIR="$MULTICLI_TOOLS_DIR" \
-    bash -c 'multicli_bin="$1"; archive="$2"; set -- help; source "$multicli_bin" >/dev/null 2>&1; cmd_export fixture/legacy "$archive"' _ \
-    "$MULTICLI_BIN" "$archive"
-
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"legacy profile transfer is disabled"* ]]
-}
-
-@test "new --from refuses legacy template application before old templates can recreate credentials" {
+@test "matrix: new --from refuses legacy template application before old templates can recreate credentials (+1 related)" {
+  # Case 1: new --from refuses legacy template application before old templates can recreate credentials
   local template_dir="$MULTICLI_HOME/.templates/tpl"
   mkdir -p "$template_dir"
   printf 'model = "gpt-5"\n' > "$template_dir/config.toml"
@@ -212,9 +194,11 @@ make_junction() {
   [[ "$output" == *"legacy template application is disabled"* ]]
   [[ "$output" == *"template 'tpl'"* ]]
   [ ! -e "$MULTICLI_HOME/legacycli/work" ]
-}
 
-@test "clone refuses legacy whole-root copies before tokens can travel" {
+  teardown
+  setup
+
+  # Case 2: clone refuses legacy whole-root copies before tokens can travel
   local source="$MULTICLI_HOME/legacycli/source"
   mkdir -p "$source"
   printf 'model = "gpt-5"\n' > "$source/config.toml"

@@ -15,7 +15,8 @@ teardown() {
 
 # 13. A new plain profile default-seeds session state from base AND the
 #     adapter's linkable assets (config.toml).
-@test "new default-seeds session state and linkable assets from base" {
+@test "matrix: new default-seeds session state and linkable assets from base (+1 related)" {
+  # Case 1: new default-seeds session state and linkable assets from base
   seed_codex_base
 
   run multicli new codex/dev
@@ -29,10 +30,12 @@ teardown() {
   [ -f "$pdir/config.toml" ]          # linkable asset seeded
   [ ! -f "$pdir/auth.json" ]          # credential never seeded
   [ ! -f "$pdir/sessions/auth.json" ] # nested decoy never seeded
-}
 
 # 14. new --no-seed seeds nothing.
-@test "new --no-seed creates an empty profile and seeds nothing" {
+  teardown
+  setup
+
+  # Case 2: new --no-seed creates an empty profile and seeds nothing
   seed_codex_base
 
   run multicli new codex/clean --no-seed

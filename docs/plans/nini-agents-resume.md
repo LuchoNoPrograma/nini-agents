@@ -83,10 +83,10 @@ los gates de la bitacora y el alcance previo exigido por `AGENTS.md`.
   credenciales.
 - El adapter sigue siendo la fuente declarativa de `credentialFiles`,
   `sharedPaths`, `sessionPaths`, `runtimePaths`,
-  `migrationPreservePaths` y credenciales compartidas; no hay allowlist privada
-  por perfil.
+  `migrationPreservePaths`, `migrationActivatePaths` y credenciales
+  compartidas; no hay una politica privada por perfil.
 - Para Codex ya se demostraron y declararon como estado normal compartido
-  `AGENTS.md`, `installation_id` y `log/`. Las familias SQLite observadas en
+  `AGENTS.md`, `AGENTS.override.md`, `installation_id` y `log/`. Las familias SQLite observadas en
   Codex 0.147.0 son estado de sesion directo bajo `sqlite_home`, pero sus
   instancias legacy se preservan inactivas para no mezclar una base con
   sidecars de otra familia. No se enlazan dentro de `.runtime`.
@@ -119,10 +119,16 @@ los gates de la bitacora y el alcance previo exigido por `AGENTS.md`.
   normal que solo cambia migracion. El objeto legacy se preserva por rename
   bajo `profile-state/`; no se compara, fusiona ni activa, y rollback lo
   devuelve. Runtime schema v2 conserva la clase normal original.
+- `normalState.migrationActivatePaths` es una allowlist opcional y exacta de
+  estado shared/session que se activa durante migracion. Si existe, el resto
+  del estado normal declarado se preserva completo bajo `profile-state/`, sin
+  merge por archivo. Si falta, los adapters conservan el comportamiento
+  anterior.
 - Codex clasifica `.sandbox_migration`, `cache/`, `models_cache.json` y
-  `version.json` como runtime reconstruible; `shell_snapshots/` y
-  `thread-writer-locks/` como sesion. Las familias SQLite exactas y
-  `thread-writer-locks/` usan preservacion legacy `profile-state`.
+  `version.json` como runtime reconstruible. Su migracion activa solo
+  configuracion/MCP, instrucciones, skills, agents, prompts, plugins, rules y
+  hooks; sesiones, history, snapshots, logs, identidad de instalacion, locks y
+  SQLite quedan inactivos completos bajo `profile-state/`.
   `legacyBackupPattern: dotSuffix`
   clasifica los dos backups MCP observados como credenciales y los preserva
   inactivos sin leerlos ni copiarlos.
@@ -142,6 +148,7 @@ estado presente para el cual el adapter no declara una frontera segura:
 | Backup MCP que coincide con `legacyBackupPattern: dotSuffix` | Se trata como credencial compartida legacy y se preserva bajo `shared-credentials/`; nunca se transporta |
 | Ruta presente declarada `runtimePaths` | Se preserva inactiva bajo `runtime-state/`; no se comparte, enlaza ni inicializa vacia |
 | Ruta presente declarada `migrationPreservePaths` | Conserva su clase normal en runtime, pero su objeto legacy se preserva inactivo bajo `profile-state/`; nunca se mezcla con el root vivo |
+| Ruta shared/session fuera de `migrationActivatePaths` cuando el campo existe | Se preserva completa bajo `profile-state/`; no se recorre ni activa durante migracion |
 | Credencial declarada pero ausente | El plan actual crea un placeholder vacio bajo `auth/` |
 | Credencial declarada como symlink o hardlink | Se rechaza antes del apply |
 | Ruta que coincide con credencial y estado normal | Se reporta `overlap` y se rechaza |

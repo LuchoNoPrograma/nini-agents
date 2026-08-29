@@ -175,6 +175,23 @@ runtime_shared_credential_root() {
   printf '%s/%s\n' "$store_root" "${relative_root//\\//}"
 }
 
+# Preserve mkdir's native filesystem diagnostic instead of collapsing every
+# failure into an incorrect path-type error. The private umask also closes the
+# brief permission window before the caller applies its explicit mode.
+runtime_try_private_mkdir() {
+  local path="$1"
+  RUNTIME_MKDIR_ERROR=""
+  if RUNTIME_MKDIR_ERROR="$(umask 077; LC_ALL=C mkdir "$path" 2>&1)"; then
+    return 0
+  fi
+  return 1
+}
+
+runtime_abort_mkdir_failure() {
+  local label="$1" path="$2" detail="${RUNTIME_MKDIR_ERROR:-mkdir failed without diagnostic output}"
+  abort "Cannot create $label '$path'. Filesystem error: $detail. Check free disk space and inodes (df -h and df -i), parent directory permissions, and read-only filesystem status, then retry."
+}
+
 # Create one relative directory tree without ever following a symlink below
 # Base. Existing directories are accepted; every other existing type fails
 # closed. New private store directories are owner-only on POSIX.
@@ -191,9 +208,12 @@ runtime_ensure_owned_directory() {
       [ -d "$current" ] || abort "Refusing to initialize $label: shared credential store component '$current' is not a directory."
       continue
     fi
-    (umask 077; mkdir "$current") 2>/dev/null || {
+    runtime_try_private_mkdir "$current" || {
       [ ! -L "$current" ] || abort "Refusing to initialize $label: shared credential store component '$current' is a link."
-      [ -d "$current" ] || abort "Cannot create shared credential store directory '$current'."
+      if [ ! -d "$current" ]; then
+        [ ! -e "$current" ] || abort "Refusing to initialize $label: shared credential store component '$current' is not a directory."
+        runtime_abort_mkdir_failure "shared credential store directory" "$current"
+      fi
     }
     runtime_is_windows_shell || chmod 700 "$current" 2>/dev/null || true
   done
@@ -268,9 +288,15 @@ runtime_ensure_shared_credential_sources() {
   lock_parent="$store_root/.shared"
   runtime_ensure_owned_directory "$store_root" '.shared' "shared credential store"
   lock_dir="$lock_parent/.init-$adapter_id.lock"
-  while ! mkdir "$lock_dir" 2>/dev/null; do
+  while ! runtime_try_private_mkdir "$lock_dir"; do
     [ ! -L "$lock_dir" ] || abort "Refusing to initialize shared credentials: '$lock_dir' is a link."
-    [ -d "$lock_dir" ] || abort "Refusing to initialize shared credentials: '$lock_dir' is not a directory."
+    if [ ! -d "$lock_dir" ]; then
+      [ ! -e "$lock_dir" ] || abort "Refusing to initialize shared credentials: '$lock_dir' is not a directory."
+      case "$RUNTIME_MKDIR_ERROR" in
+        *"File exists"*) continue ;;
+        *) runtime_abort_mkdir_failure "shared credential initialization lock" "$lock_dir" ;;
+      esac
+    fi
     owner=""
     if [ -f "$lock_dir/pid" ]; then
       owner="$(tr -dc '0-9' < "$lock_dir/pid" 2>/dev/null || true)"
@@ -481,9 +507,15 @@ runtime_overlay_is_current() {
 runtime_with_profile_lock() {
   local profile_dir="$1" operation="$2" callback="$3"; shift 3
   local lock_dir="$profile_dir/.runtime.lock" owner attempts=0
-  while ! mkdir "$lock_dir" 2>/dev/null; do
+  while ! runtime_try_private_mkdir "$lock_dir"; do
     [ ! -L "$lock_dir" ] || abort "Refusing to $operation: '$lock_dir' is a symlink."
-    [ -d "$lock_dir" ] || abort "Refusing to $operation: '$lock_dir' is not a directory."
+    if [ ! -d "$lock_dir" ]; then
+      [ ! -e "$lock_dir" ] || abort "Refusing to $operation: '$lock_dir' is not a directory."
+      case "$RUNTIME_MKDIR_ERROR" in
+        *"File exists"*) continue ;;
+        *) runtime_abort_mkdir_failure "profile runtime lock for $operation" "$lock_dir" ;;
+      esac
+    fi
     owner="$(tr -dc '0-9' < "$lock_dir/pid" 2>/dev/null || true)"
     if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then
       rm -f "$lock_dir/pid" 2>/dev/null || true
@@ -802,7 +834,7 @@ runtime_launch_account_overlay() {
   shared_root="$(runtime_platform_root "$manifest")"
   if [ "$mechanism" = fileOverlay ]; then
     if ! runtime_root="$(runtime_build_overlay "$manifest" "$profile_dir")"; then
-      abort "Cannot build the account overlay for '$tool/$(basename "$profile_dir")'."
+      abort "Cannot build the account overlay for '$tool/$(basename "$profile_dir")'. Review the specific filesystem or safety error above."
     fi
   else
     runtime_root="$shared_root"

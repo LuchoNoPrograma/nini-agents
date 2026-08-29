@@ -57,16 +57,19 @@ run_uninstall() {
   [ ! -e "$NINI_AGENTS_BIN_LINK" ]
 }
 
-@test "uninstall leaves an unrelated file at the launcher path alone" {
+@test "matrix: uninstall leaves an unrelated file at the launcher path alone (+1 related)" {
+  # Case 1: uninstall leaves an unrelated file at the launcher path alone
   printf 'echo unrelated\n' > "$NINI_AGENTS_BIN_LINK"
 
   run run_uninstall
 
   [ "$status" -eq 0 ]
   [ -f "$NINI_AGENTS_BIN_LINK" ]
-}
 
-@test "uninstall clears process-secret credentials before removing profiles" {
+  teardown
+  setup
+
+  # Case 2: uninstall clears process-secret credentials before removing profiles
   local tools="$MULTICLI_SCRATCH/tools"
   mkdir -p "$tools/secretcli" "$MULTICLI_HOME/secretcli/account-a"
   cat > "$tools/secretcli/adapter.json" <<'JSON'

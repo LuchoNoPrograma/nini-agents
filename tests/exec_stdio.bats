@@ -51,7 +51,8 @@ teardown() {
   teardown_scratch
 }
 
-@test "exec keeps stdout clean while preserving stdio, overlay env, and enforced arguments" {
+@test "matrix: exec keeps stdout clean while preserving stdio, overlay env, and enforced arguments (+1 related)" {
+  # Case 1: exec keeps stdout clean while preserving stdio, overlay env, and enforced arguments
   local stdout="$MULTICLI_SCRATCH/stdout"
   local stderr="$MULTICLI_SCRATCH/stderr"
   local request='{"jsonrpc":"2.0","id":1,"method":"initialize"}'
@@ -72,9 +73,11 @@ teardown() {
      and .args == ["app-server", "--stdio", "-c", ("sqlite_home=\"" + $shared + "\"")]' \
     "$EXEC_CAPTURE"
   [ "$status" -eq 0 ]
-}
 
-@test "exec replaces the Bash wrapper and propagates the child exit code" {
+  teardown
+  setup
+
+  # Case 2: exec replaces the Bash wrapper and propagates the child exit code
   local pid_probe="$MULTICLI_SCRATCH/pid-probe"
   local child_pid_file="$MULTICLI_SCRATCH/child.pid"
   cat > "$pid_probe" <<'PROBE'
@@ -140,7 +143,8 @@ PROBE
   [ "$runtime_auth" -ef "$profile_auth" ]
 }
 
-@test "exec rejects detached or non-file-overlay adapters before spawning" {
+@test "matrix: exec rejects detached or non-file-overlay adapters before spawning (+1 related)" {
+  # Case 1: exec rejects detached or non-file-overlay adapters before spawning
   jq '.isolation.mode="detached"' "$MULTICLI_TOOLS_DIR/fixture/adapter.json" \
     > "$MULTICLI_TOOLS_DIR/fixture/updated.json"
   mv "$MULTICLI_TOOLS_DIR/fixture/updated.json" "$MULTICLI_TOOLS_DIR/fixture/adapter.json"
@@ -160,9 +164,11 @@ PROBE
   [ "$status" -eq 1 ]
   [[ "$output" == *"requires accountOverlay/fileOverlay"* ]]
   [ ! -f "$EXEC_CAPTURE" ]
-}
 
-@test "exec preserves stdout-clean legacy whole-root compatibility while launch keeps its notice" {
+  teardown
+  setup
+
+  # Case 2: exec preserves stdout-clean legacy whole-root compatibility while launch keeps its notice
   mkdir -p "$MULTICLI_HOME/fixture/legacy"
   local request='{"jsonrpc":"2.0","id":2}'
 

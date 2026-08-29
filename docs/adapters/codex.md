@@ -117,6 +117,7 @@ migration itself cannot trigger MCP login, logout, refresh, or revocation.
 Shared root: `%USERPROFILE%\.codex` (Windows), `~/.codex` (macOS/Linux).
 
 - Config and global guidance: `config.toml`, `hooks.json`, `AGENTS.md`,
+  `AGENTS.override.md`,
   `installation_id`, `skills/`, `agents/`, `prompts/`, `mcp-configs/`,
   `plugins/`, `rules/`.
 - Logs: `log/`.
@@ -135,6 +136,33 @@ global skills and conversations, but not the separate shared MCP OAuth store.
 `move-import` installs missing state, accepts byte-identical existing files,
 and rejects any differing file rather than merging SQLite or text content.
 
+## Selective legacy migration
+
+Codex migration activates only the compact state selected by
+`normalState.migrationActivatePaths`: `config.toml`, `hooks.json`,
+`AGENTS.md`, `AGENTS.override.md`, `skills/`, `agents/`, `prompts/`,
+`mcp-configs/`, `plugins/`, and `rules/`. The main `auth.json` remains governed
+by the credential transaction and moves to the profile-local `auth/` tree.
+
+`config.toml` is the primary MCP server configuration, so those definitions
+are retained. Legacy MCP OAuth objects (`.credentials.json` and
+`mcp-oauth-locks/`) remain inactive by design; migration never imports or
+activates them, and the first MCP use can require authentication again.
+
+Current Codex also discovers user skills under `$HOME/.agents/skills`, which
+is already outside the legacy `CODEX_HOME` profile and is therefore not moved.
+The adapter still activates a legacy profile's `skills/` directory for
+compatibility with Codex versions and installations that use
+`$CODEX_HOME/skills`.
+
+All other declared ordinary state is preserved whole under
+`.inactive/migrations/codex/<profile>/profile-state/`: `installation_id`,
+`log/`, conversations, history, archived sessions, shell snapshots, session
+index, writer locks, and the declared SQLite families. A large `sessions/`
+tree therefore produces one journaled rename instead of one merge operation
+per contained file. It remains available for recovery but is not activated in
+the new profile.
+
 ## Legacy transactional state
 
 Schema-v2 Codex still uses the shared `sqlite_home` and declares
@@ -147,9 +175,11 @@ deduplicated, merged into `~/.codex`, or activated automatically.
 
 This prevents a database from one legacy profile being combined with sidecars
 or writer locks belonging to another database already active in the shared
-root. Individual sessions, history, snapshots, configuration, plugins, and
-skills retain the ordinary merge policy. A failed apply returns the preserved
-objects to the legacy profile through the migration journal and rollback.
+root. The broader selective migration policy now preserves sessions, history,
+snapshots, logs, and installation identity in the same recovery area as well;
+configuration, plugins, and skills are activated. A failed apply returns all
+preserved objects to the legacy profile through the migration journal and
+rollback.
 
 ## Reconstructible runtime state
 

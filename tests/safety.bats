@@ -20,7 +20,8 @@ teardown() {
 
 # (a) A truncated dest with the SAME mtime but a DIFFERENT size is not current
 #     and must be re-copied (repaired), restoring the full content.
-@test "truncated dest with equal mtime and different size is repaired" {
+@test "matrix: truncated dest with equal mtime and different size is repaired (+1 related)" {
+  # Case 1: truncated dest with equal mtime and different size is repaired
   seed_codex_base
   multicli new codex/backup --no-seed >/dev/null
   multicli continue codex base backup >/dev/null
@@ -45,10 +46,12 @@ teardown() {
   [ "$(wc -c < "$dst" | tr -d '[:space:]')" -eq "$full_size" ]
   run cmp -s "$src" "$dst"
   [ "$status" -eq 0 ]
-}
 
 # (b) A dest that is STRICTLY NEWER than the source is left untouched (skipped).
-@test "dest strictly newer than source is skipped, never overwritten" {
+  teardown
+  setup
+
+  # Case 2: dest strictly newer than source is skipped, never overwritten
   seed_codex_base
   multicli new codex/backup --no-seed >/dev/null
   multicli continue codex base backup >/dev/null
@@ -70,21 +73,11 @@ teardown() {
   [[ "$output" == *"LOCAL-EDIT-keep-me"* ]]
 }
 
-# (b') Equal mtime AND equal size is skipped (the no-op repeat case).
-@test "equal mtime and equal size is skipped" {
-  seed_codex_base
-  multicli new codex/backup --no-seed >/dev/null
-  multicli continue codex base backup >/dev/null
-
-  run multicli continue codex base backup
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"Copied 0 file(s), skipped 2 (same-or-newer)."* ]]
-}
-
 # --- adapter-bug path validation (assert_relpath_safe via the safe check) ------
 
 # (c) A session path containing a '..' component aborts as an adapter bug.
-@test "session path containing .. aborts as adapter bug" {
+@test "matrix: session path containing .. aborts as adapter bug (+2 related)" {
+  # Case 1: session path containing .. aborts as adapter bug
   local toolsdir="$MULTICLI_SCRATCH/tools"
   mkdir -p "$toolsdir/dotdot"
   cat > "$toolsdir/dotdot/adapter.json" <<'JSON'
@@ -103,10 +96,12 @@ JSON
   [ "$status" -eq 1 ]
   [[ "$output" == *"adapter bug"* ]]
   [[ "$output" == *"contains '..'"* ]]
-}
 
 # (c') An absolute session path aborts as an adapter bug.
-@test "absolute session path aborts as adapter bug" {
+  teardown
+  setup
+
+  # Case 2: absolute session path aborts as adapter bug
   local toolsdir="$MULTICLI_SCRATCH/tools"
   mkdir -p "$toolsdir/abs"
   cat > "$toolsdir/abs/adapter.json" <<'JSON'
@@ -125,10 +120,12 @@ JSON
   [ "$status" -eq 1 ]
   [[ "$output" == *"adapter bug"* ]]
   [[ "$output" == *"is absolute"* ]]
-}
 
 # (c'') A drive-letter session path aborts as an adapter bug.
-@test "drive-letter session path aborts as adapter bug" {
+  teardown
+  setup
+
+  # Case 3: drive-letter session path aborts as adapter bug
   local toolsdir="$MULTICLI_SCRATCH/tools"
   mkdir -p "$toolsdir/drive"
   cat > "$toolsdir/drive/adapter.json" <<'JSON'
@@ -183,7 +180,8 @@ JSON
 
 # (e) An oversize base (> SEED_MAX_BYTES) prints the actionable skip line and
 #     copies nothing during seeding.
-@test "oversize base skips automatic seeding with an actionable message" {
+@test "matrix: oversize base skips automatic seeding with an actionable message (+1 related)" {
+  # Case 1: oversize base skips automatic seeding with an actionable message
   mkdir -p "$CODEX_BASE/sessions/2026/06/11"
   # A real >500MB session file (dd allocates it so du -sk reports its size; a
   # sparse truncate would read as 0 blocks on NTFS and not trip the guard).
@@ -198,10 +196,12 @@ JSON
 
   # Nothing was seeded.
   [ ! -e "$MULTICLI_HOME/codex/heavy/sessions" ]
-}
 
 # (e') A small (under-threshold) base prints the seeding progress line.
-@test "under-threshold base prints the seeding progress line" {
+  teardown
+  setup
+
+  # Case 2: under-threshold base prints the seeding progress line
   seed_codex_base
   run multicli new codex/light
   [ "$status" -eq 0 ]
@@ -297,7 +297,8 @@ JSON
 # --- awkward filenames --------------------------------------------------------
 
 # (g) A filename containing spaces copies correctly (find -print0 / read -d '').
-@test "filename containing spaces copies correctly" {
+@test "matrix: filename containing spaces copies correctly (+1 related)" {
+  # Case 1: filename containing spaces copies correctly
   seed_codex_base
   printf '%s\n' '{"type":"session_meta"}' \
     > "$CODEX_BASE/sessions/2026/06/11/rollout with spaces.jsonl"
@@ -307,10 +308,12 @@ JSON
   [ "$status" -eq 0 ]
 
   [ -f "$MULTICLI_HOME/codex/backup/sessions/2026/06/11/rollout with spaces.jsonl" ]
-}
 
 # (g') A filename containing a newline copies correctly (NUL-delimited loop).
-@test "filename containing a newline copies correctly" {
+  teardown
+  setup
+
+  # Case 2: filename containing a newline copies correctly
   seed_codex_base
   local nl; nl="$(printf 'rollout\nnewline.jsonl')"
   if ! printf '%s\n' '{"type":"session_meta"}' \

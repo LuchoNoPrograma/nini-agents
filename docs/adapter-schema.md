@@ -28,6 +28,17 @@ automatic rollback returns it to the legacy location. This is intended for
 transactional families, volatile locks, or similar state whose members must
 not be combined with an unrelated live instance.
 
+`normalState.migrationActivatePaths` is an optional migration-only allowlist.
+Every entry must be an exact member of `sharedPaths` or `sessionPaths`. When
+the field is absent, the legacy behavior remains unchanged and all declared
+shared/session state is eligible for merge. When the field is present, only
+its entries are merged into the live normal-state root; every other declared
+shared/session object is renamed whole under
+`.inactive/migrations/<adapter>/<profile>/profile-state/`. This keeps omitted
+state recoverable while avoiding per-file traversal and merge work for bulky
+histories. An empty list intentionally activates no ordinary state. Runtime
+launch behavior is unchanged, and credential handling is unaffected.
+
 `normalState.runtimePaths` is optional. It declares exact paths for
 reconstructible state that the upstream tool creates inside its runtime view.
 Nini Agents does not create empty placeholders, links, exports, imports, or

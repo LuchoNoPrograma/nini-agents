@@ -174,7 +174,8 @@ track_secret_profile() {
 
 # --- Flag parsing -------------------------------------------------------------
 
-@test "new --isolated and every alias form create a marked isolated profile" {
+@test "matrix: new --isolated and every alias form create a marked isolated profile (+2 related)" {
+  # Case 1: new --isolated and every alias form create a marked isolated profile
   local i=0 flag
   for flag in --isolated --isolate -i; do
     i=$((i + 1))
@@ -182,9 +183,11 @@ track_secret_profile() {
     [ "$status" -eq 0 ]
     [ -f "$MULTICLI_HOME/fixture/iso-$i/.isolated" ]
   done
-}
 
-@test "new rejects misspelled and undocumented isolated options" {
+  teardown
+  setup
+
+  # Case 2: new rejects misspelled and undocumented isolated options
   local option name
   for option in --isloated -isolate; do
     name="typo-${option//-/}"
@@ -193,32 +196,39 @@ track_secret_profile() {
     [[ "$output" == *"Unknown option for new: '$option'"* ]]
     [ ! -e "$MULTICLI_HOME/fixture/$name" ]
   done
-}
 
-@test "new --from requires a template name" {
+  teardown
+  setup
+
+  # Case 3: new --from requires a template name
   run multicli new fixture/missing-template --from
   [ "$status" -eq 1 ]
   [[ "$output" == *"Usage: --from <template>"* ]]
   [ ! -e "$MULTICLI_HOME/fixture/missing-template" ]
 }
 
-@test "--shared and --isolated together fail with a clear message and create nothing" {
+@test "matrix: --shared and --isolated together fail with a clear message and create nothing (+2 related)" {
+  # Case 1: --shared and --isolated together fail with a clear message and create nothing
   run multicli new fixture/clash --shared --isolated --no-seed
   [ "$status" -eq 1 ]
   [[ "$output" == *"--shared"* ]]
   [[ "$output" == *"--isolated"* ]]
   [ ! -e "$MULTICLI_HOME/fixture/clash" ]
-}
 
-@test "--isolated refuses schema-v1 adapters with an actionable message" {
+  teardown
+  setup
+
+  # Case 2: --isolated refuses schema-v1 adapters with an actionable message
   run multicli new codex/legacy-iso --isolated --no-seed
   [ "$status" -eq 1 ]
   [[ "$output" == *"--isolated"* ]]
   [[ "$output" == *"accountOverlay"* ]]
   [ ! -e "$MULTICLI_HOME/codex/legacy-iso" ]
-}
 
-@test "a file-overlay isolated profile carries metadata but no overlay skeleton" {
+  teardown
+  setup
+
+  # Case 3: a file-overlay isolated profile carries metadata but no overlay skeleton
   mkdir -p "$HOME/.fixture"
   printf 'shared-session\n' > "$HOME/.fixture/history.jsonl"
 
@@ -238,7 +248,8 @@ track_secret_profile() {
 
 # --- Launch: home env points at the profile dir -------------------------------
 
-@test "isolated launch points the adapter home env at the profile dir, not the shared root or an overlay" {
+@test "matrix: isolated launch points the adapter home env at the profile dir, not the shared root or an overlay (+1 related)" {
+  # Case 1: isolated launch points the adapter home env at the profile dir, not the shared root or an overlay
   mkdir -p "$HOME/.fixture"
   printf 'shared-session\n' > "$HOME/.fixture/history.jsonl"
   run multicli new fixture/iso --isolated --no-seed
@@ -251,9 +262,11 @@ track_secret_profile() {
   # no runtime overlay was built
   [ ! -e "$pdir/.runtime" ]
   [ ! -e "$pdir"/.runtime.staging.* ]
-}
 
-@test "isolated launch applies enforced adapter arguments inside the profile root" {
+  teardown
+  setup
+
+  # Case 2: isolated launch applies enforced adapter arguments inside the profile root
   jq '.isolation.args=["-c", "sqlite_home=\"{sharedStateRoot}\""]' \
     "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
   mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
@@ -270,7 +283,8 @@ track_secret_profile() {
   [ ! -e "$pdir/.runtime" ]
 }
 
-@test "isolated launch leaves a canary in the native shared root untouched" {
+@test "matrix: isolated launch leaves a canary in the native shared root untouched (+1 related)" {
+  # Case 1: isolated launch leaves a canary in the native shared root untouched
   mkdir -p "$HOME/.fixture"
   printf 'canary\n' > "$HOME/.fixture/canary.txt"
   printf 'shared-session\n' > "$HOME/.fixture/history.jsonl"
@@ -283,9 +297,11 @@ track_secret_profile() {
   # the profile holds no links into the shared root
   [ ! -e "$MULTICLI_HOME/fixture/iso/history.jsonl" ]
   [ ! -L "$MULTICLI_HOME/fixture/iso/config.toml" ]
-}
 
-@test "isolated launch never creates the native shared root when absent" {
+  teardown
+  setup
+
+  # Case 2: isolated launch never creates the native shared root when absent
   [ ! -e "$HOME/.fixture" ]
   run multicli new fixture/iso --isolated --no-seed
   [ "$status" -eq 0 ]
@@ -295,7 +311,8 @@ track_secret_profile() {
   [ ! -e "$HOME/.fixture" ]
 }
 
-@test "isolated launch still clears inherited account variables" {
+@test "matrix: isolated launch still clears inherited account variables (+1 related)" {
+  # Case 1: isolated launch still clears inherited account variables
   run multicli new fixture/iso --isolated --no-seed
   [ "$status" -eq 0 ]
   export GLOBAL_FIXTURE_TOKEN='wrong-account-secret'
@@ -304,9 +321,11 @@ track_secret_profile() {
   [ "$status" -eq 0 ]
   [ "$(jq -r '.inherited' "$CAPTURE_OUTPUT")" = "" ]
   [ "$GLOBAL_FIXTURE_TOKEN" = "wrong-account-secret" ]
-}
 
-@test "Command Code clears its higher-precedence inherited API key" {
+  teardown
+  setup
+
+  # Case 2: Command Code clears its higher-precedence inherited API key
   mkdir -p "$TOOLS_ROOT/commandcode"
   cp "$MULTICLI_REPO_ROOT/ai-tools/commandcode/adapter.json" "$TOOLS_ROOT/commandcode/adapter.json"
   run multicli new commandcode/iso --isolated --no-seed
@@ -343,7 +362,8 @@ PROBE
 
 # --- processSecret: home isolation plus per-profile credential ----------------
 
-@test "process-secret isolated profile keeps credential isolation and points home at the profile dir" {
+@test "matrix: process-secret isolated profile keeps credential isolation and points home at the profile dir (+1 related)" {
+  # Case 1: process-secret isolated profile keeps credential isolation and points home at the profile dir
   run multicli new secretcli/account-a --isolated --no-seed
   [ "$status" -eq 0 ]
   run multicli new secretcli/account-b --isolated --no-seed
@@ -367,9 +387,11 @@ PROBE
   assert_same_path "$(jq -r '.secret_home' "$CAPTURE_OUTPUT")" "$MULTICLI_HOME/secretcli/account-b"
   # the native shared root was never touched
   [ ! -e "$HOME/.secretcli" ]
-}
 
-@test "process-secret isolated launch without a stored credential fails closed with the auth hint" {
+  teardown
+  setup
+
+  # Case 2: process-secret isolated launch without a stored credential fails closed with the auth hint
   run multicli new secretcli/account-a --isolated --no-seed
   [ "$status" -eq 0 ]
 
@@ -380,14 +402,17 @@ PROBE
 
 # --- fixed OS credential identity ---------------------------------------------
 
-@test "isolated mode is rejected for OS credential-store adapters before profile creation" {
+@test "matrix: isolated mode is rejected for OS credential-store adapters before profile creation (+1 related)" {
+  # Case 1: isolated mode is rejected for OS credential-store adapters before profile creation
   run multicli new lockedcli/iso --isolated --no-seed
   [ "$status" -eq 1 ]
   [[ "$output" == *"folder redirection does not isolate the OS credential store"* ]]
   [ ! -e "$MULTICLI_HOME/lockedcli/iso" ]
-}
 
-@test "a legacy isolated marker cannot bypass the OS credential-store boundary" {
+  teardown
+  setup
+
+  # Case 2: a legacy isolated marker cannot bypass the OS credential-store boundary
   run multicli new lockedcli/legacy --no-seed
   [ "$status" -eq 0 ]
   touch "$MULTICLI_HOME/lockedcli/legacy/.isolated"
@@ -415,7 +440,8 @@ PROBE
   [[ "$output" != *"isolated"* ]]
 }
 
-@test "continue copies sessions between isolated profiles, never credentials" {
+@test "matrix: continue copies sessions between isolated profiles, never credentials (+1 related)" {
+  # Case 1: continue copies sessions between isolated profiles, never credentials
   run multicli new fixture/iso-a --isolated --no-seed
   [ "$status" -eq 0 ]
   run multicli new fixture/iso-b --isolated --no-seed
@@ -435,9 +461,11 @@ PROBE
   [ -f "$dst/history.jsonl" ]
   [ ! -e "$dst/auth.json" ]
   [ ! -e "$dst/sessions/auth.json" ]
-}
 
-@test "continue from base into an isolated profile copies the native root's sessions" {
+  teardown
+  setup
+
+  # Case 2: continue from base into an isolated profile copies the native root's sessions
   mkdir -p "$HOME/.fixture/sessions/2026/06/11"
   printf '%s\n' '{"type":"session_meta","payload":{"id":"base-1"}}' \
     > "$HOME/.fixture/sessions/2026/06/11/rollout-2026-06-11T10-00-00-base-1.jsonl"
@@ -454,7 +482,8 @@ PROBE
   [ ! -e "$dst/auth.json" ]
 }
 
-@test "continue between shared (non-isolated) schema-v2 profiles stays a no-op" {
+@test "matrix: continue between shared (non-isolated) schema-v2 profiles stays a no-op (+1 related)" {
+  # Case 1: continue between shared (non-isolated) schema-v2 profiles stays a no-op
   run multicli new fixture/account-a --no-seed
   [ "$status" -eq 0 ]
   run multicli new fixture/account-b --no-seed
@@ -463,9 +492,11 @@ PROBE
   run multicli continue fixture account-a account-b
   [ "$status" -eq 0 ]
   [[ "$output" == *"already share conversations"* ]]
-}
 
-@test "continue refuses a missing shared schema-v2 endpoint" {
+  teardown
+  setup
+
+  # Case 2: continue refuses a missing shared schema-v2 endpoint
   run multicli new fixture/account-a --no-seed
   [ "$status" -eq 0 ]
 

@@ -51,7 +51,8 @@ COUNTING_JQ
   }
 }
 
-@test "the fast launch path still rejects a used traversal path" {
+@test "matrix: the fast launch path still rejects a used traversal path (+2 related)" {
+  # Case 1: the fast launch path still rejects a used traversal path
   run multicli new codex/account-a --no-seed
   [ "$status" -eq 0 ]
   run multicli launch codex/account-a
@@ -66,9 +67,11 @@ COUNTING_JQ
   [ "$status" -ne 0 ]
   [[ "$output" == *"unsafe shared state path '../outside'"* ]]
   [ ! -e "$HOME/outside" ]
-}
 
-@test "the fast launch path rejects credential and shared-state overlap before linking" {
+  teardown
+  setup
+
+  # Case 2: the fast launch path rejects credential and shared-state overlap before linking
   run multicli new codex/account-a --no-seed
   [ "$status" -eq 0 ]
 
@@ -89,9 +92,11 @@ COUNTING_JQ
   [[ "$output" == *"credential path 'collision/auth.json' overlaps shared path 'collision'"* ]]
   [ ! -e "$HOME/.codex/collision" ]
   [ ! -e "$MULTICLI_HOME/codex/account-a/.runtime/collision" ]
-}
 
-@test "the fast launch path rejects unknown placeholders in enforced arguments" {
+  teardown
+  setup
+
+  # Case 3: the fast launch path rejects unknown placeholders in enforced arguments
   run multicli new codex/account-a --no-seed
   [ "$status" -eq 0 ]
 

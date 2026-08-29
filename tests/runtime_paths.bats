@@ -24,7 +24,8 @@ teardown() {
   assert_same_path "$output" "$real_root/missing/leaf"
 }
 
-@test "find_adapter_binary skips an unresolved AppX candidate and keeps searching" {
+@test "matrix: find_adapter_binary skips an unresolved AppX candidate and keeps searching (+1 related)" {
+  # Case 1: find_adapter_binary skips an unresolved AppX candidate and keeps searching
   local stub_bin="$MULTICLI_SCRATCH/bin"
   mkdir -p "$stub_bin" "$MULTICLI_TOOLS_DIR/appx-tool"
   cat > "$MULTICLI_TOOLS_DIR/appx-tool/adapter.json" <<'JSON'
@@ -39,9 +40,11 @@ JSON
 
   [ "$status" -eq 0 ]
   [ "$output" = "$stub_bin/fallback-tool.exe" ]
-}
 
-@test "find_adapter_binary resolves the Codex user-local Linux candidate" {
+  teardown
+  setup
+
+  # Case 2: find_adapter_binary resolves the Codex user-local Linux candidate
   local local_bin="$HOME/.local/bin/codex"
   mkdir -p "$(dirname "$local_bin")" "$MULTICLI_TOOLS_DIR/codex"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$local_bin"
@@ -57,33 +60,22 @@ JSON
   [ "$output" = "$local_bin" ]
 }
 
-@test "launch_sandbox_user announces first launch before Linux provisioning" {
-  run env MULTICLI_PLATFORM=linux MULTICLI_TOOLS_DIR="$MULTICLI_TOOLS_DIR" \
-    bash -c '
-      multicli_bin="$1"; profile_dir="$2"; set -- help; source "$multicli_bin" >/dev/null
-      id() { [ "$1" = "-u" ] && { printf "123\n"; return 0; }; return 1; }
-      create_sandbox_user() { printf "created:%s:%s\n" "$1" "$2"; }
-      sudo() { printf "sudo:%s\n" "$*"; }
-      xhost() { return 0; }
-      launch_sandbox_user codex "$profile_dir" /usr/bin/true
-    ' _ "$MULTICLI_BIN" "$MULTICLI_HOME/codex/demo"
+@test "launch_sandbox_user announces first launch on Linux and macOS" {
+  local platform
+  for platform in linux macos; do
+    run env MULTICLI_PLATFORM="$platform" MULTICLI_TOOLS_DIR="$MULTICLI_TOOLS_DIR" \
+      bash -c '
+        multicli_bin="$1"; profile_dir="$2"; set -- help; source "$multicli_bin" >/dev/null
+        id() { [ "$1" = "-u" ] && { printf "123\n"; return 0; }; return 1; }
+        dscl() { return 1; }
+        create_sandbox_user() { printf "created:%s:%s\n" "$1" "$2"; }
+        sudo() { printf "sudo:%s\n" "$*"; }
+        xhost() { return 0; }
+        launch_sandbox_user codex "$profile_dir" /usr/bin/true
+      ' _ "$MULTICLI_BIN" "$MULTICLI_HOME/codex/demo"
 
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"First launch: creating sandbox user (requires sudo)..."* ]]
-  [[ "$output" == *"created:demo:$MULTICLI_HOME/codex/demo"* ]]
-}
-
-@test "launch_sandbox_user announces first launch before macOS provisioning" {
-  run env MULTICLI_PLATFORM=macos MULTICLI_TOOLS_DIR="$MULTICLI_TOOLS_DIR" \
-    bash -c '
-      multicli_bin="$1"; profile_dir="$2"; set -- help; source "$multicli_bin" >/dev/null
-      dscl() { return 1; }
-      create_sandbox_user() { printf "created:%s:%s\n" "$1" "$2"; }
-      sudo() { printf "sudo:%s\n" "$*"; }
-      launch_sandbox_user codex "$profile_dir" /usr/bin/true
-    ' _ "$MULTICLI_BIN" "$MULTICLI_HOME/codex/demo"
-
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"First launch: creating sandbox user (requires sudo)..."* ]]
-  [[ "$output" == *"created:demo:$MULTICLI_HOME/codex/demo"* ]]
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"First launch: creating sandbox user (requires sudo)..."* ]]
+    [[ "$output" == *"created:demo:$MULTICLI_HOME/codex/demo"* ]]
+  done
 }

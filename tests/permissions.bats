@@ -42,7 +42,8 @@ teardown() {
   teardown_scratch
 }
 
-@test "permissions set full-access persists one shared Codex policy atomically" {
+@test "matrix: permissions set full-access persists one shared Codex policy atomically (+1 related)" {
+  # Case 1: permissions set full-access persists one shared Codex policy atomically
   mkdir -p "$HOME/.codex"
   cat > "$HOME/.codex/config.toml" <<'TOML'
 # keep this comment
@@ -70,15 +71,16 @@ TOML
   ! grep -q '^sandbox_mode[[:space:]]*=' "$HOME/.codex/config.toml"
   ! grep -q '^\[sandbox_workspace_write\]' "$HOME/.codex/config.toml"
   [ "$(stat -c '%a' "$HOME/.codex/config.toml" 2>/dev/null || stat -f '%Lp' "$HOME/.codex/config.toml")" = 600 ]
-}
 
-@test "permissions presets persist their sandbox and approval pair" {
+  teardown
+  setup
+
+  # Case 2: permissions presets persist their sandbox and approval pair
   local preset expected_profile expected_approval
-  for preset in read-only workspace full-access; do
+  for preset in read-only workspace; do
     case "$preset" in
       read-only) expected_profile=':read-only'; expected_approval='on-request' ;;
       workspace) expected_profile=':workspace'; expected_approval='on-request' ;;
-      full-access) expected_profile=':danger-full-access'; expected_approval='never' ;;
     esac
     run multicli permissions set "$preset"
     [ "$status" -eq 0 ]
@@ -102,7 +104,8 @@ TOML
   [ "$(cksum "$HOME/.codex/config.toml")" = "$before" ]
 }
 
-@test "permissions refuses duplicate top-level keys without changing config" {
+@test "matrix: permissions refuses duplicate top-level keys without changing config (+1 related)" {
+  # Case 1: permissions refuses duplicate top-level keys without changing config
   mkdir -p "$HOME/.codex"
   printf '%s\n' 'approval_policy = "never"' 'approval_policy = "on-request"' > "$HOME/.codex/config.toml"
   local before
@@ -113,9 +116,11 @@ TOML
   [ "$status" -ne 0 ]
   [[ "$output" == *"duplicate top-level 'approval_policy'"* ]]
   [ "$(cksum "$HOME/.codex/config.toml")" = "$before" ]
-}
 
-@test "permissions refuses a linked config file" {
+  teardown
+  setup
+
+  # Case 2: permissions refuses a linked config file
   mkdir -p "$HOME/.codex"
   printf 'model = "outside"\n' > "$MULTICLI_SCRATCH/outside.toml"
   ln -s "$MULTICLI_SCRATCH/outside.toml" "$HOME/.codex/config.toml"

@@ -306,11 +306,20 @@ legacy migration. Existing objects at those paths are renamed into
 `.inactive/migrations/<tool>/<profile>/profile-state/`; they are not merged or
 activated automatically, and rollback returns them to the legacy profile.
 
-Legacy links found inside declared shared or session state are likewise moved
-as opaque objects into
+Adapters that need a deliberately small migration may declare
+`normalState.migrationActivatePaths`. Only that exact shared/session subset is
+merged into the live root; all other declared shared/session objects are moved
+whole into the same inactive `profile-state/` recovery area. This avoids
+walking large histories while retaining them for manual recovery. Adapters
+without the field keep the previous all-declared-state behavior.
+
+Legacy links selected for ordinary shared/session activation are moved as
+opaque objects into
 `.inactive/migrations/<tool>/<profile>/linked-state/`. Migration never reads or
 follows their targets, the active schema-v2 profile contains no such links,
-and automatic rollback restores them if the transaction fails.
+and automatic rollback restores them if the transaction fails. With a
+`migrationActivatePaths` allowlist, non-selected objects—including links—are
+instead preserved whole under `profile-state/` before merge planning.
 
 Only schema-v2 profiles, templates, and archives are portable. Migrate legacy profiles first.
 

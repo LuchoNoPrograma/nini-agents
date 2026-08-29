@@ -43,7 +43,8 @@ assert_no_private_data() {
   assert_envelope version
 }
 
-@test "list and status expose safe profile summaries only" {
+@test "matrix: list and status expose safe profile summaries only (+1 related)" {
+  # Case 1: list and status expose safe profile summaries only
   run multicli list --json
   [ "$status" -eq 0 ]
   assert_envelope list
@@ -60,9 +61,11 @@ assert_no_private_data() {
   assert_envelope status
   printf '%s' "$output" | jq -e '.data.count == 1 and .data.profiles[0].tool == "codex"' >/dev/null
   assert_no_private_data
-}
 
-@test "tools JSON reports public adapter capabilities without binary paths" {
+  teardown
+  setup
+
+  # Case 2: tools JSON reports public adapter capabilities without binary paths
   local expected_platform=linux
   [ "$(uname -s)" = Darwin ] && expected_platform=macos
   run multicli tools --json
@@ -76,7 +79,8 @@ assert_no_private_data() {
   assert_no_private_data
 }
 
-@test "doctor JSON contains verdicts but no storage or binary paths" {
+@test "matrix: doctor JSON contains verdicts but no storage or binary paths (+1 related)" {
+  # Case 1: doctor JSON contains verdicts but no storage or binary paths
   local expected_platform=linux
   [ "$(uname -s)" = Darwin ] && expected_platform=macos
   run multicli doctor --json
@@ -89,9 +93,11 @@ assert_no_private_data() {
     (.data.tools | type) == "array"
   ' >/dev/null
   assert_no_private_data
-}
 
-@test "stats and template list JSON use numeric sizes" {
+  teardown
+  setup
+
+  # Case 2: stats and template list JSON use numeric sizes
   run multicli stats --json
   [ "$status" -eq 0 ]
   assert_envelope stats
@@ -108,7 +114,8 @@ assert_no_private_data() {
   assert_no_private_data
 }
 
-@test "unsupported JSON commands fail with a deterministic safe envelope" {
+@test "matrix: unsupported JSON commands fail with a deterministic safe envelope (+3 related)" {
+  # Case 1: unsupported JSON commands fail with a deterministic safe envelope
   run multicli clone codex/work codex/copy --json
   [ "$status" -eq 2 ]
   assert_envelope clone
@@ -118,9 +125,11 @@ assert_no_private_data() {
   ' >/dev/null
   [ -d "$MULTICLI_HOME/codex/work" ]
   assert_no_private_data
-}
 
-@test "transactional movement result serializer exposes only state codes" {
+  teardown
+  setup
+
+  # Case 2: transactional movement result serializer exposes only state codes
   run bash -c '
     source "$1/lib/cli-json.sh"
     MOVE_RESULT_CODE=destination_runtime_failed_rolled_back
@@ -136,9 +145,11 @@ assert_no_private_data() {
     .error.details == {state:"source_restored",format:"v2"}
   ' >/dev/null
   assert_no_private_data
-}
 
-@test "successful movement result serializer uses the same envelope" {
+  teardown
+  setup
+
+  # Case 3: successful movement result serializer uses the same envelope
   run bash -c '
     source "$1/lib/cli-json.sh"
     MOVE_RESULT_CODE=ok
@@ -149,9 +160,11 @@ assert_no_private_data() {
   [ "$status" -eq 0 ]
   assert_envelope move
   printf '%s' "$output" | jq -e '.ok and .data == {code:"ok",state:"destination_active",format:"legacy"}' >/dev/null
-}
 
-@test "every unsupported JSON argument is rejected deterministically" {
+  teardown
+  setup
+
+  # Case 4: every unsupported JSON argument is rejected deterministically
   local invocation
   for invocation in \
     'version extra --json' \

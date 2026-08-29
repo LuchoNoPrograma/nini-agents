@@ -227,6 +227,13 @@
             "$ref": "#/$defs/relativePath"
           }
         },
+        "migrationActivatePaths": {
+          "type": "array",
+          "description": "Optional exact shared/session subset activated during legacy migration. When present, all other declared shared/session objects are preserved inactive. Runtime behavior is unchanged.",
+          "items": {
+            "$ref": "#/$defs/relativePath"
+          }
+        },
         "unsafePaths": {
           "type": "array",
           "items": {

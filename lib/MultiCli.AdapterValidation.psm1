@@ -88,7 +88,7 @@ function Test-AdapterPathSeparation {
     }
 }
 
-# filePaths, directPaths, and migrationPreservePaths classify entries that
+# filePaths, directPaths, migrationPreservePaths, and migrationActivatePaths classify entries that
 # already belong to sharedPaths or sessionPaths; none may introduce
 # undeclared state.
 function Test-AdapterStatePathMembership {
@@ -157,7 +157,7 @@ function Test-AdapterFields {
     Test-AdapterObjectFields -Errors $Errors -Object $account -Allowed @('mechanism', 'credentialFiles', 'credentialPrecedence', 'logoutScope', 'reason', 'secret') -Label 'account'
     Test-AdapterObjectFields -Errors $Errors -Object (Get-ObjectProperty -Object $account -Name 'secret') -Allowed @('environmentVariable') -Label 'account.secret'
     $normalState = Get-ObjectProperty -Object $Adapter -Name 'normalState'
-    Test-AdapterObjectFields -Errors $Errors -Object $normalState -Allowed @('root', 'runtimeSubdir', 'sharedPaths', 'sessionPaths', 'runtimePaths', 'filePaths', 'directPaths', 'migrationPreservePaths', 'unsafePaths') -Label 'normalState'
+    Test-AdapterObjectFields -Errors $Errors -Object $normalState -Allowed @('root', 'runtimeSubdir', 'sharedPaths', 'sessionPaths', 'runtimePaths', 'filePaths', 'directPaths', 'migrationPreservePaths', 'migrationActivatePaths', 'unsafePaths') -Label 'normalState'
     Test-AdapterObjectFields -Errors $Errors -Object (Get-ObjectProperty -Object $normalState -Name 'root') -Allowed @('windows', 'macos', 'linux') -Label 'normalState.root'
     $sharedCredentialState = Get-ObjectProperty -Object $Adapter -Name 'sharedCredentialState'
     Test-AdapterObjectFields -Errors $Errors -Object $sharedCredentialState -Allowed @('root', 'entries', 'legacyMigration', 'legacyBackupPattern') -Label 'sharedCredentialState'
@@ -399,6 +399,7 @@ function Test-AdapterV2 {
     $filePaths = Get-ObjectProperty -Object $normalState -Name 'filePaths'
     $directPaths = Get-ObjectProperty -Object $normalState -Name 'directPaths'
     $migrationPreservePaths = Get-ObjectProperty -Object $normalState -Name 'migrationPreservePaths'
+    $migrationActivatePaths = Get-ObjectProperty -Object $normalState -Name 'migrationActivatePaths'
     $unsafePaths = Get-ObjectProperty -Object $normalState -Name 'unsafePaths'
     Test-AdapterPathList -Errors $Errors -Values $credentials -Label 'credential path'
     Test-AdapterPathList -Errors $Errors -Values $sharedPaths -Label 'shared path'
@@ -407,6 +408,7 @@ function Test-AdapterV2 {
     Test-AdapterPathList -Errors $Errors -Values $filePaths -Label 'file path'
     Test-AdapterPathList -Errors $Errors -Values $directPaths -Label 'direct path'
     Test-AdapterPathList -Errors $Errors -Values $migrationPreservePaths -Label 'migration preserve path'
+    Test-AdapterPathList -Errors $Errors -Values $migrationActivatePaths -Label 'migration activate path'
     Test-AdapterPathList -Errors $Errors -Values $unsafePaths -Label 'unsafe path'
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $credentials -LeftLabel 'credential path' -RightValues $sharedPaths -RightLabel 'shared path'
     Test-AdapterPathSeparation -Errors $Errors -LeftValues $credentials -LeftLabel 'credential path' -RightValues $sessionPaths -RightLabel 'session path'
@@ -421,6 +423,7 @@ function Test-AdapterV2 {
     Test-AdapterStatePathMembership -Errors $Errors -Paths $filePaths -Label 'file path' -SharedPaths $sharedPaths -SessionPaths $sessionPaths
     Test-AdapterStatePathMembership -Errors $Errors -Paths $directPaths -Label 'direct path' -SharedPaths $sharedPaths -SessionPaths $sessionPaths
     Test-AdapterStatePathMembership -Errors $Errors -Paths $migrationPreservePaths -Label 'migration preserve path' -SharedPaths $sharedPaths -SessionPaths $sessionPaths
+    Test-AdapterStatePathMembership -Errors $Errors -Paths $migrationActivatePaths -Label 'migration activate path' -SharedPaths $sharedPaths -SessionPaths $sessionPaths
     Test-AdapterSharedCredentialState -Errors $Errors -Adapter $Adapter
 
     $concurrency = Get-ObjectProperty -Object $Adapter -Name 'concurrency'

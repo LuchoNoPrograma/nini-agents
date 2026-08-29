@@ -246,6 +246,32 @@ Describe 'Invoke-MultiCliMigration dry run' {
         } finally { Remove-MigrationScratch $scratch }
     }
 
+    It 'keeps bulky sessions whole and bounds a selective migration plan' {
+        $scratch = New-MigrationScratch
+        try {
+            $adapter = Write-MigrationAdapter -Scratch $scratch
+            $adapter.normalState | Add-Member -NotePropertyName migrationActivatePaths -NotePropertyValue @('config.toml', 'agents', 'plugins')
+            $pdir = New-LegacyProfile -Scratch $scratch -Name 'work'
+            $shared = Initialize-SharedRoot -Scratch $scratch
+            $sessionDir = Join-Path $pdir 'sessions\2026\06'
+            foreach ($i in 1..200) {
+                Set-Content -LiteralPath (Join-Path $sessionDir "$i.jsonl") -Value 'rollout' -Encoding ASCII
+            }
+
+            $result = Invoke-Migration -Scratch $scratch -Adapter $adapter -ProfileDir $pdir -DryRun
+
+            $result.Lines | Should Contain '  preserve profile state sessions in inactive recovery'
+            $result.Lines | Should Contain '  preserve profile state history.jsonl in inactive recovery'
+            $result.Lines | Should Contain "  merge shared agents -> $(Join-Path $shared 'agents')"
+            $result.Lines | Should Contain '  skip config.toml (conflict: content differs; use --prefer-profile to override)'
+            ($result.Lines -join "`n") | Should Not Match 'merge session sessions'
+            ($result.Lines -join "`n") | Should Not Match '200.jsonl'
+            ($result.Lines.Count -lt 14) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $sessionDir '200.jsonl') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $scratch.Profiles '.inactive')) | Should Be $false
+        } finally { Remove-MigrationScratch $scratch }
+    }
+
     It 'does not create the shared state root' {
         $scratch = New-MigrationScratch
         try {
@@ -452,7 +478,7 @@ Describe 'Invoke-MultiCliMigration refusal' {
             $result.Lines | Should Contain '  preserve shared credential mcp-oauth-locks.before-test in inactive recovery'
             $result.Lines | Should Contain '  preserve runtime state cache in inactive recovery'
             $result.Lines | Should Contain '  preserve runtime state models_cache.json in inactive recovery'
-            ($result.Lines -join "`n") | Should Match 'merge session shell_snapshots'
+            $result.Lines | Should Contain '  preserve profile state shell_snapshots in inactive recovery'
             $result.Lines | Should Contain '  preserve profile state thread-writer-locks in inactive recovery'
             $credentialAfter = Get-Item -LiteralPath (Join-Path $pdir 'auth.json')
             $credentialAfter.Length | Should Be $credentialLength
@@ -493,7 +519,7 @@ Describe 'Invoke-MultiCliMigration refusal' {
         try {
             $adapter = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'ai-tools\codex\adapter.json') -Raw | ConvertFrom-Json
             $pdir = Join-Path $scratch.Profiles 'codex\modern'
-            New-Item -ItemType Directory -Force -Path (Join-Path $pdir 'mcp-oauth-locks'), (Join-Path $pdir 'mcp-oauth-locks.before-test'), (Join-Path $pdir 'cache'), (Join-Path $pdir 'thread-writer-locks') | Out-Null
+            New-Item -ItemType Directory -Force -Path (Join-Path $pdir 'mcp-oauth-locks'), (Join-Path $pdir 'mcp-oauth-locks.before-test'), (Join-Path $pdir 'cache'), (Join-Path $pdir 'thread-writer-locks'), (Join-Path $pdir 'sessions\2026\08') | Out-Null
             Set-Content -LiteralPath (Join-Path $pdir 'mcp-oauth-locks\owner') -Value 'synthetic-lock' -Encoding ASCII
             Set-Content -LiteralPath (Join-Path $pdir 'auth.json') -Value 'synthetic-token' -Encoding ASCII
             Set-Content -LiteralPath (Join-Path $pdir '.credentials.json') -Value '{"synthetic":"legacy"}' -Encoding ASCII
@@ -504,6 +530,7 @@ Describe 'Invoke-MultiCliMigration refusal' {
             Set-Content -LiteralPath (Join-Path $pdir 'state_5.sqlite-shm') -Value 'shm' -Encoding ASCII
             Set-Content -LiteralPath (Join-Path $pdir 'state_5.sqlite-wal') -Value 'wal' -Encoding ASCII
             Set-Content -LiteralPath (Join-Path $pdir 'thread-writer-locks\writer') -Value 'lock' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $pdir 'sessions\2026\08\rollout.jsonl') -Value 'session' -Encoding ASCII
             $inactive = Join-Path $scratch.Profiles '.inactive\migrations\codex\modern\shared-credentials'
             $runtimeInactive = Join-Path $scratch.Profiles '.inactive\migrations\codex\modern\runtime-state'
             $profileStateInactive = Join-Path $scratch.Profiles '.inactive\migrations\codex\modern\profile-state'
@@ -521,6 +548,7 @@ Describe 'Invoke-MultiCliMigration refusal' {
             (Test-Path -LiteralPath (Join-Path $profileStateInactive 'state_5.sqlite-shm') -PathType Leaf) | Should Be $true
             (Test-Path -LiteralPath (Join-Path $profileStateInactive 'state_5.sqlite-wal') -PathType Leaf) | Should Be $true
             (Test-Path -LiteralPath (Join-Path $profileStateInactive 'thread-writer-locks\writer') -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $profileStateInactive 'sessions\2026\08\rollout.jsonl') -PathType Leaf) | Should Be $true
             (Test-Path -LiteralPath (Join-Path $pdir '.credentials.json')) | Should Be $false
             (Test-Path -LiteralPath (Join-Path $pdir 'mcp-oauth-locks')) | Should Be $false
             ((Get-Content -LiteralPath (Join-Path $inactive '.credentials.json') -Raw | ConvertFrom-Json).synthetic) | Should Be 'legacy'
@@ -530,7 +558,7 @@ Describe 'Invoke-MultiCliMigration refusal' {
             $journal = Get-Content -LiteralPath (Join-Path $pdir '.migration-journal.json') -Raw | ConvertFrom-Json
             @($journal.operations | Where-Object { $_.op -eq 'preserve-shared-credential' -and $_.status -eq 'done' }).Count | Should Be 4
             @($journal.operations | Where-Object { $_.op -eq 'preserve-runtime-state' -and $_.status -eq 'done' }).Count | Should Be 2
-            @($journal.operations | Where-Object { $_.op -eq 'preserve-profile-state' -and $_.status -eq 'done' }).Count | Should Be 4
+            @($journal.operations | Where-Object { $_.op -eq 'preserve-profile-state' -and $_.status -eq 'done' }).Count | Should Be 5
         } finally { Remove-MigrationScratch $scratch }
     }
 

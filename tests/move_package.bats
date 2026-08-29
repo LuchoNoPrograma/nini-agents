@@ -72,7 +72,8 @@ make_package_profile() {
   printf '%s\n' '{"history":"synthetic"}' > "$SOURCE_HOME/.fixture/history.jsonl"
 }
 
-@test "move package export contains credentials chats and global skills then deactivates source" {
+@test "matrix: move package export contains credentials chats and global skills then deactivates source (+1 related)" {
+  # Case 1: move package export contains credentials chats and global skills then deactivates source
   make_package_profile
 
   run move_package_export "$MANIFEST" "$SOURCE_ROOT/account-a" "$PACKAGE" account-a idle_probe
@@ -90,9 +91,11 @@ make_package_profile() {
   local chunk_count
   chunk_count="$(unzip -p "$PACKAGE" nini-agents-move-package.ndjson | grep -c '"type":"chunk"')"
   [ "$chunk_count" -ge 5 ]
-}
 
-@test "move package imports on a different home and rebuilds runtime" {
+  teardown
+  setup
+
+  # Case 2: move package imports on a different home and rebuilds runtime
   make_package_profile
   move_package_export "$MANIFEST" "$SOURCE_ROOT/account-a" "$PACKAGE" account-a idle_probe
   export HOME="$DEST_HOME"
@@ -109,7 +112,8 @@ make_package_profile() {
   [ -f "$PACKAGE" ]
 }
 
-@test "move package import accepts identical state but rejects conflicting state without activating profile" {
+@test "matrix: move package import accepts identical state but rejects conflicting state without activating profile (+1 related)" {
+  # Case 1: move package import accepts identical state but rejects conflicting state without activating profile
   make_package_profile
   move_package_export "$MANIFEST" "$SOURCE_ROOT/account-a" "$PACKAGE" account-a idle_probe
   export HOME="$DEST_HOME"
@@ -123,9 +127,11 @@ make_package_profile() {
   [[ "$output" == *"conflicting file"* ]]
   [ ! -e "$DEST_ROOT/account-a" ]
   [ "$(cat "$DEST_HOME/.fixture/skills/global/SKILL.md")" = '# conflicting skill' ]
-}
 
-@test "move package refuses extra ZIP entries and unsafe payload paths" {
+  teardown
+  setup
+
+  # Case 2: move package refuses extra ZIP entries and unsafe payload paths
   make_package_profile
   move_package_export "$MANIFEST" "$SOURCE_ROOT/account-a" "$PACKAGE" account-a idle_probe
   printf 'extra\n' > "$MULTICLI_SCRATCH/extra.txt"

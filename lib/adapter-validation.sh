@@ -74,7 +74,7 @@ validate_adapter_path_separation() {
   done < <(jq -r "$left_path // [] | .[]?" "$manifest" 2>/dev/null | tr -d '\r')
 }
 
-# filePaths, directPaths, and migrationPreservePaths only classify entries
+# filePaths, directPaths, migrationPreservePaths, and migrationActivatePaths only classify entries
 # already owned by sharedPaths or sessionPaths. An orphan classification would
 # introduce undeclared state.
 validate_adapter_state_path_membership() {
@@ -139,7 +139,7 @@ validate_adapter_fields() {
   fi
   validate_adapter_object_fields "$manifest" '.account' $'mechanism\ncredentialFiles\ncredentialPrecedence\nlogoutScope\nreason\nsecret' 'account'
   validate_adapter_object_fields "$manifest" '.account.secret' 'environmentVariable' 'account.secret'
-  validate_adapter_object_fields "$manifest" '.normalState' $'root\nruntimeSubdir\nsharedPaths\nsessionPaths\nruntimePaths\nfilePaths\ndirectPaths\nmigrationPreservePaths\nunsafePaths' 'normalState'
+  validate_adapter_object_fields "$manifest" '.normalState' $'root\nruntimeSubdir\nsharedPaths\nsessionPaths\nruntimePaths\nfilePaths\ndirectPaths\nmigrationPreservePaths\nmigrationActivatePaths\nunsafePaths' 'normalState'
   validate_adapter_object_fields "$manifest" '.normalState.root' $'windows\nmacos\nlinux' 'normalState.root'
   validate_adapter_object_fields "$manifest" '.sharedCredentialState' $'root\nentries\nlegacyMigration\nlegacyBackupPattern' 'sharedCredentialState'
   validate_adapter_object_fields "$manifest" '.sharedCredentialState.entries[]?' $'path\nkind' 'sharedCredentialState.entries'
@@ -349,6 +349,7 @@ validate_adapter_v2() {
   validate_adapter_path_list "$manifest" '.normalState.filePaths' 'file path'
   validate_adapter_path_list "$manifest" '.normalState.directPaths' 'direct path'
   validate_adapter_path_list "$manifest" '.normalState.migrationPreservePaths' 'migration preserve path'
+  validate_adapter_path_list "$manifest" '.normalState.migrationActivatePaths' 'migration activate path'
   validate_adapter_path_list "$manifest" '.normalState.unsafePaths' 'unsafe path'
   validate_adapter_path_separation "$manifest" '.account.credentialFiles' 'credential path' '.normalState.sharedPaths' 'shared path'
   validate_adapter_path_separation "$manifest" '.account.credentialFiles' 'credential path' '.normalState.sessionPaths' 'session path'
@@ -363,6 +364,7 @@ validate_adapter_v2() {
   validate_adapter_state_path_membership "$manifest" '.normalState.filePaths' 'file path'
   validate_adapter_state_path_membership "$manifest" '.normalState.directPaths' 'direct path'
   validate_adapter_state_path_membership "$manifest" '.normalState.migrationPreservePaths' 'migration preserve path'
+  validate_adapter_state_path_membership "$manifest" '.normalState.migrationActivatePaths' 'migration activate path'
   validate_adapter_shared_credential_state "$manifest"
   validate_adapter_support "$manifest"
 }

@@ -14,7 +14,9 @@
 #   - declared credential files move into <profile>/auth/<rel>, subpaths kept;
 #   - declared shared/session state merges into the adapter's native shared
 #     root without overwriting differing content (skip + report, unless
-#     --prefer-profile); credential targets are never overwritten;
+#     --prefer-profile); when migrationActivatePaths is present, only that
+#     exact subset is activated and the rest is preserved inactive;
+#     credential targets are never overwritten;
 #   - migrationPreservePaths retain legacy transactional/volatile normal state
 #     inactive instead of merging it into an unrelated live state family;
 #   - legacy --shared links are recognized and left in place;
@@ -39,6 +41,8 @@ MIGRATION_SHARED=()
 MIGRATION_SESSION=()
 MIGRATION_RUNTIME=()
 MIGRATION_PRESERVE=()
+MIGRATION_ACTIVATE=()
+MIGRATION_HAS_ACTIVATION_POLICY=false
 MIGRATION_SHARED_CREDENTIALS=()
 MIGRATION_SHARED_CREDENTIAL_BACKUP_PATTERN=""
 MIGRATION_UNSAFE_DECLS=()
@@ -64,7 +68,9 @@ migration_is_legacy_profile() {
 # MIGRATION_* arrays, separators normalized to '/'.
 migration_load_declarations() {
   local manifest="$1" p
-  MIGRATION_CREDS=(); MIGRATION_SHARED=(); MIGRATION_SESSION=(); MIGRATION_RUNTIME=(); MIGRATION_PRESERVE=(); MIGRATION_SHARED_CREDENTIALS=(); MIGRATION_UNSAFE_DECLS=()
+  MIGRATION_CREDS=(); MIGRATION_SHARED=(); MIGRATION_SESSION=(); MIGRATION_RUNTIME=(); MIGRATION_PRESERVE=(); MIGRATION_ACTIVATE=(); MIGRATION_SHARED_CREDENTIALS=(); MIGRATION_UNSAFE_DECLS=()
+  MIGRATION_HAS_ACTIVATION_POLICY=false
+  jq -e '.normalState | has("migrationActivatePaths")' "$manifest" >/dev/null 2>&1 && MIGRATION_HAS_ACTIVATION_POLICY=true
   MIGRATION_SHARED_CREDENTIAL_BACKUP_PATTERN="$(runtime_json_str '.sharedCredentialState.legacyBackupPattern' "$manifest")"
   while IFS= read -r p; do
     [ -n "$p" ] && MIGRATION_CREDS+=("${p//\\//}")
@@ -82,11 +88,33 @@ migration_load_declarations() {
     [ -n "$p" ] && MIGRATION_PRESERVE+=("${p//\\//}")
   done < <(runtime_json_arr '.normalState.migrationPreservePaths' "$manifest")
   while IFS= read -r p; do
+    [ -n "$p" ] && MIGRATION_ACTIVATE+=("${p//\\//}")
+  done < <(runtime_json_arr '.normalState.migrationActivatePaths' "$manifest")
+  while IFS= read -r p; do
     [ -n "$p" ] && MIGRATION_SHARED_CREDENTIALS+=("${p//\\//}")
   done < <(runtime_json_arr '.sharedCredentialState.entries // [] | map(.path)' "$manifest")
   while IFS= read -r p; do
     [ -n "$p" ] && MIGRATION_UNSAFE_DECLS+=("${p//\\//}")
   done < <(runtime_json_arr '.normalState.unsafePaths' "$manifest")
+}
+
+# Selective adapters activate only a small exact subset of ordinary state.
+# Bulky histories and sessions stay recoverable without a file-by-file merge.
+migration_apply_activation_policy() {
+  [ "$MIGRATION_HAS_ACTIVATION_POLICY" = true ] || return 0
+  local i class rel activated candidate
+  for i in "${!MIGRATION_ENTRIES[@]}"; do
+    IFS=$'\t' read -r class rel <<< "${MIGRATION_ENTRIES[$i]}"
+    case "$class" in shared|session) ;; *) continue ;; esac
+    activated=false
+    for candidate in "${MIGRATION_ACTIVATE[@]+"${MIGRATION_ACTIVATE[@]}"}"; do
+      if [ "$rel" = "$candidate" ]; then
+        activated=true
+        break
+      fi
+    done
+    [ "$activated" = true ] || MIGRATION_ENTRIES[$i]="preserve-profile-state	$rel"
+  done
 }
 
 # Print the first declared path related to $1: equal to it, an ancestor
@@ -1381,6 +1409,7 @@ cmd_migrate() {
 
   migration_load_declarations "$manifest"
   migration_classify "$pdir"
+  migration_apply_activation_policy
   if [ "$preserve_unknown" = true ] && [ "${#MIGRATION_UNKNOWN[@]}" -gt 0 ]; then
     for entry in "${MIGRATION_UNKNOWN[@]}"; do
       MIGRATION_ENTRIES+=("preserve-unknown	$entry")

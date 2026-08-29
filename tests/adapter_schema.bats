@@ -68,16 +68,19 @@ valid_v2_adapter() {
 JSON
 }
 
-@test "validator accepts existing schema-v1 adapters for legacy compatibility" {
+@test "matrix: validator accepts existing schema-v1 adapters for legacy compatibility (+1 related)" {
+  # Case 1: validator accepts existing schema-v1 adapters for legacy compatibility
   write_adapter legacy '{"id":"legacy","displayName":"Legacy","kind":"cli","binary":{"windows":["legacy.exe"],"macos":["legacy"],"linux":["legacy"]},"isolation":{"strategy":"env","env":{"LEGACY_HOME":"{profileDir}"}},"share":{"systemHome":"$HOME/.legacy","linkable":["config"],"neverLink":["auth.json"]},"session":{"portable":true,"paths":["sessions"],"credentials":["auth.json"]},"status":"stable"}'
 
   run bash "$VALIDATOR" "$TOOLS_ROOT"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Validated 1 adapter(s)"* ]]
-}
 
-@test "validator accepts a complete schema-v2 account overlay" {
+  teardown
+  setup
+
+  # Case 2: validator accepts a complete schema-v2 account overlay
   write_adapter test-cli "$(valid_v2_adapter)"
 
   run bash "$VALIDATOR" "$TOOLS_ROOT"
@@ -86,7 +89,8 @@ JSON
   [[ "$output" == *"Validated 1 adapter(s)"* ]]
 }
 
-@test "validator accepts shared credential state below the adapter-owned store" {
+@test "matrix: validator accepts shared credential state below the adapter-owned store (+1 related)" {
+  # Case 1: validator accepts shared credential state below the adapter-owned store
   local adapter
   adapter="$(valid_v2_adapter | jq '.sharedCredentialState={
     root:".shared/test-cli/mcp",
@@ -101,9 +105,11 @@ JSON
   run bash "$VALIDATOR" "$TOOLS_ROOT"
 
   [ "$status" -eq 0 ]
-}
 
-@test "validator accepts reconstructible runtime paths and dot-suffix credential backups" {
+  teardown
+  setup
+
+  # Case 2: validator accepts reconstructible runtime paths and dot-suffix credential backups
   local adapter
   adapter="$(valid_v2_adapter | jq '
     .normalState.runtimePaths=["runtime-cache", "models_cache.json"] |
@@ -124,7 +130,8 @@ JSON
   [ "$status" -eq 0 ]
 }
 
-@test "validator rejects runtime paths overlapping state or credential backup namespaces" {
+@test "matrix: validator rejects runtime paths overlapping state or credential backup namespaces (+3 related)" {
+  # Case 1: validator rejects runtime paths overlapping state or credential backup namespaces
   local adapter
   adapter="$(valid_v2_adapter | jq '
     .normalState.runtimePaths=["sessions/cache", ".credentials.json.before-test"] |
@@ -141,9 +148,11 @@ JSON
   [ "$status" -eq 1 ]
   [[ "$output" == *"session path 'sessions' overlaps runtime path 'sessions/cache'"* ]]
   [[ "$output" == *"shared credential path '.credentials.json' overlaps runtime path '.credentials.json.before-test'"* ]]
-}
 
-@test "validator rejects shared credential roots outside the adapter-owned store" {
+  teardown
+  setup
+
+  # Case 2: validator rejects shared credential roots outside the adapter-owned store
   local adapter
   adapter="$(valid_v2_adapter | jq '.sharedCredentialState={root:"test-cli/mcp",entries:[{path:"oauth.json",kind:"jsonObjectFile"}],legacyMigration:"preserveInactive"}')"
   write_adapter test-cli "$adapter"
@@ -152,9 +161,11 @@ JSON
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"sharedCredentialState.root must be below '.shared/test-cli/'"* ]]
-}
 
-@test "validator rejects invalid or overlapping shared credential entries" {
+  teardown
+  setup
+
+  # Case 3: validator rejects invalid or overlapping shared credential entries
   local adapter
   adapter="$(valid_v2_adapter | jq '.sharedCredentialState={
     root:".shared/test-cli/mcp",
@@ -172,9 +183,11 @@ JSON
   [[ "$output" == *"shared credential kind 'secretFile' is not supported"* ]]
   [[ "$output" == *"shared credential path 'oauth' overlaps shared credential path 'oauth/locks'"* ]]
   [[ "$output" == *"sharedCredentialState.legacyMigration must be 'preserveInactive'"* ]]
-}
 
-@test "validator rejects shared credential entries overlapping profile or normal state" {
+  teardown
+  setup
+
+  # Case 4: validator rejects shared credential entries overlapping profile or normal state
   local adapter
   adapter="$(valid_v2_adapter | jq '.sharedCredentialState={
     root:".shared/test-cli/mcp",
@@ -209,24 +222,30 @@ JSON
   [ "$status" -eq 0 ]
 }
 
-@test "JSON schema accepts the runtime subdirectory used by Command Code" {
+@test "matrix: JSON schema accepts the runtime subdirectory used by Command Code (+2 related)" {
+  # Case 1: JSON schema accepts the runtime subdirectory used by Command Code
   run jq -e '
     .properties.normalState.properties.runtimeSubdir["$ref"] == "#/$defs/relativePath"
   ' "$MULTICLI_REPO_ROOT/schema/adapter.schema.json"
 
   [ "$status" -eq 0 ]
-}
 
-@test "JSON schema exposes direct normal-state paths" {
+  teardown
+  setup
+
+  # Case 2: JSON schema exposes direct normal-state paths
   run jq -e '
     .properties.normalState.properties.directPaths.items["$ref"] == "#/$defs/relativePath" and
-    .properties.normalState.properties.migrationPreservePaths.items["$ref"] == "#/$defs/relativePath"
+    .properties.normalState.properties.migrationPreservePaths.items["$ref"] == "#/$defs/relativePath" and
+    .properties.normalState.properties.migrationActivatePaths.items["$ref"] == "#/$defs/relativePath"
   ' "$MULTICLI_REPO_ROOT/schema/adapter.schema.json"
 
   [ "$status" -eq 0 ]
-}
 
-@test "JSON schema exposes shared credential state only to schema-v2 adapters" {
+  teardown
+  setup
+
+  # Case 3: JSON schema exposes shared credential state only to schema-v2 adapters
   run jq -e '
     .properties.sharedCredentialState.properties.root["$ref"] == "#/$defs/relativePath" and
     .properties.sharedCredentialState.properties.entries.minItems == 1 and
@@ -245,8 +264,10 @@ JSON
     (.binary.linux | index("$HOME/.local/bin/codex")) != null and
     (.normalState.sharedPaths | index("rules")) != null and
     (.normalState.sharedPaths | index("AGENTS.md")) != null and
+    (.normalState.sharedPaths | index("AGENTS.override.md")) != null and
     (.normalState.sharedPaths | index("log")) != null and
     (.normalState.filePaths | index("AGENTS.md")) != null and
+    (.normalState.filePaths | index("AGENTS.override.md")) != null and
     .isolation.args == [
       "-c", "cli_auth_credentials_store=\"file\"",
       "-c", "mcp_oauth_credentials_store=\"file\"",
@@ -263,6 +284,9 @@ JSON
     (.normalState.sessionPaths | index("thread-writer-locks")) != null and
     (.normalState.directPaths | index("state_5.sqlite")) != null and
     (.normalState.migrationPreservePaths | sort) == ((.normalState.directPaths + ["thread-writer-locks"]) | sort) and
+    .normalState.migrationActivatePaths == [
+      "config.toml", "hooks.json", "AGENTS.md", "AGENTS.override.md", "skills", "agents", "prompts", "mcp-configs", "plugins", "rules"
+    ] and
     (.normalState.filePaths | index("state_5.sqlite")) != null and
     (.normalState.sharedPaths | index("installation_id")) != null and
     .sharedCredentialState == {
@@ -326,34 +350,41 @@ JSON
   [ "$status" -ne 0 ]
 }
 
-@test "validator rejects malformed JSON with the adapter path" {
+@test "matrix: validator rejects malformed JSON with the adapter path (+3 related)" {
+  # Case 1: validator rejects malformed JSON with the adapter path
   write_adapter broken '{"id":"broken"'
 
   run bash "$VALIDATOR" "$TOOLS_ROOT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"broken/adapter.json: invalid JSON"* ]]
-}
 
-@test "validator rejects a directory and adapter id mismatch" {
+  teardown
+  setup
+
+  # Case 2: validator rejects a directory and adapter id mismatch
   write_adapter wrong-dir "$(valid_v2_adapter)"
 
   run bash "$VALIDATOR" "$TOOLS_ROOT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"directory 'wrong-dir' does not match id 'test-cli'"* ]]
-}
 
-@test "validator rejects unsafe adapter ids" {
+  teardown
+  setup
+
+  # Case 3: validator rejects unsafe adapter ids
   write_adapter 'bad id' '{"schemaVersion":2,"id":"bad id","displayName":"Bad","kind":"cli","binary":{"windows":["bad"],"macos":["bad"],"linux":["bad"]},"isolation":{"strategy":"accountOverlay","mode":"foreground"},"account":{"mechanism":"inseparable","reason":"combined state"},"normalState":{"root":{"windows":"x","macos":"x","linux":"x"},"sharedPaths":[],"sessionPaths":[],"unsafePaths":[]},"concurrency":{"level":"unsupported","singletonScope":"user"},"support":{"windows":{"level":"unsupported","reason":"combined state"},"macos":{"level":"unsupported","reason":"combined state"},"linux":{"level":"unsupported","reason":"combined state"}}}'
 
   run bash "$VALIDATOR" "$TOOLS_ROOT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"id must match"* ]]
-}
 
-@test "validator rejects schema-v2 darwin binary keys" {
+  teardown
+  setup
+
+  # Case 4: validator rejects schema-v2 darwin binary keys
   local adapter
   adapter="$(valid_v2_adapter | jq 'del(.binary.macos) | .binary.darwin=["test-cli"]')"
   write_adapter test-cli "$adapter"
@@ -364,7 +395,8 @@ JSON
   [[ "$output" == *"binary uses unsupported platform key 'darwin'; use 'macos'"* ]]
 }
 
-@test "validator rejects credential paths overlapping normal state" {
+@test "matrix: validator rejects credential paths overlapping normal state (+3 related)" {
+  # Case 1: validator rejects credential paths overlapping normal state
   local adapter
   adapter="$(valid_v2_adapter | jq '.account.credentialFiles=["sessions/auth.json"] | .normalState.sessionPaths=["sessions"]')"
   write_adapter test-cli "$adapter"
@@ -373,9 +405,11 @@ JSON
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"credential path 'sessions/auth.json' overlaps session path 'sessions'"* ]]
-}
 
-@test "validator rejects shared paths overlapping session paths" {
+  teardown
+  setup
+
+  # Case 2: validator rejects shared paths overlapping session paths
   local adapter
   adapter="$(valid_v2_adapter | jq '.normalState.sharedPaths=["state"] | .normalState.sessionPaths=["state/sessions"]')"
   write_adapter test-cli "$adapter"
@@ -384,9 +418,11 @@ JSON
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"shared path 'state' overlaps session path 'state/sessions'"* ]]
-}
 
-@test "validator rejects file paths that are not declared as shared or session state" {
+  teardown
+  setup
+
+  # Case 3: validator rejects file paths that are not declared as shared or session state
   local adapter
   adapter="$(valid_v2_adapter | jq '.normalState.filePaths=["undeclared.json"]')"
   write_adapter test-cli "$adapter"
@@ -395,9 +431,11 @@ JSON
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"file path 'undeclared.json' must also be declared in sharedPaths or sessionPaths"* ]]
-}
 
-@test "validator rejects direct paths that are not declared as shared or session state" {
+  teardown
+  setup
+
+  # Case 4: validator rejects direct paths that are not declared as shared or session state
   local adapter
   adapter="$(valid_v2_adapter | jq '.normalState.directPaths=["undeclared.sqlite"]')"
   write_adapter test-cli "$adapter"
@@ -408,7 +446,8 @@ JSON
   [[ "$output" == *"direct path 'undeclared.sqlite' must also be declared in sharedPaths or sessionPaths"* ]]
 }
 
-@test "validator accepts migration preserve paths only as declared shared or session state" {
+@test "matrix: validator accepts migration preserve paths only as declared shared or session state (+1 related)" {
+  # Case 1: validator accepts migration preserve paths only as declared shared or session state
   local adapter
   adapter="$(valid_v2_adapter | jq '.normalState.migrationPreservePaths=["history.jsonl", "sessions"]')"
   write_adapter test-cli "$adapter"
@@ -416,9 +455,11 @@ JSON
   run bash "$VALIDATOR" "$TOOLS_ROOT"
 
   [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
-}
 
-@test "validator rejects unsafe or undeclared migration preserve paths" {
+  teardown
+  setup
+
+  # Case 2: validator rejects unsafe or undeclared migration preserve paths
   local adapter
   adapter="$(valid_v2_adapter | jq '.normalState.migrationPreservePaths=["../outside", "undeclared.sqlite"]')"
   write_adapter test-cli "$adapter"
@@ -430,7 +471,33 @@ JSON
   [[ "$output" == *"migration preserve path 'undeclared.sqlite' must also be declared in sharedPaths or sessionPaths"* ]]
 }
 
-@test "validator rejects parent traversal in declared state paths" {
+@test "matrix: validator accepts migration activate paths only as declared shared or session state (+1 related)" {
+  # Case 1: validator accepts migration activate paths only as declared shared or session state
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.normalState.migrationActivatePaths=["config.toml", "agents", "sessions"]')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+
+  teardown
+  setup
+
+  # Case 2: validator rejects unsafe or undeclared migration activate paths
+  local adapter
+  adapter="$(valid_v2_adapter | jq '.normalState.migrationActivatePaths=["../outside", "undeclared.sqlite"]')"
+  write_adapter test-cli "$adapter"
+
+  run bash "$VALIDATOR" "$TOOLS_ROOT"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"migration activate path '../outside' must be a safe relative path"* ]]
+  [[ "$output" == *"migration activate path 'undeclared.sqlite' must also be declared in sharedPaths or sessionPaths"* ]]
+}
+
+@test "matrix: validator rejects parent traversal in declared state paths (+1 related)" {
+  # Case 1: validator rejects parent traversal in declared state paths
   local adapter
   adapter="$(valid_v2_adapter | jq '.normalState.sharedPaths=["../outside"]')"
   write_adapter test-cli "$adapter"
@@ -439,9 +506,11 @@ JSON
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"shared path '../outside' must be a safe relative path"* ]]
-}
 
-@test "validator rejects unknown placeholders" {
+  teardown
+  setup
+
+  # Case 2: validator rejects unknown placeholders
   local adapter
   adapter="$(valid_v2_adapter | jq '.isolation.env.TEST_HOME="{mysteryRoot}"')"
   write_adapter test-cli "$adapter"
@@ -452,7 +521,8 @@ JSON
   [[ "$output" == *"unknown placeholder '{mysteryRoot}'"* ]]
 }
 
-@test "validator requires a reason for unsupported support" {
+@test "matrix: validator requires a reason for unsupported support (+1 related)" {
+  # Case 1: validator requires a reason for unsupported support
   local adapter
   adapter="$(valid_v2_adapter | jq '.support.windows={"level":"unsupported"}')"
   write_adapter test-cli "$adapter"
@@ -461,9 +531,11 @@ JSON
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"support.windows.reason is required for level 'unsupported'"* ]]
-}
 
-@test "validator accepts supported support without a reason" {
+  teardown
+  setup
+
+  # Case 2: validator accepts supported support without a reason
   local adapter
   adapter="$(valid_v2_adapter | jq 'del(.support.windows.reason)')"
   write_adapter test-cli "$adapter"
@@ -474,7 +546,8 @@ JSON
   [[ "$output" == *"Validated 1 adapter(s)"* ]]
 }
 
-@test "validator rejects the retired experimental level with a clear message" {
+@test "matrix: validator rejects the retired experimental level with a clear message (+1 related)" {
+  # Case 1: validator rejects the retired experimental level with a clear message
   local adapter
   adapter="$(valid_v2_adapter | jq '.support.windows={"level":"experimental","reason":"legacy"}')"
   write_adapter test-cli "$adapter"
@@ -483,9 +556,11 @@ JSON
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"support.windows.level 'experimental' was retired; use 'supported' or 'unsupported'"* ]]
-}
 
-@test "validator rejects retired evidenceId metadata" {
+  teardown
+  setup
+
+  # Case 2: validator rejects retired evidenceId metadata
   local adapter
   adapter="$(valid_v2_adapter | jq '.evidenceId="EV-1"')"
   write_adapter test-cli "$adapter"
@@ -496,7 +571,8 @@ JSON
   [[ "$output" == *"unsupported top-level field 'evidenceId'"* ]]
 }
 
-@test "validator rejects unknown nested fields" {
+@test "matrix: validator rejects unknown nested fields (+2 related)" {
+  # Case 1: validator rejects unknown nested fields
   local adapter
   adapter="$(valid_v2_adapter | jq '.support.windows.note="not part of the contract"')"
   write_adapter test-cli "$adapter"
@@ -505,9 +581,11 @@ JSON
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"unsupported field 'support.windows.note'"* ]]
-}
 
-@test "validator rejects legacy fields in schema-v2" {
+  teardown
+  setup
+
+  # Case 2: validator rejects legacy fields in schema-v2
   local adapter
   adapter="$(valid_v2_adapter | jq '.status="stable"')"
   write_adapter test-cli "$adapter"
@@ -516,9 +594,11 @@ JSON
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"unsupported top-level field 'status'"* ]]
-}
 
-@test "validator rejects unknown schema-v1 nested fields" {
+  teardown
+  setup
+
+  # Case 3: validator rejects unknown schema-v1 nested fields
   write_adapter legacy '{"id":"legacy","displayName":"Legacy","kind":"cli","binary":{"windows":["legacy"],"macos":["legacy"],"linux":["legacy"]},"isolation":{"strategy":"env","env":{"HOME":"{profileDir}"}},"share":{"systemHome":"$HOME/.legacy","linkable":["config"],"neverLink":["auth.json"],"note":"extra"},"status":"stable"}'
 
   run bash "$VALIDATOR" "$TOOLS_ROOT"

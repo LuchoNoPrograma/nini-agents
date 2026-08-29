@@ -2103,3 +2103,33 @@ Pendientes y siguiente gate:
   no se ejecutaron. Los 18 fallos Pester y el parseo Bash 3.2 de la base siguen
   como `separate_fix`. `origin/main` y releases publicados aun no contienen
   ENG-02; esa publicacion pertenece al cutover posterior.
+
+### 2026-08-29 — migracion legacy Codex reducida a estado esencial
+
+- Alcance aprobado: reescribir la migracion por defecto de Codex para rescatar
+  principalmente `auth.json`, MCP y skills, investigar el resto del estado
+  valioso y eliminar el costo absurdo de fusionar cientos de archivos para un
+  solo perfil. Se excluyeron perfiles/credenciales reales, apply o launch real,
+  instalaciones, Git, release y cambios destructivos.
+- Contrato: `normalState.migrationActivatePaths` es una allowlist declarativa
+  opcional y exacta. Cuando existe, solo ese subconjunto shared/session llega al
+  merge activo; cada otro objeto normal declarado se renombra completo a
+  `profile-state/`. Adapters sin el campo mantienen el comportamiento anterior.
+  Schema y validadores Bash/PowerShell exigen rutas seguras ya declaradas.
+- Codex activa `config.toml` —incluidas definiciones MCP—, `hooks.json`,
+  `AGENTS.md`, `AGENTS.override.md`, `skills/`, `agents/`, `prompts/`,
+  `mcp-configs/`, `plugins/` y `rules/`. `auth.json` conserva la transaccion de
+  credencial. MCP OAuth legacy permanece inactivo y puede exigir reauth.
+- `installation_id`, logs, sesiones, history, archivados, snapshots, indice,
+  locks y familias SQLite se preservan completos e inactivos. Una prueba con
+  200 rollouts produce una unica operacion superior para `sessions/`, no una
+  operacion por archivo; apply verifica que el arbol reaparece completo bajo
+  recuperacion y que el journal registra una sola preservacion.
+- Evidencia local sintetica: schema+migracion Bash pasaron 85/85 antes del
+  refuerzo final; los casos dirigidos posteriores de politica selectiva, apply,
+  adapter y overlay tambien pasaron. Pasaron validacion de 17 adapters,
+  documentacion, sintaxis Bash/JSON, `git diff --check` y 41/41 pruebas de
+  overlay/runtime/performance. PowerShell 5.1/Pester, Windows y macOS no estan
+  disponibles en este host y no se declaran ejecutados. `bashcov` tampoco esta
+  instalado, por lo que el gate de cobertura no se ejecuto ni se instalaron
+  dependencias.

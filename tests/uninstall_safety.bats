@@ -15,15 +15,18 @@ teardown() {
   teardown_scratch
 }
 
-@test "uninstall refuses to remove HOME as the install directory" {
+@test "matrix: uninstall refuses to remove HOME as the install directory (+1 related)" {
+  # Case 1: uninstall refuses to remove HOME as the install directory
   run env MULTICLI_INSTALL_DIR="$HOME" MULTICLI_HOME="$MULTICLI_SCRATCH/profiles" MULTICLI_BIN_LINK="$MULTICLI_BIN_LINK" \
     bash -c "printf 'y\\nn\\n' | '$MULTICLI_REPO_ROOT/install/uninstall.sh'"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"refusing to remove unsafe install path"* ]]
-}
 
-@test "uninstall refuses to remove a directory that is not a Nini Agents install" {
+  teardown
+  setup
+
+  # Case 2: uninstall refuses to remove a directory that is not a Nini Agents install
   local foreign_install="$MULTICLI_SCRATCH/foreign-install"
   mkdir -p "$foreign_install"
   printf 'notes\n' > "$foreign_install/readme.txt"

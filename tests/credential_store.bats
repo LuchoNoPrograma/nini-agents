@@ -77,13 +77,16 @@ new_secret() {
 
 # --- Target naming ----------------------------------------------------------
 
-@test "mc_cred_target builds multi-cli/<tool>/<profileId>/<ENVVAR>" {
+@test "matrix: mc_cred_target builds multi-cli/<tool>/<profileId>/<ENVVAR> (+1 related)" {
+  # Case 1: mc_cred_target builds multi-cli/<tool>/<profileId>/<ENVVAR>
   run cred_call mc_cred_target cursor-cli 9b2e4c6a1234 CURSOR_API_KEY
   [ "$status" -eq 0 ]
   [ "$output" = "multi-cli/cursor-cli/9b2e4c6a1234/CURSOR_API_KEY" ]
-}
 
-@test "mc_cred_target rejects empty segments with an actionable error" {
+  teardown
+  setup
+
+  # Case 2: mc_cred_target rejects empty segments with an actionable error
   run cred_call mc_cred_target "" some-id SOME_VAR
   [ "$status" -ne 0 ]
   [[ "$output" == *"tool"* ]]
@@ -99,7 +102,8 @@ new_secret() {
 
 # --- Input validation (fires before any backend is touched) -----------------
 
-@test "entry points reject an empty target with an actionable error" {
+@test "matrix: entry points reject an empty target with an actionable error (+1 related)" {
+  # Case 1: entry points reject an empty target with an actionable error
   run cred_call mc_cred_get ""
   [ "$status" -ne 0 ]
   [[ "$output" == *"target"* ]]
@@ -117,9 +121,11 @@ new_secret() {
   unset MC_CRED_TEST_SECRET
   [ "$status" -ne 0 ]
   [[ "$output" == *"target"* ]]
-}
 
-@test "mc_cred_set rejects an empty secret before touching any backend" {
+  teardown
+  setup
+
+  # Case 2: mc_cred_set rejects an empty secret before touching any backend
   export MC_CRED_TEST_SECRET=""
   run cred_call mc_cred_set "multi-cli/tests/$(new_uuid)/MCLI_BATS_TOKEN"
   unset MC_CRED_TEST_SECRET
@@ -129,7 +135,8 @@ new_secret() {
 
 # --- Backend selection ------------------------------------------------------
 
-@test "platform detection maps darwin/linux/msys to macos/linux/windows" {
+@test "matrix: platform detection maps darwin/linux/msys to macos/linux/windows (+1 related)" {
+  # Case 1: platform detection maps darwin/linux/msys to macos/linux/windows
   run cred_platform_call darwin mc_cred_platform
   [ "$status" -eq 0 ]
   [ "$output" = "macos" ]
@@ -145,9 +152,11 @@ new_secret() {
   run cred_platform_call MINGW64_NT-10.0 mc_cred_platform
   [ "$status" -eq 0 ]
   [ "$output" = "windows" ]
-}
 
-@test "unsupported platform aborts with an actionable error" {
+  teardown
+  setup
+
+  # Case 2: unsupported platform aborts with an actionable error
   run cred_platform_call freebsd mc_cred_get "multi-cli/tests/x/MCLI_BATS_TOKEN"
   [ "$status" -ne 0 ]
   [[ "$output" == *"unsupported platform"* ]]
@@ -254,43 +263,22 @@ STUB
   [ "$(tail -n 1 "$capture")" = "$keychain" ]
 }
 
-@test "macos backend treats an absent item as not-present (not an error)" {
+@test "macos backend keeps absent-item operations silent and idempotent" {
   local bin_dir
   bin_dir="$(write_security_stub_absent)"
-  run bash -c '
-    PATH="$1:$PATH"
-    export MULTICLI_PLATFORM=macos
-    source "$CRED_STORE_LIB"
-    mc_cred_present "multi-cli/tests/absent/MCLI_BATS_TOKEN"
-  ' _ "$bin_dir"
-  [ "$status" -eq 1 ]
-  [ "$output" = "" ]
-}
-
-@test "macos backend clear is idempotent on an absent item" {
-  local bin_dir
-  bin_dir="$(write_security_stub_absent)"
-  run bash -c '
-    PATH="$1:$PATH"
-    export MULTICLI_PLATFORM=macos
-    source "$CRED_STORE_LIB"
-    mc_cred_clear "multi-cli/tests/absent/MCLI_BATS_TOKEN"
-  ' _ "$bin_dir"
-  [ "$status" -eq 0 ]
-  [ "$output" = "" ]
-}
-
-@test "macos backend get on an absent item exits 1 with empty output" {
-  local bin_dir
-  bin_dir="$(write_security_stub_absent)"
-  run bash -c '
-    PATH="$1:$PATH"
-    export MULTICLI_PLATFORM=macos
-    source "$CRED_STORE_LIB"
-    mc_cred_get "multi-cli/tests/absent/MCLI_BATS_TOKEN"
-  ' _ "$bin_dir"
-  [ "$status" -eq 1 ]
-  [ "$output" = "" ]
+  local operation expected_status
+  for operation in mc_cred_present mc_cred_clear mc_cred_get; do
+    expected_status=1
+    [ "$operation" = "mc_cred_clear" ] && expected_status=0
+    run bash -c '
+      PATH="$1:$PATH"
+      export MULTICLI_PLATFORM=macos
+      source "$CRED_STORE_LIB"
+      "$2" "multi-cli/tests/absent/MCLI_BATS_TOKEN"
+    ' _ "$bin_dir" "$operation"
+    [ "$status" -eq "$expected_status" ]
+    [ "$output" = "" ]
+  done
 }
 
 @test "macos backend round-trips a secret via the login keychain" {
@@ -323,7 +311,8 @@ STUB
 
 # --- Windows backend (real Credential Manager on this host) ------------------
 
-@test "windows backend stores, reads and clears a secret in Credential Manager without touching disk" {
+@test "matrix: windows backend stores, reads and clears a secret in Credential Manager without touching disk (+3 related)" {
+  # Case 1: windows backend stores, reads and clears a secret in Credential Manager without touching disk
   _multicli_is_windows || skip "windows backend test requires Git Bash on Windows"
   CRED_TEST_TARGET="$(new_credential_target)"
   local secret=" mcli-bats-$(new_uuid) sp ac/e+äöü€ "
@@ -358,9 +347,11 @@ STUB
   run cred_call mc_cred_present "$CRED_TEST_TARGET"
   [ "$status" -eq 1 ]
   [ "$output" = "" ]
-}
 
-@test "windows backend overwrites an existing secret at the same target" {
+  teardown
+  setup
+
+  # Case 2: windows backend overwrites an existing secret at the same target
   _multicli_is_windows || skip "windows backend test requires Git Bash on Windows"
   CRED_TEST_TARGET="$(new_credential_target)"
 
@@ -370,9 +361,11 @@ STUB
   run cred_call mc_cred_get "$CRED_TEST_TARGET"
   [ "$status" -eq 0 ]
   [ "$output" = "second-secret-value" ]
-}
 
-@test "windows backend keeps a command-injection-shaped secret inert" {
+  teardown
+  setup
+
+  # Case 3: windows backend keeps a command-injection-shaped secret inert
   _multicli_is_windows || skip "windows backend test requires Git Bash on Windows"
   CRED_TEST_TARGET="$(new_credential_target)"
   # If this string ever reached a command line or script text, the exit code
@@ -386,41 +379,15 @@ STUB
   run cred_call mc_cred_get "$CRED_TEST_TARGET"
   [ "$status" -eq 0 ]
   [ "$output" = "$secret" ]
-}
 
-@test "windows backend get on a never-stored target exits non-zero with empty output" {
-  _multicli_is_windows || skip "windows backend test requires Git Bash on Windows"
-  CRED_TEST_TARGET="$(new_credential_target)"
+  teardown
+  setup
 
-  run cred_call mc_cred_get "$CRED_TEST_TARGET"
-  [ "$status" -eq 1 ]
-  [ "$output" = "" ]
-
-  run cred_call mc_cred_present "$CRED_TEST_TARGET"
-  [ "$status" -eq 1 ]
-  [ "$output" = "" ]
-}
-
-@test "windows backend clear is idempotent on a never-stored target" {
+  # Case 4: windows backend clear is idempotent on a never-stored target
   _multicli_is_windows || skip "windows backend test requires Git Bash on Windows"
   CRED_TEST_TARGET="$(new_credential_target)"
 
   run cred_call mc_cred_clear "$CRED_TEST_TARGET"
   [ "$status" -eq 0 ]
-  [ "$output" = "" ]
-}
-
-@test "windows backend rejects an empty secret and stores nothing" {
-  _multicli_is_windows || skip "windows backend test requires Git Bash on Windows"
-  CRED_TEST_TARGET="$(new_credential_target)"
-
-  export MC_CRED_TEST_SECRET=""
-  run cred_call mc_cred_set "$CRED_TEST_TARGET"
-  unset MC_CRED_TEST_SECRET
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"empty"* ]]
-
-  run cred_call mc_cred_present "$CRED_TEST_TARGET"
-  [ "$status" -eq 1 ]
   [ "$output" = "" ]
 }

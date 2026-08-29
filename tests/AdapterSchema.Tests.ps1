@@ -90,8 +90,10 @@ Describe 'adapter schema validation' {
         (@($codex.binary.linux) -contains '$HOME/.local/bin/codex') | Should Be $true
         (@($codex.normalState.sharedPaths) -contains 'rules') | Should Be $true
         (@($codex.normalState.sharedPaths) -contains 'AGENTS.md') | Should Be $true
+        (@($codex.normalState.sharedPaths) -contains 'AGENTS.override.md') | Should Be $true
         (@($codex.normalState.sharedPaths) -contains 'log') | Should Be $true
         (@($codex.normalState.filePaths) -contains 'AGENTS.md') | Should Be $true
+        (@($codex.normalState.filePaths) -contains 'AGENTS.override.md') | Should Be $true
         (@($codex.isolation.args) -join "`n") | Should Be (@(
             '-c', 'cli_auth_credentials_store="file"',
             '-c', 'mcp_oauth_credentials_store="file"',
@@ -104,6 +106,7 @@ Describe 'adapter schema validation' {
         (@($codex.normalState.directPaths) -contains 'state_5.sqlite') | Should Be $true
         $expectedMigrationPreservePaths = @($codex.normalState.directPaths) + @('thread-writer-locks')
         (@($codex.normalState.migrationPreservePaths | Sort-Object) -join "`n") | Should Be (@($expectedMigrationPreservePaths | Sort-Object) -join "`n")
+        (@($codex.normalState.migrationActivatePaths) -join "`n") | Should Be (@('config.toml', 'hooks.json', 'AGENTS.md', 'AGENTS.override.md', 'skills', 'agents', 'prompts', 'mcp-configs', 'plugins', 'rules') -join "`n")
         (@($codex.normalState.filePaths) -contains 'state_5.sqlite') | Should Be $true
         (@($codex.normalState.sharedPaths) -contains 'installation_id') | Should Be $true
         $codex.sharedCredentialState.root | Should Be '.shared/codex/mcp'
@@ -354,6 +357,32 @@ Describe 'adapter schema validation' {
             $result.ExitCode | Should Be 1
             $result.Output | Should Match "migration preserve path '../outside' must be a safe relative path"
             $result.Output | Should Match "migration preserve path 'undeclared.sqlite' must also be declared in sharedPaths or sessionPaths"
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'accepts migration activate paths only as declared shared or session state' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter.normalState | Add-Member -NotePropertyName migrationActivatePaths -NotePropertyValue @('config.toml', 'agents', 'sessions')
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 0
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects unsafe or undeclared migration activate paths' {
+        $root = New-AdapterSchemaScratch
+        try {
+            $adapter = Get-ValidV2AdapterJson | ConvertFrom-Json
+            $adapter.normalState | Add-Member -NotePropertyName migrationActivatePaths -NotePropertyValue @('../outside', 'undeclared.sqlite')
+            Write-TestAdapter -Root $root -Directory 'test-cli' -Json ($adapter | ConvertTo-Json -Depth 12)
+            $result = Invoke-AdapterValidator -Root $root
+
+            $result.ExitCode | Should Be 1
+            $result.Output | Should Match "migration activate path '../outside' must be a safe relative path"
+            $result.Output | Should Match "migration activate path 'undeclared.sqlite' must also be declared in sharedPaths or sessionPaths"
         } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 

@@ -17,14 +17,17 @@ teardown() {
   teardown_scratch
 }
 
-@test "install rejects an unknown option" {
+@test "matrix: install rejects an unknown option (+1 related)" {
+  # Case 1: install rejects an unknown option
   run "$GIT_BASH_BIN" "$MULTICLI_REPO_ROOT/install/install.sh" --wat
 
   [ "$status" -eq 2 ]
   [[ "$output" == *"unknown option '--wat'"* ]]
-}
 
-@test "install rejects placeholder repository URLs" {
+  teardown
+  setup
+
+  # Case 2: install rejects placeholder repository URLs
   run env NINI_AGENTS_REPO="https://github.com/<owner>/<repo>.git" \
     NINI_AGENTS_BIN_LINK="$NINI_AGENTS_BIN_LINK" MULTICLI_BIN_LINK="$MULTICLI_BIN_LINK" \
     "$GIT_BASH_BIN" "$MULTICLI_REPO_ROOT/install/install.sh"
@@ -33,7 +36,8 @@ teardown() {
   [[ "$output" == *"NINI_AGENTS_REPO/MULTICLI_REPO contains a placeholder"* ]]
 }
 
-@test "install requires git for GitHub installs" {
+@test "matrix: install requires git for GitHub installs (+1 related)" {
+  # Case 1: install requires git for GitHub installs
   local empty_bin="$MULTICLI_SCRATCH/empty-bin"
   mkdir -p "$empty_bin"
 
@@ -43,9 +47,11 @@ teardown() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"git is required to install Nini Agents from GitHub"* ]]
-}
 
-@test "install refuses to reuse a non-git directory" {
+  teardown
+  setup
+
+  # Case 2: install refuses to reuse a non-git directory
   export NINI_AGENTS_INSTALL_DIR="$MULTICLI_SCRATCH/existing-install"
   mkdir -p "$NINI_AGENTS_INSTALL_DIR"
   printf 'not a checkout\n' > "$NINI_AGENTS_INSTALL_DIR/README.txt"

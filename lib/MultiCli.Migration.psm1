@@ -10,7 +10,9 @@
 #   - declared credential files move into <profile>/auth/<rel>, subpaths kept;
 #   - declared shared/session state merges into the adapter's native shared
 #     root without overwriting differing content (skip + report, unless
-#     -PreferProfile); credential targets are never overwritten;
+#     -PreferProfile); when migrationActivatePaths is present, only that exact
+#     subset is activated and the rest is preserved inactive; credential
+#     targets are never overwritten;
 #   - migrationPreservePaths retain legacy transactional/volatile normal state
 #     inactive instead of merging it into an unrelated live state family;
 #   - legacy --shared links are recognized and left in place;
@@ -79,12 +81,16 @@ function Get-MigrationDeclarations {
     param($Adapter)
     $account = Get-MigrationProperty -Object $Adapter -Name 'account'
     $normalState = Get-MigrationProperty -Object $Adapter -Name 'normalState'
+    $activationProperty = $null
+    if ($normalState) { $activationProperty = $normalState.PSObject.Properties['migrationActivatePaths'] }
     return @{
         Credentials = Get-MigrationPathList -Object $account -Name 'credentialFiles'
         Shared      = Get-MigrationPathList -Object $normalState -Name 'sharedPaths'
         Session     = Get-MigrationPathList -Object $normalState -Name 'sessionPaths'
         Runtime     = Get-MigrationPathList -Object $normalState -Name 'runtimePaths'
         Preserve    = Get-MigrationPathList -Object $normalState -Name 'migrationPreservePaths'
+        Activate    = Get-MigrationPathList -Object $normalState -Name 'migrationActivatePaths'
+        HasActivationPolicy = ($null -ne $activationProperty)
         SharedCredentials = @(
             @(Get-MigrationProperty -Object (Get-MigrationProperty -Object $Adapter -Name 'sharedCredentialState') -Name 'entries') |
                 ForEach-Object { Get-MigrationProperty -Object $_ -Name 'path' } |
@@ -1330,6 +1336,13 @@ function Invoke-MultiCliMigration {
 
     $declarations = Get-MigrationDeclarations -Adapter $Adapter
     $classification = Get-MigrationClassification -ProfileDir $ProfileDir -Declarations $declarations
+    if ($declarations.HasActivationPolicy) {
+        foreach ($entry in @($classification.Entries)) {
+            if (@('shared', 'session') -contains $entry.Class -and $declarations.Activate -notcontains $entry.Rel) {
+                $entry.Class = 'preserve-profile-state'
+            }
+        }
+    }
     if ($PreserveUnknown -and $classification.Unknown.Count -gt 0) {
         foreach ($entry in @($classification.Unknown)) {
             $classification.Entries += [pscustomobject]@{ Class = 'preserve-unknown'; Rel = $entry }

@@ -17,7 +17,8 @@ teardown() {
 
 # 1. base -> profile copies sessions + history.jsonl, never auth.json,
 #    prints the copied count and the resume hint.
-@test "continue base->profile copies sessions and history, never auth.json, prints count and resumeHint" {
+@test "matrix: continue base->profile copies sessions and history, never auth.json, prints count and resumeHint (+1 related)" {
+  # Case 1: continue base->profile copies sessions and history, never auth.json, prints count and resumeHint
   seed_codex_base
   multicli new codex/backup --no-seed >/dev/null
 
@@ -34,24 +35,13 @@ teardown() {
   [[ "$output" == *'"type":"session_meta"'* ]]
   # the top-level credential is never copied
   [ ! -f "$dest/auth.json" ]
-}
-
-# 2. A nested decoy credential inside sessions/ is not copied.
-@test "nested decoy credential inside sessions/ is excluded by basename blocklist" {
-  seed_codex_base
-  multicli new codex/backup --no-seed >/dev/null
-
-  run multicli continue codex base backup
-  [ "$status" -eq 0 ]
-
-  local dest="$MULTICLI_HOME/codex/backup"
   [ ! -f "$dest/sessions/auth.json" ]
-  # but the real rollout under sessions/ did come across
-  [ -f "$dest/sessions/2026/06/11/rollout-2026-06-11T10-00-00-abc-123.jsonl" ]
-}
 
 # 3. Repeat run skips everything (mtime merge): prints skipped count, copies 0.
-@test "repeat continue skips all via mtime merge and copies nothing new" {
+  teardown
+  setup
+
+  # Case 2: repeat continue skips all via mtime merge and copies nothing new
   seed_codex_base
   multicli new codex/backup --no-seed >/dev/null
   multicli continue codex base backup >/dev/null
@@ -62,7 +52,8 @@ teardown() {
 }
 
 # 4. A newer src file is re-copied; same-or-newer dest is skipped.
-@test "newer source file is re-copied while up-to-date files are skipped" {
+@test "matrix: newer source file is re-copied while up-to-date files are skipped (+2 related)" {
+  # Case 1: newer source file is re-copied while up-to-date files are skipped
   seed_codex_base
   multicli new codex/backup --no-seed >/dev/null
   multicli continue codex base backup >/dev/null
@@ -78,10 +69,12 @@ teardown() {
 
   run cat "$MULTICLI_HOME/codex/backup/history.jsonl"
   [[ "$output" == *"newer turn"* ]]
-}
 
 # 5. --no-merge overwrites unconditionally (no skips).
-@test "--no-merge re-copies every file regardless of mtime" {
+  teardown
+  setup
+
+  # Case 2: --no-merge re-copies every file regardless of mtime
   seed_codex_base
   multicli new codex/backup --no-seed >/dev/null
   multicli continue codex base backup >/dev/null
@@ -89,10 +82,12 @@ teardown() {
   run multicli continue codex base backup --no-merge
   [ "$status" -eq 0 ]
   [[ "$output" == *"Copied 2 file(s), skipped 0 (same-or-newer)."* ]]
-}
 
 # 6. --dry-run prints would-copy lines and writes nothing.
-@test "--dry-run announces would-copy lines and writes no files" {
+  teardown
+  setup
+
+  # Case 3: --dry-run announces would-copy lines and writes no files
   seed_codex_base
   multicli new codex/backup --no-seed >/dev/null
 
@@ -107,46 +102,56 @@ teardown() {
 }
 
 # 7. Non-portable tool (cursor) -> exit 1 with the adapter's reason.
-@test "continue on a non-portable tool exits 1 and prints the reason" {
+@test "matrix: continue on a non-portable tool exits 1 and prints the reason (+3 related)" {
+  # Case 1: continue on a non-portable tool exits 1 and prints the reason
   multicli new cursor/personal --no-seed >/dev/null 2>&1 || true
   run multicli continue cursor base personal
   [ "$status" -eq 1 ]
   [[ "$output" == *"sessions are not portable"* ]]
   [[ "$output" == *"sqlite state databases"* ]]
-}
 
 # 8. Unknown tool -> exit 1.
-@test "continue with an unknown tool exits 1" {
+  teardown
+  setup
+
+  # Case 2: continue with an unknown tool exits 1
   run multicli continue nosuchtool base backup
   [ "$status" -eq 1 ]
   [[ "$output" == *"Unknown tool 'nosuchtool'"* ]]
-}
 
 # 8b. An unrecognised --flag is rejected before any work happens.
-@test "continue with an unknown option exits 1 with usage" {
+  teardown
+  setup
+
+  # Case 3: continue with an unknown option exits 1 with usage
   run multicli continue codex base backup --bogus
   [ "$status" -eq 1 ]
   [[ "$output" == *"Unknown option '--bogus'"* ]]
-}
 
 # 8c. Missing positional arguments are rejected with the usage line.
-@test "continue with too few arguments exits 1 with usage" {
+  teardown
+  setup
+
+  # Case 4: continue with too few arguments exits 1 with usage
   run multicli continue codex base
   [ "$status" -eq 1 ]
   [[ "$output" == *"Usage: nini-agents continue"* ]]
 }
 
 # 9. Missing destination profile -> exit 1, suggests `nini-agents new`.
-@test "continue to a missing destination exits 1 and suggests nini-agents new" {
+@test "matrix: continue to a missing destination exits 1 and suggests nini-agents new (+1 related)" {
+  # Case 1: continue to a missing destination exits 1 and suggests nini-agents new
   seed_codex_base
   run multicli continue codex base ghost
   [ "$status" -eq 1 ]
   [[ "$output" == *"Destination endpoint 'ghost' not found"* ]]
   [[ "$output" == *"nini-agents new codex/ghost"* ]]
-}
 
 # 10. src == dest -> exit 1.
-@test "continue with identical source and destination exits 1" {
+  teardown
+  setup
+
+  # Case 2: continue with identical source and destination exits 1
   run multicli continue codex base base
   [ "$status" -eq 1 ]
   [[ "$output" == *"Source and destination must differ"* ]]

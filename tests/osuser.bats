@@ -79,16 +79,12 @@ is_elevated() {
   run osuser_call mc_osuser_username agy-cli "$FIXTURE_PROFILE_ID"
   [ "$status" -eq 0 ]
   [ "$output" = "$FIXTURE_USERNAME" ]
-}
-
-@test "username fits the 20-char Windows SAM limit and uses lowercase hex" {
-  run osuser_call mc_osuser_username kiro "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-  [ "$status" -eq 0 ]
   [ "${#output}" -eq 17 ]
   [[ "$output" =~ ^mcli_[0-9a-f]{12}$ ]]
 }
 
-@test "usernames are collision-safe across every osUser adapter and across profiles" {
+@test "matrix: usernames are collision-safe across every osUser adapter and across profiles (+1 related)" {
+  # Case 1: usernames are collision-safe across every osUser adapter and across profiles
   local names=() tool unique
   for tool in antigravity agy-cli kiro zed windsurf copilot-vscode cursor; do
     names+=("$(osuser_call mc_osuser_username "$tool" "$FIXTURE_PROFILE_ID")")
@@ -96,9 +92,11 @@ is_elevated() {
   unique="$(printf '%s\n' "${names[@]}" | sort -u | wc -l | tr -d ' ')"
   [ "$unique" = "7" ]
   [ "$(osuser_call mc_osuser_username agy-cli 99999999-8888-7777-6666-555555555555)" != "$FIXTURE_USERNAME" ]
-}
 
-@test "tool id case does not change the derived username" {
+  teardown
+  setup
+
+  # Case 2: tool id case does not change the derived username
   [ "$(osuser_call mc_osuser_username AGY-CLI "$FIXTURE_PROFILE_ID")" = "$FIXTURE_USERNAME" ]
 }
 
@@ -109,12 +107,15 @@ is_elevated() {
   [ "$ps_name" = "$(osuser_call mc_osuser_username kiro "$FIXTURE_PROFILE_ID")" ]
 }
 
-@test "task name and credential target formats" {
+@test "matrix: task name and credential target formats (+1 related)" {
+  # Case 1: task name and credential target formats
   [ "$(osuser_call mc_osuser_task_name "$FIXTURE_USERNAME")" = "multi-cli-fcfb4582f558" ]
   [ "$(osuser_call mc_osuser_cred_target "$FIXTURE_USERNAME")" = "multi-cli/osuser/$FIXTURE_USERNAME" ]
-}
 
-@test "derivation rejects a missing tool id or profileId" {
+  teardown
+  setup
+
+  # Case 2: derivation rejects a missing tool id or profileId
   run osuser_call mc_osuser_username "" "$FIXTURE_PROFILE_ID"
   [ "$status" -ne 0 ]
   [[ "$output" == *"requires a tool id"* ]]
@@ -125,30 +126,36 @@ is_elevated() {
 
 # --- Ownership records --------------------------------------------------------
 
-@test "ownership fields round-trip; a missing record yields exit 1 and no output" {
+@test "matrix: ownership fields round-trip; a missing record yields exit 1 and no output (+2 related)" {
+  # Case 1: ownership fields round-trip; a missing record yields exit 1 and no output
   write_ownership "$FIXTURE_USERNAME"
   [ "$(osuser_call mc_osuser_ownership_field "$FIXTURE_PROFILE_DIR" .username)" = "$FIXTURE_USERNAME" ]
   [ "$(osuser_call mc_osuser_ownership_field "$FIXTURE_PROFILE_DIR" .tool)" = "agy-cli" ]
   run osuser_call mc_osuser_ownership_field "$MULTICLI_HOME" .username
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-}
 
-@test "is_owned reflects the record file" {
+  teardown
+  setup
+
+  # Case 2: is_owned reflects the record file
   run osuser_call mc_osuser_is_owned "$FIXTURE_PROFILE_DIR"
   [ "$status" -eq 1 ]
   write_ownership "$FIXTURE_USERNAME"
   run osuser_call mc_osuser_is_owned "$FIXTURE_PROFILE_DIR"
   [ "$status" -eq 0 ]
-}
 
-@test "a consistent ownership record passes verification" {
+  teardown
+  setup
+
+  # Case 3: a consistent ownership record passes verification
   write_ownership "$FIXTURE_USERNAME"
   run osuser_call mc_osuser_assert_ownership "$FIXTURE_PROFILE_DIR"
   [ "$status" -eq 0 ]
 }
 
-@test "an internally valid ownership record copied from another profile is refused" {
+@test "matrix: an internally valid ownership record copied from another profile is refused (+2 related)" {
+  # Case 1: an internally valid ownership record copied from another profile is refused
   local other_profile="$MULTICLI_HOME/agy-cli/other"
   local other_id="99999999-8888-7777-6666-555555555555"
   local other_username
@@ -163,9 +170,11 @@ is_elevated() {
   [[ "$output" == *"belongs to another profile"* ]]
   [ -f "$FIXTURE_PROFILE_DIR/.osuser.json" ]
   [ ! -e "$other_profile" ]
-}
 
-@test "a valid username with tampered task or credential coordinates is refused" {
+  teardown
+  setup
+
+  # Case 2: a valid username with tampered task or credential coordinates is refused
   write_ownership "$FIXTURE_USERNAME"
   jq '.taskName="unrelated-task"' "$FIXTURE_PROFILE_DIR/.osuser.json" > "$FIXTURE_PROFILE_DIR/.osuser.tmp"
   mv "$FIXTURE_PROFILE_DIR/.osuser.tmp" "$FIXTURE_PROFILE_DIR/.osuser.json"
@@ -179,9 +188,11 @@ is_elevated() {
   run osuser_call mc_osuser_assert_ownership "$FIXTURE_PROFILE_DIR"
   [ "$status" -ne 0 ]
   [[ "$output" == *"does not match the derived identity"* ]]
-}
 
-@test "a fabricated foreign ownership record is refused and left in place" {
+  teardown
+  setup
+
+  # Case 3: a fabricated foreign ownership record is refused and left in place
   write_ownership "mcli_deadbeef0000"
   run osuser_call mc_osuser_assert_ownership "$FIXTURE_PROFILE_DIR"
   [ "$status" -ne 0 ]
@@ -193,7 +204,8 @@ is_elevated() {
 
 # --- macOS / Linux provisioning contract -------------------------------------
 
-@test "macOS provisioning fails before mutation when a required command is unavailable" {
+@test "matrix: macOS provisioning fails before mutation when a required command is unavailable (+1 related)" {
+  # Case 1: macOS provisioning fails before mutation when a required command is unavailable
   run env MULTICLI_PLATFORM=macos bash -c '
     function command() {
       if [ "$1" = -v ] && [ "$2" = sudo ]; then return 1; fi
@@ -207,9 +219,11 @@ is_elevated() {
   [[ "$output" == *"requires 'sudo'"* ]]
   [ ! -f "$FIXTURE_PROFILE_DIR/.osuser.json" ]
   ! id "$FIXTURE_USERNAME" >/dev/null 2>&1
-}
 
-@test "Linux provisioning fails before mutation when a required command is unavailable" {
+  teardown
+  setup
+
+  # Case 2: Linux provisioning fails before mutation when a required command is unavailable
   run env MULTICLI_PLATFORM=linux bash -c '
     function command() {
       if [ "$1" = -v ] && [ "$2" = sudo ]; then return 1; fi
@@ -232,16 +246,19 @@ is_elevated() {
   [[ "$output" == *"has no OS-user ownership record"* ]]
 }
 
-@test "remove with no record is a no-op on every platform (profile delete safety)" {
+@test "matrix: remove with no record is a no-op on every platform (profile delete safety) (+1 related)" {
+  # Case 1: remove with no record is a no-op on every platform (profile delete safety)
   run osuser_call mc_osuser_remove "$FIXTURE_PROFILE_DIR"
   [ "$status" -eq 0 ]
   run osuser_platform_call macos mc_osuser_remove "$FIXTURE_PROFILE_DIR"
   [ "$status" -eq 0 ]
   run osuser_platform_call linux mc_osuser_remove "$FIXTURE_PROFILE_DIR"
   [ "$status" -eq 0 ]
-}
 
-@test "remove refuses a fabricated foreign record before any deletion" {
+  teardown
+  setup
+
+  # Case 2: remove refuses a fabricated foreign record before any deletion
   write_ownership "mcli_deadbeef0000"
   run osuser_call mc_osuser_remove "$FIXTURE_PROFILE_DIR"
   [ "$status" -ne 0 ]
@@ -251,7 +268,8 @@ is_elevated() {
 
 # --- Windows elevation gate (non-admin host) -----------------------------------
 
-@test "ensure on Windows without elevation fails precisely BEFORE creating anything" {
+@test "matrix: ensure on Windows without elevation fails precisely BEFORE creating anything (+1 related)" {
+  # Case 1: ensure on Windows without elevation fails precisely BEFORE creating anything
   _multicli_is_windows || skip "requires Windows"
   if is_elevated; then skip "host is elevated; the elevation gate cannot fire"; fi
   run osuser_call mc_osuser_ensure agy-cli "$FIXTURE_PROFILE_DIR" "$FIXTURE_ADAPTER/adapter.json"
@@ -262,9 +280,11 @@ is_elevated() {
   run net user "$FIXTURE_USERNAME"
   [ "$status" -ne 0 ]
   [ ! -f "$FIXTURE_PROFILE_DIR/.osuser.json" ]
-}
 
-@test "launch on Windows without elevation fails precisely BEFORE creating anything" {
+  teardown
+  setup
+
+  # Case 2: launch on Windows without elevation fails precisely BEFORE creating anything
   _multicli_is_windows || skip "requires Windows"
   if is_elevated; then skip "host is elevated; the elevation gate cannot fire"; fi
   run env MC_OSUSER_ADAPTER_PATH="$FIXTURE_ADAPTER/adapter.json" \
@@ -276,7 +296,8 @@ is_elevated() {
   [ ! -f "$FIXTURE_PROFILE_DIR/.osuser.json" ]
 }
 
-@test "remove with a consistent record on Windows without elevation stops at the elevation gate" {
+@test "matrix: remove with a consistent record on Windows without elevation stops at the elevation gate (+2 related)" {
+  # Case 1: remove with a consistent record on Windows without elevation stops at the elevation gate
   _multicli_is_windows || skip "requires Windows"
   if is_elevated; then skip "host is elevated; the elevation gate cannot fire"; fi
   write_ownership "$FIXTURE_USERNAME"
@@ -285,9 +306,11 @@ is_elevated() {
   [[ "$output" == *"requires an elevated terminal (Run as Administrator)."* ]]
   # The record survives: nothing was deleted.
   [ -f "$FIXTURE_PROFILE_DIR/.osuser.json" ]
-}
 
-@test "profile delete preserves an OS-user profile when cleanup fails" {
+  teardown
+  setup
+
+  # Case 2: profile delete preserves an OS-user profile when cleanup fails
   _multicli_is_windows || skip "requires Windows"
   if is_elevated; then skip "host is elevated; the elevation gate cannot fire"; fi
   write_ownership "$FIXTURE_USERNAME"
@@ -298,9 +321,11 @@ is_elevated() {
   [[ "$output" == *"requires an elevated terminal (Run as Administrator)."* ]]
   [ -d "$FIXTURE_PROFILE_DIR" ]
   [ -f "$FIXTURE_PROFILE_DIR/.osuser.json" ]
-}
 
-@test "ensure rejects a missing adapter manifest" {
+  teardown
+  setup
+
+  # Case 3: ensure rejects a missing adapter manifest
   _multicli_is_windows || skip "requires Windows"
   run osuser_call mc_osuser_ensure nope "$FIXTURE_PROFILE_DIR" "$MULTICLI_SCRATCH/nope.json"
   [ "$status" -ne 0 ]

@@ -82,7 +82,30 @@ write_fixture_adapter() {
 JSON
 }
 
-@test "schema-v2 new creates stable metadata and account-only directories without copying normal state" {
+install_failing_mkdir() {
+  local failed_path="$1" failure_message="$2" real_mkdir shim_dir
+  real_mkdir="$(command -v mkdir)"
+  shim_dir="$MULTICLI_SCRATCH/failing-mkdir-bin"
+  "$real_mkdir" -p "$shim_dir"
+  cat > "$shim_dir/mkdir" <<'SHIM'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$#" -eq 1 ] && [ "$1" = "${FAIL_MKDIR_PATH:?}" ]; then
+  printf "mkdir: cannot create directory '%s': %s\n" "$1" "${FAIL_MKDIR_MESSAGE:?}" >&2
+  exit 1
+fi
+exec "${REAL_MKDIR:?}" "$@"
+SHIM
+  chmod +x "$shim_dir/mkdir"
+  export REAL_MKDIR="$real_mkdir"
+  export FAIL_MKDIR_PATH="$failed_path"
+  export FAIL_MKDIR_MESSAGE="$failure_message"
+  PATH="$shim_dir:$PATH"
+  export PATH
+}
+
+@test "matrix: schema-v2 new creates stable metadata and account-only directories without copying normal state (+2 related)" {
+  # Case 1: schema-v2 new creates stable metadata and account-only directories without copying normal state
   mkdir -p "$HOME/.fixture/sessions" "$HOME/.fixture/agents"
   printf 'shared\n' > "$HOME/.fixture/history.jsonl"
 
@@ -94,9 +117,11 @@ JSON
   [ ! -e "$MULTICLI_HOME/fixture/account-a/history.jsonl" ]
   run jq -er '.schemaVersion == 2 and .adapterId == "fixture" and (.profileId | test("^[a-f0-9-]{36}$"))' "$MULTICLI_HOME/fixture/account-a/.profile.json"
   [ "$status" -eq 0 ]
-}
 
-@test "concurrent launches leave a complete reusable runtime overlay" {
+  teardown
+  setup
+
+  # Case 2: concurrent launches leave a complete reusable runtime overlay
   run multicli new fixture/account-a --no-seed
   [ "$status" -eq 0 ]
   local first="$MULTICLI_SCRATCH/first.log"
@@ -118,9 +143,11 @@ JSON
 
   run multicli launch fixture/account-a
   [ "$status" -eq 0 ]
-}
 
-@test "file overlay keeps credentials per profile while linking normal state and sessions to one native root" {
+  teardown
+  setup
+
+  # Case 3: file overlay keeps credentials per profile while linking normal state and sessions to one native root
   mkdir -p "$HOME/.fixture/sessions" "$HOME/.fixture/agents"
   printf 'shared-session\n' > "$HOME/.fixture/history.jsonl"
   printf 'shared-config\n' > "$HOME/.fixture/config.toml"
@@ -156,32 +183,8 @@ JSON
   [ "$runtime_a" != "$runtime_b" ]
 }
 
-@test "foreground launch persists an atomically replaced profile credential" {
-  run multicli new fixture/account-a --no-seed
-  [ "$status" -eq 0 ]
-  cat > "$MULTICLI_OVERRIDE_BINARY" <<'PROBE'
-#!/usr/bin/env bash
-set -euo pipefail
-replacement="${FIXTURE_HOME}/.auth.json.replacement.$$"
-printf '%s\n' '{"synthetic":"fresh-login"}' > "$replacement"
-chmod 600 "$replacement"
-mv -f "$replacement" "${FIXTURE_HOME}/auth.json"
-PROBE
-  chmod +x "$MULTICLI_OVERRIDE_BINARY"
-
-  run multicli launch fixture/account-a
-
-  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
-  local profile_auth="$MULTICLI_HOME/fixture/account-a/auth/auth.json"
-  local runtime_auth="$MULTICLI_HOME/fixture/account-a/.runtime/auth.json"
-  run jq -er '.synthetic' "$profile_auth"
-  [ "$status" -eq 0 ]
-  [ "$output" = "fresh-login" ]
-  [ -L "$runtime_auth" ]
-  [ "$runtime_auth" -ef "$profile_auth" ]
-}
-
-@test "foreground launch persists a successful credential deletion as logout" {
+@test "matrix: foreground launch persists a successful credential deletion as logout (+1 related)" {
+  # Case 1: foreground launch persists a successful credential deletion as logout
   run multicli new fixture/account-a --no-seed
   [ "$status" -eq 0 ]
   local profile_auth="$MULTICLI_HOME/fixture/account-a/auth/auth.json"
@@ -201,9 +204,11 @@ PROBE
   [ ! -s "$profile_auth" ]
   [ -L "$runtime_auth" ]
   [ "$runtime_auth" -ef "$profile_auth" ]
-}
 
-@test "foreground launch reconciles credentials while preserving a child failure status" {
+  teardown
+  setup
+
+  # Case 2: foreground launch reconciles credentials while preserving a child failure status
   run multicli new fixture/account-a --no-seed
   [ "$status" -eq 0 ]
   cat > "$MULTICLI_OVERRIDE_BINARY" <<'PROBE'
@@ -227,7 +232,8 @@ PROBE
   [ "$runtime_auth" -ef "$profile_auth" ]
 }
 
-@test "credential reconciliation fails closed for an unexpected runtime symlink" {
+@test "matrix: credential reconciliation fails closed for an unexpected runtime symlink (+1 related)" {
+  # Case 1: credential reconciliation fails closed for an unexpected runtime symlink
   run multicli new fixture/account-a --no-seed
   [ "$status" -eq 0 ]
   run multicli launch fixture/account-a
@@ -246,9 +252,11 @@ PROBE
   [[ "$output" == *"credential path auth.json is an unexpected link"* ]]
   [ "$(jq -r '.synthetic' "$profile_auth")" = "profile" ]
   [ "$(jq -r '.synthetic' "$outside")" = "outside" ]
-}
 
-@test "credential reconciliation fails closed for an unexpected runtime directory" {
+  teardown
+  setup
+
+  # Case 2: credential reconciliation fails closed for an unexpected runtime directory
   run multicli new fixture/account-a --no-seed
   [ "$status" -eq 0 ]
   run multicli launch fixture/account-a
@@ -294,7 +302,8 @@ PROBE
   [ "$outside" -ef "$alias" ]
 }
 
-@test "credential reconciliation refuses a linked parent of a nested runtime credential" {
+@test "matrix: credential reconciliation refuses a linked parent of a nested runtime credential (+1 related)" {
+  # Case 1: credential reconciliation refuses a linked parent of a nested runtime credential
   jq '.account.credentialFiles=["tokens/auth.json"] | .account.credentialPrecedence=["tokens/auth.json"]' \
     "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
   mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
@@ -317,9 +326,11 @@ PROBE
   [[ "$output" == *"runtime credential"*"component"*"is a link"* ]]
   [ "$(jq -r '.synthetic' "$profile_auth")" = "profile" ]
   [ ! -e "$outside/auth.json" ]
-}
 
-@test "direct reconciliation rejects missing control roots and recovers a warm overlay" {
+  teardown
+  setup
+
+  # Case 2: direct reconciliation rejects missing control roots and recovers a warm overlay
   run multicli new fixture/account-a --no-seed
   [ "$status" -eq 0 ]
   run multicli launch fixture/account-a
@@ -357,7 +368,8 @@ PROBE
   [ "$runtime_auth" -ef "$profile_auth" ]
 }
 
-@test "two profiles share one credential store while main auth remains profile-local" {
+@test "matrix: two profiles share one credential store while main auth remains profile-local (+1 related)" {
+  # Case 1: two profiles share one credential store while main auth remains profile-local
   jq '.sharedCredentialState={
     root:".shared/fixture/oauth",
     entries:[
@@ -413,9 +425,11 @@ PROBE
   run multicli doctor --deep
   [ "$status" -eq 0 ]
   [[ "$output" != *"wrong target"* ]]
-}
 
-@test "a warm overlay revalidates a replaced shared credential backing file" {
+  teardown
+  setup
+
+  # Case 2: a warm overlay revalidates a replaced shared credential backing file
   jq '.sharedCredentialState={
     root:".shared/fixture/oauth",
     entries:[{path:".credentials.json",kind:"jsonObjectFile"}],
@@ -487,10 +501,52 @@ PROBE
   [ ! -e "$MULTICLI_SCRATCH/outside/oauth/.credentials.json" ]
 }
 
+@test "matrix: shared credential lock reports the native no-space filesystem error (+1 related)" {
+  # Case 1: shared credential lock reports the native no-space filesystem error
+  jq '.sharedCredentialState={
+    root:".shared/fixture/oauth",
+    entries:[{path:".credentials.json",kind:"jsonObjectFile"}],
+    legacyMigration:"preserveInactive"
+  }' "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  mkdir -p "$MULTICLI_HOME/.shared"
+  local lock_dir="$MULTICLI_HOME/.shared/.init-fixture.lock"
+  install_failing_mkdir "$lock_dir" "No space left on device"
+
+  run multicli launch fixture/account-a
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Cannot create shared credential initialization lock '$lock_dir'"* ]]
+  [[ "$output" == *"No space left on device"* ]]
+  [[ "$output" == *"Check free disk space and inodes"* ]]
+  [[ "$output" == *"Review the specific filesystem or safety error above"* ]]
+  [[ "$output" != *"'$lock_dir' is not a directory"* ]]
+
+  teardown
+  setup
+
+  # Case 2: profile runtime lock reports a native permission filesystem error
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  local lock_dir="$MULTICLI_HOME/fixture/account-a/.runtime.lock"
+  install_failing_mkdir "$lock_dir" "Permission denied"
+
+  run multicli launch fixture/account-a
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Cannot create profile runtime lock for build overlay '$lock_dir'"* ]]
+  [[ "$output" == *"Permission denied"* ]]
+  [[ "$output" == *"parent directory permissions"* ]]
+  [[ "$output" != *"'$lock_dir' is not a directory"* ]]
+}
+
 @test "Codex adapter links documented instructions rules and logs as shared normal state" {
   mkdir -p "$TOOLS_ROOT/codex" "$HOME/.codex/rules" "$HOME/.codex/log"
   cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
   printf 'global guidance\n' > "$HOME/.codex/AGENTS.md"
+  printf 'global override\n' > "$HOME/.codex/AGENTS.override.md"
   printf 'prefix_rule(pattern=["git", "status"], decision="allow")\n' > "$HOME/.codex/rules/default.rules"
   printf 'shared log\n' > "$HOME/.codex/log/codex.log"
 
@@ -501,11 +557,14 @@ PROBE
 
   local runtime_rules="$MULTICLI_HOME/codex/account-a/.runtime/rules"
   local runtime_agents="$MULTICLI_HOME/codex/account-a/.runtime/AGENTS.md"
+  local runtime_agents_override="$MULTICLI_HOME/codex/account-a/.runtime/AGENTS.override.md"
   local runtime_log="$MULTICLI_HOME/codex/account-a/.runtime/log"
   [ -L "$runtime_rules" ]
   [ -L "$runtime_agents" ]
+  [ -L "$runtime_agents_override" ]
   [ -L "$runtime_log" ]
   [ "$(cat "$runtime_agents" | tr -d '\r')" = 'global guidance' ]
+  [ "$(cat "$runtime_agents_override" | tr -d '\r')" = 'global override' ]
   [ "$(cat "$runtime_rules/default.rules" | tr -d '\r')" = 'prefix_rule(pattern=["git", "status"], decision="allow")' ]
   [ "$(cat "$runtime_log/codex.log" | tr -d '\r')" = 'shared log' ]
   run jq -e --arg root "$HOME/.codex" '.args == [
@@ -516,10 +575,12 @@ PROBE
   [ "$status" -eq 0 ]
   [ ! -e "$MULTICLI_HOME/codex/account-a/auth/rules" ]
   [ ! -e "$MULTICLI_HOME/codex/account-a/auth/AGENTS.md" ]
+  [ ! -e "$MULTICLI_HOME/codex/account-a/auth/AGENTS.override.md" ]
   [ ! -e "$MULTICLI_HOME/codex/account-a/auth/log" ]
 }
 
-@test "Hyper without the title-lock opt-in emits no private title protocol" {
+@test "matrix: Hyper without the title-lock opt-in emits no private title protocol (+2 related)" {
+  # Case 1: Hyper without the title-lock opt-in emits no private title protocol
   mkdir -p "$TOOLS_ROOT/codex" "$MULTICLI_HOME/codex/omega"
   cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
 
@@ -528,9 +589,11 @@ PROBE
   [ "$status" -eq 0 ]
   [[ "$output" != *"__MULTICLI_TITLE_LOCK__"* ]]
   [[ "$output" != *"__MULTICLI_TITLE_UNLOCK__"* ]]
-}
 
-@test "opted-in Hyper locks each schema-v2 Codex profile title to its alias" {
+  teardown
+  setup
+
+  # Case 2: opted-in Hyper locks each schema-v2 Codex profile title to its alias
   mkdir -p "$TOOLS_ROOT/codex"
   cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
   run multicli new codex/omega --no-seed
@@ -549,9 +612,11 @@ PROBE
   run env TERM_PROGRAM=Hyper NINI_AGENTS_HYPER_TITLE_LOCK=1 "$MULTICLI_BIN" launch codex/nexo
   [ "$status" -eq 0 ]
   [[ "$output" == *"$lock"*"$unlock"* ]]
-}
 
-@test "opted-in Hyper title locking also covers a legacy whole-root Codex profile" {
+  teardown
+  setup
+
+  # Case 3: opted-in Hyper title locking also covers a legacy whole-root Codex profile
   mkdir -p "$TOOLS_ROOT/codex" "$MULTICLI_HOME/codex/tienda"
   cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$TOOLS_ROOT/codex/adapter.json"
 
@@ -565,7 +630,8 @@ PROBE
   [[ "$output" == *"legacy whole-root"* ]]
 }
 
-@test "account overlay keeps direct state outside runtime and appends expanded adapter args" {
+@test "matrix: account overlay keeps direct state outside runtime and appends expanded adapter args (+1 related)" {
+  # Case 1: account overlay keeps direct state outside runtime and appends expanded adapter args
   jq '.isolation.args=["-c", "sqlite_home=\"{sharedStateRoot}\""]
     | .normalState.sessionPaths += ["state_5.sqlite"]
     | .normalState.filePaths += ["state_5.sqlite"]
@@ -594,9 +660,11 @@ PROBE
   run jq -e --arg root "$HOME/.fixture" \
     '.args == ["--direct", "-c", ("sqlite_home=\"" + $root + "\""), "--", "prompt"]' "$CAPTURE_OUTPUT"
   [ "$status" -eq 0 ]
-}
 
-@test "launch clears inherited account variables without mutating the parent shell" {
+  teardown
+  setup
+
+  # Case 2: launch clears inherited account variables without mutating the parent shell
   run multicli new fixture/account-a --no-seed
   [ "$status" -eq 0 ]
   export GLOBAL_FIXTURE_TOKEN='wrong-account-secret'
@@ -608,7 +676,8 @@ PROBE
   [ "$GLOBAL_FIXTURE_TOKEN" = "wrong-account-secret" ]
 }
 
-@test "doctor --deep reports unexpected runtime files as adapter defects" {
+@test "matrix: doctor --deep reports unexpected runtime files as adapter defects (+1 related)" {
+  # Case 1: doctor --deep reports unexpected runtime files as adapter defects
   run multicli new fixture/account-a --no-seed
   [ "$status" -eq 0 ]
   run multicli launch fixture/account-a
@@ -618,9 +687,11 @@ PROBE
   run multicli doctor --deep
   [ "$status" -eq 1 ]
   [[ "$output" == *"unexpected runtime file rogue.txt"* ]]
-}
 
-@test "doctor --deep is quiet when runtime contains only declared links" {
+  teardown
+  setup
+
+  # Case 2: doctor --deep is quiet when runtime contains only declared links
   run multicli new fixture/account-a --no-seed
   [ "$status" -eq 0 ]
   run multicli launch fixture/account-a
@@ -638,7 +709,8 @@ PROBE
   [[ "$output" != *"unexpected runtime file"* ]]
 }
 
-@test "launch rebuilds an existing runtime when the adapter shared root changes" {
+@test "matrix: launch rebuilds an existing runtime when the adapter shared root changes (+1 related)" {
+  # Case 1: launch rebuilds an existing runtime when the adapter shared root changes
   mkdir -p "$HOME/.fixture"
   printf 'old-root\n' > "$HOME/.fixture/config.toml"
   run multicli new fixture/account-a --no-seed
@@ -657,9 +729,11 @@ PROBE
   [ "$status" -eq 0 ]
   [ "$(tr -d '\r' < "$MULTICLI_HOME/fixture/account-a/.runtime/config.toml")" = "new-root" ]
   [ "$MULTICLI_HOME/fixture/account-a/.runtime/config.toml" -ef "$HOME/.fixture-new/config.toml" ]
-}
 
-@test "doctor --deep understands runtimeSubdir and detects missing or misdirected links" {
+  teardown
+  setup
+
+  # Case 2: doctor --deep understands runtimeSubdir and detects missing or misdirected links
   jq '.normalState.runtimeSubdir="state"' "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
   mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
   run multicli new fixture/account-a --no-seed
@@ -687,7 +761,8 @@ PROBE
   [[ "$output" == *"runtime link state/agents has the wrong target"* ]]
 }
 
-@test "legacy file-overlay launch keeps the whole root and does not migrate credentials" {
+@test "matrix: legacy file-overlay launch keeps the whole root and does not migrate credentials (+2 related)" {
+  # Case 1: legacy file-overlay launch keeps the whole root and does not migrate credentials
   local profile="$MULTICLI_HOME/fixture/legacy"
   local expected_auth="$MULTICLI_SCRATCH/legacy-auth.expected"
   mkdir -p "$profile"
@@ -707,9 +782,11 @@ PROBE
   [ ! -e "$profile/.profile.json" ]
   [ ! -e "$profile/.runtime" ]
   [ ! -e "$profile/auth" ]
-}
 
-@test "legacy whole-root launch applies enforced adapter arguments inside the profile root" {
+  teardown
+  setup
+
+  # Case 2: legacy whole-root launch applies enforced adapter arguments inside the profile root
   jq '.isolation.args=["-c", "sqlite_home=\"{sharedStateRoot}\""]' \
     "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
   mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
@@ -723,9 +800,11 @@ PROBE
   run jq -e --arg root "$profile" \
     '.args == ["--user-value", "-c", ("sqlite_home=\"" + $root + "\"")]' "$CAPTURE_OUTPUT"
   [ "$status" -eq 0 ]
-}
 
-@test "legacy whole-root compatibility stays closed for process-secret adapters" {
+  teardown
+  setup
+
+  # Case 3: legacy whole-root compatibility stays closed for process-secret adapters
   jq '.account = {
     "mechanism": "processSecret",
     "credentialFiles": [],

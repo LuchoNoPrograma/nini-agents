@@ -69,7 +69,8 @@ teardown() {
   teardown_scratch
 }
 
-@test "auth set/status/clear round-trips a profile secret in the OS store" {
+@test "matrix: auth set/status/clear round-trips a profile secret in the OS store (+1 related)" {
+  # Case 1: auth set/status/clear round-trips a profile secret in the OS store
   run multicli new secretcli/account-a --no-seed
   [ "$status" -eq 0 ]
 
@@ -92,9 +93,11 @@ teardown() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"No credential stored"* ]]
   MULTICLI_TEST_TARGET=""
-}
 
-@test "process-secret launch injects only the profile credential into the child" {
+  teardown
+  setup
+
+  # Case 2: process-secret launch injects only the profile credential into the child
   run multicli new secretcli/account-a --no-seed
   [ "$status" -eq 0 ]
   run multicli new secretcli/account-b --no-seed
@@ -119,7 +122,8 @@ teardown() {
   mc_cred_clear "multi-cli/secretcli/$(jq -r '.profileId' "$MULTICLI_HOME/secretcli/account-b/.profile.json")/SECRETCLI_TOKEN" 2>/dev/null || true
 }
 
-@test "launch without a stored credential fails with the auth set hint" {
+@test "matrix: launch without a stored credential fails with the auth set hint (+1 related)" {
+  # Case 1: launch without a stored credential fails with the auth set hint
   run multicli new secretcli/account-a --no-seed
   [ "$status" -eq 0 ]
 
@@ -127,9 +131,11 @@ teardown() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"nini-agents auth set secretcli/account-a"* ]]
-}
 
-@test "auth rejects tools that do not use process-secret credentials" {
+  teardown
+  setup
+
+  # Case 2: auth rejects tools that do not use process-secret credentials
   run multicli auth status codex/anything
 
   [ "$status" -eq 1 ]
