@@ -31,9 +31,12 @@ Describe 'stable JSON CLI v1' {
 
     BeforeEach {
         $scratch = New-Scratch
+        Copy-Item -LiteralPath (Join-Path $script:RepoRoot 'ai-tools\codex\adapter.json') -Destination (Join-Path $scratch.Tools 'codex\adapter.json') -Force
         $codex = Join-Path $scratch.MultiCliHome 'codex\work'
+        $codexEmpty = Join-Path $scratch.MultiCliHome 'codex\empty'
         $cursor = Join-Path $scratch.MultiCliHome 'cursor\personal'
-        New-Item -ItemType Directory -Force -Path (Join-Path $codex 'auth'), $cursor | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $codex 'auth'), (Join-Path $codexEmpty 'auth'), $cursor | Out-Null
+        Set-Content -LiteralPath (Join-Path $codexEmpty '.profile.json') -Encoding UTF8 -Value '{"schemaVersion":2,"profileId":null,"adapterId":"codex","mode":"accountOverlay"}'
         Set-Content -LiteralPath (Join-Path $codex '.profile.json') -Encoding UTF8 -Value '{"schemaVersion":2,"profileId":null,"adapterId":"codex","mode":"accountOverlay"}'
         Set-Content -LiteralPath (Join-Path $codex 'auth\auth.json') -Encoding UTF8 -Value '{"fixtureOnly":true}'
         Set-Content -LiteralPath (Join-Path $cursor 'state.txt') -Encoding UTF8 -Value 'ordinary-state'
@@ -65,8 +68,12 @@ Describe 'stable JSON CLI v1' {
         $result.ExitCode | Should Be 0
         $json = Convert-LauncherJson $result
         Assert-JsonEnvelope $json 'list'
-        $json.data.count | Should Be 2
-        @($json.data.profiles | Where-Object { $_.tool -eq 'codex' -and $_.name -eq 'work' -and $_.schemaVersion -eq 2 }).Count | Should Be 1
+        $json.data.count | Should Be 3
+        (@($json.data.profiles | ForEach-Object { "$($_.tool)/$($_.name)" }) -join ',') | Should Be 'codex/empty,codex/work,cursor/personal'
+        ($json.data.profiles | Where-Object { $_.tool -eq 'codex' -and $_.name -eq 'work' }).hasAuthFile | Should Be $true
+        ($json.data.profiles | Where-Object { $_.tool -eq 'codex' -and $_.name -eq 'empty' }).hasAuthFile | Should Be $false
+        ($json.data.profiles | Where-Object { $_.tool -eq 'cursor' -and $_.name -eq 'personal' }).hasAuthFile | Should Be $false
+        $listWorkAuth = ($json.data.profiles | Where-Object { $_.tool -eq 'codex' -and $_.name -eq 'work' }).hasAuthFile
         Assert-NoPrivateJsonData $result.StdOut $scratch
 
         $result = Invoke-Launcher -Scratch $scratch -Arguments @('--json', 'status', 'codex')
@@ -75,8 +82,10 @@ Describe 'stable JSON CLI v1' {
         }
         $json = Convert-LauncherJson $result
         Assert-JsonEnvelope $json 'status'
-        $json.data.count | Should Be 1
-        $json.data.profiles[0].tool | Should Be 'codex'
+        $json.data.count | Should Be 2
+        (@($json.data.profiles | ForEach-Object { $_.name }) -join ',') | Should Be 'empty,work'
+        ($json.data.profiles | Where-Object { $_.name -eq 'work' }).hasAuthFile | Should Be $listWorkAuth
+        ($json.data.profiles | Where-Object { $_.name -eq 'empty' }).hasAuthFile | Should Be $false
         Assert-NoPrivateJsonData $result.StdOut $scratch
     }
 
@@ -95,7 +104,7 @@ Describe 'stable JSON CLI v1' {
         $result = Invoke-Launcher -Scratch $scratch -Arguments @('stats', '--json')
         $json = Convert-LauncherJson $result
         Assert-JsonEnvelope $json 'stats'
-        $json.data.count | Should Be 2
+        $json.data.count | Should Be 3
         ($json.data.totalBytes -is [long] -or $json.data.totalBytes -is [int]) | Should Be $true
 
         $result = Invoke-Launcher -Scratch $scratch -Arguments @('template', 'list', '--json')

@@ -1638,6 +1638,48 @@ function Get-FolderSizeBytes {
     return $size
 }
 
+function Get-ProfileCredentialPaths {
+    param([string]$ToolId)
+    try {
+        $adapter = Get-Adapter $ToolId
+    } catch {
+        return @()
+    }
+    $schemaVersion = if ($adapter.PSObject.Properties.Name -contains 'schemaVersion') { [int]$adapter.schemaVersion } else { 1 }
+    $containerName = if ($schemaVersion -eq 2) { 'account' } else { 'session' }
+    $pathsName = if ($schemaVersion -eq 2) { 'credentialFiles' } else { 'credentials' }
+    $containerProperty = $adapter.PSObject.Properties[$containerName]
+    if (-not $containerProperty) { return @() }
+    $pathsProperty = $containerProperty.Value.PSObject.Properties[$pathsName]
+    if (-not $pathsProperty) { return @() }
+    return @($pathsProperty.Value)
+}
+
+function Test-ProfileHasAuthFile {
+    param([string]$ProfileDir, [int]$SchemaVersion, [string[]]$CredentialPaths)
+    $credentialRoot = if ($SchemaVersion -eq 2) { Join-Path $ProfileDir 'auth' } else { $ProfileDir }
+    $rootItem = Get-Item -LiteralPath $credentialRoot -Force -ErrorAction SilentlyContinue
+    if (-not $rootItem -or -not $rootItem.PSIsContainer -or (Test-IsReparsePoint $rootItem)) { return $false }
+
+    foreach ($relative in @($CredentialPaths)) {
+        if (-not $relative) { continue }
+        $current = $credentialRoot
+        $item = $rootItem
+        $safe = $true
+        foreach ($component in @($relative -split '[\\/]+')) {
+            if (-not $component) { continue }
+            $current = Join-Path $current $component
+            $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+            if (-not $item -or (Test-IsReparsePoint $item)) {
+                $safe = $false
+                break
+            }
+        }
+        if ($safe -and -not $item.PSIsContainer) { return $true }
+    }
+    return $false
+}
+
 function Get-ProfileJsonData {
     param([string]$ToolFilter)
     $profiles = @()
@@ -1646,18 +1688,21 @@ function Get-ProfileJsonData {
             Where-Object { $_.Name -notmatch '^\.' -and $_.Name -ne 'bin' -and -not ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) } | Sort-Object Name)
         if ($ToolFilter) { $tools = @($tools | Where-Object { $_.Name -eq $ToolFilter }) }
         foreach ($toolDir in $tools) {
+            $credentialPaths = @(Get-ProfileCredentialPaths -ToolId $toolDir.Name)
             foreach ($profile in @(Get-ChildItem -LiteralPath $toolDir.FullName -Directory -Force -ErrorAction SilentlyContinue |
                 Where-Object { -not ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) } | Sort-Object Name)) {
                 $type = if (Test-Path -LiteralPath (Join-Path $profile.FullName '.cli') -PathType Leaf) { 'cli' }
                     elseif (Test-Path -LiteralPath (Join-Path $profile.FullName '.shared') -PathType Leaf) { 'shared' }
                     elseif (Test-Path -LiteralPath (Join-Path $profile.FullName '.isolated') -PathType Leaf) { 'isolated' }
                     else { 'full' }
+                $profileSchemaVersion = $(if (Test-Path -LiteralPath (Join-Path $profile.FullName '.profile.json') -PathType Leaf) { 2 } else { 1 })
                 $profiles += [ordered]@{
                     tool = $toolDir.Name
                     name = $profile.Name
                     type = $type
-                    schemaVersion = $(if (Test-Path -LiteralPath (Join-Path $profile.FullName '.profile.json') -PathType Leaf) { 2 } else { 1 })
+                    schemaVersion = $profileSchemaVersion
                     sizeBytes = [long](Get-FolderSizeBytes -Path $profile.FullName)
+                    hasAuthFile = [bool](Test-ProfileHasAuthFile -ProfileDir $profile.FullName -SchemaVersion $profileSchemaVersion -CredentialPaths $credentialPaths)
                 }
             }
         }

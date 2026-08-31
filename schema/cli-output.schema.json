@@ -23,6 +23,44 @@
         "schemaVersion": { "type": "integer", "enum": [1, 2] }
       }
     },
+    "profileSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "name", "type", "schemaVersion", "sizeBytes", "hasAuthFile"],
+      "properties": {
+        "tool": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9-]*$" },
+        "name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9-]*$" },
+        "type": { "enum": ["full", "cli", "shared", "isolated"] },
+        "schemaVersion": { "type": "integer", "enum": [1, 2] },
+        "sizeBytes": { "type": "integer", "minimum": 0 },
+        "hasAuthFile": { "type": "boolean" }
+      }
+    },
+    "profileListData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profiles", "count"],
+      "properties": {
+        "profiles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/profileSummary" }
+        },
+        "count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "profileStatsData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profiles", "count", "totalBytes"],
+      "properties": {
+        "profiles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/profileSummary" }
+        },
+        "count": { "type": "integer", "minimum": 0 },
+        "totalBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
     "newMutationData": {
       "type": "object",
       "additionalProperties": false,
@@ -108,6 +146,24 @@
       },
       "else": {
         "properties": { "data": { "type": "null" }, "error": { "type": "object" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "command": { "enum": ["list", "status"] }, "ok": { "const": true } },
+        "required": ["command", "ok"]
+      },
+      "then": {
+        "properties": { "data": { "$ref": "#/$defs/profileListData" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "command": { "const": "stats" }, "ok": { "const": true } },
+        "required": ["command", "ok"]
+      },
+      "then": {
+        "properties": { "data": { "$ref": "#/$defs/profileStatsData" } }
       }
     },
     {

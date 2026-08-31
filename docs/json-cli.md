@@ -50,10 +50,14 @@ code.
 | `delete <tool>/<profile> --confirm <tool>/<profile>` | `state`, `profile` |
 | `move <tool>/<profile> <device> ...` (Bash) | `code`, `state`, `format` |
 
-Profile summaries contain `tool`, `name`, `type`, `schemaVersion`, and logical
-`sizeBytes`. Tool summaries contain `id`, `kind`, `strategy`, `supportLevel`,
-and the boolean `installed`. Arrays are sorted by tool and profile or template
-name. Sizes count regular-file bytes without following symbolic links.
+Profile summaries contain `tool`, `name`, `type`, `schemaVersion`, logical
+`sizeBytes`, and the boolean `hasAuthFile`. The boolean reports only whether a
+regular credential file declared by the tool adapter exists in the profile's
+canonical credential location (`auth/` for schema-v2 profiles); Nini Agents
+does not read or expose its contents. Tool summaries contain `id`, `kind`,
+`strategy`, `supportLevel`, and the boolean `installed`. Arrays are sorted by
+tool and profile or template name. Sizes count regular-file bytes without
+following symbolic links.
 
 Mutation profile summaries for `new` and `rename` contain only `tool`, `name`,
 `type`, and `schemaVersion`; deletion returns only the deleted public address,

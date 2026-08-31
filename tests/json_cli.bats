@@ -4,7 +4,10 @@ load helpers/common
 
 setup() {
   setup_scratch
-  mkdir -p "$MULTICLI_HOME/codex/work/auth" "$MULTICLI_HOME/cursor/personal"
+  cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$MULTICLI_TOOLS_DIR/codex/adapter.json"
+  mkdir -p "$MULTICLI_HOME/codex/empty/auth" "$MULTICLI_HOME/codex/work/auth" "$MULTICLI_HOME/cursor/personal"
+  printf '%s\n' '{"schemaVersion":2,"profileId":null,"adapterId":"codex","mode":"accountOverlay"}' \
+    > "$MULTICLI_HOME/codex/empty/.profile.json"
   printf '%s\n' '{"schemaVersion":2,"profileId":null,"adapterId":"codex","mode":"accountOverlay"}' \
     > "$MULTICLI_HOME/codex/work/.profile.json"
   printf '%s\n' '{"fixtureOnly":true}' > "$MULTICLI_HOME/codex/work/auth/auth.json"
@@ -49,17 +52,27 @@ assert_no_private_data() {
   [ "$status" -eq 0 ]
   assert_envelope list
   printf '%s' "$output" | jq -e '
-    .data.count == 2 and
-    (.data.profiles | any(.tool == "codex" and .name == "work" and .schemaVersion == 2)) and
-    (.data.profiles | any(.tool == "cursor" and .name == "personal" and .schemaVersion == 1)) and
-    (.data.profiles | all((.sizeBytes | type) == "number"))
+    .data.count == 3 and
+    (.data.profiles | map(.tool + "/" + .name) == ["codex/empty","codex/work","cursor/personal"]) and
+    (.data.profiles | any(.tool == "codex" and .name == "work" and .schemaVersion == 2 and .hasAuthFile == true)) and
+    (.data.profiles | any(.tool == "codex" and .name == "empty" and .schemaVersion == 2 and .hasAuthFile == false)) and
+    (.data.profiles | any(.tool == "cursor" and .name == "personal" and .schemaVersion == 1 and .hasAuthFile == false)) and
+    (.data.profiles | all((.sizeBytes | type) == "number" and (.hasAuthFile | type) == "boolean"))
   ' >/dev/null
+  local list_work_auth
+  list_work_auth="$(printf '%s' "$output" | jq -r '.data.profiles[] | select(.tool == "codex" and .name == "work") | .hasAuthFile')"
   assert_no_private_data
 
   run multicli --json status codex
   [ "$status" -eq 0 ]
   assert_envelope status
-  printf '%s' "$output" | jq -e '.data.count == 1 and .data.profiles[0].tool == "codex"' >/dev/null
+  printf '%s' "$output" | jq -e '
+    .data.count == 2 and
+    (.data.profiles | map(.name) == ["empty","work"]) and
+    (.data.profiles[] | select(.name == "work") | .hasAuthFile) == true and
+    (.data.profiles[] | select(.name == "empty") | .hasAuthFile) == false
+  ' >/dev/null
+  [ "$(printf '%s' "$output" | jq -r '.data.profiles[] | select(.name == "work") | .hasAuthFile')" = "$list_work_auth" ]
   assert_no_private_data
 
   teardown
@@ -102,7 +115,7 @@ assert_no_private_data() {
   [ "$status" -eq 0 ]
   assert_envelope stats
   printf '%s' "$output" | jq -e '
-    .data.count == 2 and (.data.totalBytes | type) == "number" and
+    .data.count == 3 and (.data.totalBytes | type) == "number" and
     (.data.profiles | all((.sizeBytes | type) == "number"))
   ' >/dev/null
   assert_no_private_data

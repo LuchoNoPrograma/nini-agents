@@ -1850,8 +1850,32 @@ folder_size_bytes() {
   printf '%s\n' "$total"
 }
 
+profile_has_auth_file() {
+  local profile_dir="$1" schema_version="$2"
+  shift 2
+  local credential_root relative current component
+
+  credential_root="$profile_dir"
+  [ "$schema_version" -eq 2 ] && credential_root="$profile_dir/auth"
+  [ -d "$credential_root" ] && [ ! -L "$credential_root" ] || return 1
+
+  for relative in "$@"; do
+    is_safe_adapter_path "$relative" || continue
+    current="$credential_root"
+    local IFS=/
+    for component in ${relative//\\//}; do
+      [ -n "$component" ] || continue
+      current="$current/$component"
+      [ ! -L "$current" ] || continue 2
+    done
+    [ -f "$current" ] && return 0
+  done
+  return 1
+}
+
 json_profile_data() {
-  local tool_filter="${1:-}" tool_dir tname pdir pname ptype schema_version size
+  local tool_filter="${1:-}" tool_dir tname pdir pname ptype schema_version size has_auth_file manifest adapter_schema path
+  local credential_paths=()
   {
     if [ -d "$BASE" ]; then
       for tool_dir in "$BASE"/*/; do
@@ -1861,6 +1885,20 @@ json_profile_data() {
         [[ "$tname" == .* ]] && continue
         [ "$tname" = bin ] && continue
         [ -n "$tool_filter" ] && [ "$tname" != "$tool_filter" ] && continue
+        credential_paths=()
+        manifest="$(adapter_path "$tname")"
+        if [ -f "$manifest" ] && [ ! -L "$manifest" ]; then
+          adapter_schema="$(runtime_json_str '.schemaVersion' "$manifest")"
+          if [ "$adapter_schema" = 2 ]; then
+            while IFS= read -r path; do
+              [ -n "$path" ] && credential_paths+=("$path")
+            done < <(runtime_json_arr '.account.credentialFiles' "$manifest")
+          else
+            while IFS= read -r path; do
+              [ -n "$path" ] && credential_paths+=("$path")
+            done < <(runtime_json_arr '.session.credentials' "$manifest")
+          fi
+        fi
         for pdir in "$tool_dir"/*/; do
           pdir="${pdir%/}"
           [ -d "$pdir" ] && [ ! -L "$pdir" ] || continue
@@ -1872,9 +1910,14 @@ json_profile_data() {
           schema_version=1
           [ -f "$pdir/.profile.json" ] && schema_version=2
           size="$(folder_size_bytes "$pdir")"
+          if profile_has_auth_file "$pdir" "$schema_version" ${credential_paths[@]+"${credential_paths[@]}"}; then
+            has_auth_file=true
+          else
+            has_auth_file=false
+          fi
           jq -cn --arg tool "$tname" --arg name "$pname" --arg type "$ptype" \
-            --argjson schemaVersion "$schema_version" --argjson sizeBytes "$size" \
-            '{tool:$tool,name:$name,type:$type,schemaVersion:$schemaVersion,sizeBytes:$sizeBytes}'
+            --argjson schemaVersion "$schema_version" --argjson sizeBytes "$size" --argjson hasAuthFile "$has_auth_file" \
+            '{tool:$tool,name:$name,type:$type,schemaVersion:$schemaVersion,sizeBytes:$sizeBytes,hasAuthFile:$hasAuthFile}'
         done
       done
     fi
