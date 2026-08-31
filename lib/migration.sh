@@ -1387,6 +1387,10 @@ cmd_migrate() {
 
   if ! migration_is_legacy_profile "$pdir"; then
     echo "Profile '$spec' is already schema-v2 (accountOverlay); nothing to do."
+    if [ "$dry_run" != true ]; then
+      create_shell_alias "$TOOL" "$NAME" || return $?
+      echo "Ensured profile aliases for '$spec'."
+    fi
     return 0
   fi
   mechanism="$(runtime_json_str '.account.mechanism' "$manifest")"
@@ -1431,6 +1435,7 @@ cmd_migrate() {
   echo "Migrating $spec (legacy-isolated -> accountOverlay):"
   journal="$pdir/$MIGRATION_JOURNAL_NAME"
   migration_apply_transaction "$pdir" "$manifest" "$journal" "$TOOL" "$NAME" "$shared_root" "$prefer_profile" "$spec" || return $?
+  create_shell_alias "$TOOL" "$NAME" || return $?
   echo "Migrated $spec to schema-v2 (accountOverlay)."
   if [ "$mechanism" = processSecret ]; then
     echo "Note: adapter '$TOOL' uses process-secret credentials. Run: nini-agents auth set $spec before launching."

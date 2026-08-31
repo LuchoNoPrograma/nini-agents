@@ -1,21 +1,22 @@
 # Nini Agents: checkpoint operativo
 
-- Actualizado: 2026-08-24
+- Actualizado: 2026-08-31
 - Branch: `main`
-- HEAD observado: `ad9630c99648`
-- `origin/main` observado: `293c48d31731`; el commit local todavia no fue
-  publicado.
-- Validacion aislada: PR borrador `#1`, base remota temporal
-  `validation/eng-02a-base-ad9630c`, delta `a155613`, harness `b7790c9` y tip
-  `879d461` con la prueba in-process de cobertura. Ninguna de esas refs modifica
-  `origin/main`.
-- ENG-02B/C aisladas: branch temporal `validation/eng-02b`, commits `c36a229`
-  y `fc3361f`. El tip agrega `delete --json` y `exec` stdout-clean sin modificar
-  `origin/main` ni publicar un release.
-- Integracion local: ENG-02B/C fue portado manualmente al worktree concurrente
-  de `main`, sin cambiar su HEAD, stagear ni borrar cambios previos. El wrapper
-  instalado en `~/.local/bin/nini-agents` ya delegaba a este checkout,
-  por lo que `nini-agents help` expone `exec` sin reescribir el instalador.
+- HEAD base observado antes de esta correccion: `05dfe8e4e75b`;
+  `origin/main` observado: `bf2f79337de1`. La entrega de aliases se conserva
+  solo en un commit local; no fue publicada.
+- Incidente de aliases: el propietario es Nini Agents, no Nini Hub ni
+  Codexporter. `new`, `migrate`, import portable y movimiento entre dispositivos
+  deben reconciliar los launchers canonico `tool-profile` y corto `profile`; el
+  instalador POSIX debe persistir su directorio en `PATH`.
+- Activacion autorizada: el checkout y la instalacion receptora quedaron con el
+  mismo motor. Se reconciliaron 6 perfiles schema-v2 locales y 7 remotos; los
+  aliases remotos pasaron de 7 canonicos y 0 cortos a 7/7. No se lanzo ninguna
+  cuenta y los metadatos de los archivos de credenciales permanecieron iguales.
+- Validacion: documentación valida, pruebas focales `38/38`, suite Bash
+  `200/200` con cuatro skips esperados por plataforma/dependencia. Pester no se
+  ejecuto porque PowerShell no esta instalado y la cobertura Bash no arranco
+  porque falta `bashcov`; no se instalaron dependencias.
 - Objetivo inmediato: continuar el cierre de Nini Hub con `QA-01`; el producto
   lleva `12/14`. La publicacion del motor, el cutover y los incidentes base de
   Pester/Bash 3.2 permanecen como gates separados.
@@ -56,20 +57,12 @@ los gates de la bitacora y el alcance previo exigido por `AGENTS.md`.
   paridad Bash/PowerShell; ENG-02C agrega `exec` stdout-clean para procesos
   foreground. Los tres contratos estan en el worktree activo y versionados en
   la rama aislada de validacion.
-- El commit local `ad9630c` agrupa la migracion y recuperacion transaccional,
-  el estado MCP compartido, el launcher rapido, permisos Codex compartidos,
-  endurecimiento de runtime y adapters, pruebas, documentacion y la integracion
-  externa de titulos de Hyper. `main` estaba limpio y un commit delante de
-  `origin/main` antes de este handoff documental; no asumir que esta publicado,
-  instalado o convertido en release.
-- El worktree contiene cambios concurrentes de movimiento remoto y ENG-02A/B/C
-  en entrypoints, modulos, pruebas y documentacion. Preservarlos y revisar el
-  diff por archivo; no stagear, commitear, publicar ni resolver un lado completo
-  sin autorizacion nueva.
-- El aislamiento de CI no stageo ese worktree: reconstruyo ENG-02A sobre
-  `ad9630c` y extendio `validation/eng-02b` con ENG-02B/C. El PR no se debe
-  mezclar, cerrar o borrar como si fuera una entrega de `main`; `fc3361f` es el
-  commit versionado de C y la integracion activa sigue sin commit en `main`.
+- La base local observada `05dfe8e` ya incluye la consulta segura de presencia
+  de autenticacion y esta un commit delante de `origin/main`; no asumir que fue
+  publicada o convertida en release.
+- La correccion de aliases modifica entrypoints Bash/PowerShell, migracion,
+  movimiento remoto, instalador, pruebas y documentacion. `releases/` permanece
+  como artefacto local no versionado ajeno a este alcance.
 
 ## Lo que ya implemento y valida el migrador
 

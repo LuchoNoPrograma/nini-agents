@@ -861,6 +861,37 @@ Describe 'restored launcher behaviors' {
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
+    It 'migrate apply creates aliases and a repeated apply repairs missing aliases' {
+        $scratch = New-ProfileFixtureScratch
+        try {
+            Write-ProfileFixtureAdapter -Scratch $scratch
+            $profileDir = Join-Path $scratch.Profiles 'fixture\work'
+            New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+            Set-Content -LiteralPath (Join-Path $profileDir 'auth.json') -Value 'profile-token' -Encoding ASCII
+            Set-Content -LiteralPath (Join-Path $profileDir 'config.toml') -Value 'profile-config' -Encoding ASCII
+
+            $applied = Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('migrate', 'fixture/work')
+
+            if ($applied.ExitCode -ne 0) { Write-Host $applied.Output }
+            $applied.ExitCode | Should Be 0
+            $canonical = Join-Path $scratch.Profiles 'bin\fixture-work.cmd'
+            $short = Join-Path $scratch.Profiles 'bin\work.cmd'
+            (Test-Path -LiteralPath $canonical -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath $short -PathType Leaf) | Should Be $true
+            (Get-Content -LiteralPath $canonical -Raw) | Should Match 'set "MULTICLI_HOME='
+            (Get-Content -LiteralPath $canonical -Raw) | Should Match 'launch fixture/work'
+
+            Remove-Item -LiteralPath $canonical, $short -Force
+            $repaired = Invoke-ProfileFixtureLauncher -Scratch $scratch -Arguments @('migrate', 'fixture/work')
+
+            if ($repaired.ExitCode -ne 0) { Write-Host $repaired.Output }
+            $repaired.ExitCode | Should Be 0
+            $repaired.Output | Should Match "Ensured profile aliases for 'fixture/work'\."
+            (Test-Path -LiteralPath $canonical -PathType Leaf) | Should Be $true
+            (Test-Path -LiteralPath $short -PathType Leaf) | Should Be $true
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
     It 'continue on existing shared schema-v2 profiles reports the shared-state no-op' {
         $scratch = New-ProfileFixtureScratch
         try {

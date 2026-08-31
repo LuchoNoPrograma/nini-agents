@@ -175,6 +175,7 @@ make_dir_writable() {
   [[ "$output" == *"Dry run -- no changes written."* ]]
 
   local pdir="$MULTICLI_HOME/fixture/work"
+  [ ! -e "$MULTICLI_HOME/bin" ]
   [ ! -e "$pdir/.profile.json" ]
   [ ! -e "$pdir/.migration-journal.json" ]
   [ ! -e "$pdir/auth" ]
@@ -1131,14 +1132,21 @@ make_dir_writable() {
   run cmd_migrate fixture/work
   [ "$status" -eq 0 ]
   local pdir="$MULTICLI_HOME/fixture/work"
+  [ -x "$MULTICLI_HOME/bin/fixture-work" ]
+  [ -x "$MULTICLI_HOME/bin/work" ]
+  grep -Fq "export MULTICLI_HOME=$MULTICLI_HOME" "$MULTICLI_HOME/bin/fixture-work"
   local before_profile before_shared
   before_profile="$(list_tree "$pdir")"
   before_shared="$(list_tree "$SHARED_ROOT")"
+  rm -f "$MULTICLI_HOME/bin/fixture-work" "$MULTICLI_HOME/bin/work"
 
   run cmd_migrate fixture/work
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Profile 'fixture/work' is already schema-v2 (accountOverlay); nothing to do."* ]]
+  [[ "$output" == *"Ensured profile aliases for 'fixture/work'."* ]]
+  [ -x "$MULTICLI_HOME/bin/fixture-work" ]
+  [ -x "$MULTICLI_HOME/bin/work" ]
   [ "$(list_tree "$pdir")" = "$before_profile" ]
   [ "$(list_tree "$SHARED_ROOT")" = "$before_shared" ]
 

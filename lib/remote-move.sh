@@ -232,18 +232,39 @@ remote_move_process_probe() {
 }
 
 remote_move_write_launcher() {
-  local tool="$1" profile="$2" root="$3" launcher_root launcher temporary
+  local tool="$1" profile="$2" root="$3" launcher_root launcher short_launcher temporary
   launcher_root="$(dirname "$root")/bin"
   launcher="$launcher_root/$tool-$profile"
+  short_launcher="$launcher_root/$profile"
+  [ ! -L "$launcher_root" ] || return 1
   mkdir -p "$launcher_root" || return 1
-  temporary="$launcher.tmp.${BASHPID:-$$}"
+  [ -d "$launcher_root" ] && [ ! -L "$launcher_root" ] || return 1
+  [ ! -e "$launcher" ] || { [ -f "$launcher" ] && [ ! -L "$launcher" ]; } || return 1
+  [ ! -e "$short_launcher" ] && [ ! -L "$short_launcher" ] || { [ -f "$short_launcher" ] && [ ! -L "$short_launcher" ]; } || return 1
+  temporary="$(mktemp "$launcher_root/.nini-alias.XXXXXX")" || return 1
   {
     printf '#!/usr/bin/env bash\n'
     printf 'export MULTICLI_HOME=%q\n' "$(dirname "$root")"
     printf 'exec %q launch %q "$@"\n' "$SCRIPT_DIR/nini-agents" "$tool/$profile"
-  } > "$temporary" || return 1
-  chmod 755 "$temporary" || return 1
-  mv -- "$temporary" "$launcher"
+  } > "$temporary" || { rm -f "$temporary"; return 1; }
+  chmod 755 "$temporary" || { rm -f "$temporary"; return 1; }
+  mv -- "$temporary" "$launcher" || { rm -f "$temporary"; return 1; }
+
+  if [ ! -e "$short_launcher" ] && [ ! -L "$short_launcher" ]; then
+    temporary="$(mktemp "$launcher_root/.nini-alias.XXXXXX")" || return 1
+    {
+      printf '#!/usr/bin/env bash\n'
+      printf 'export MULTICLI_HOME=%q\n' "$(dirname "$root")"
+      printf 'exec %q launch %q "$@"\n' "$SCRIPT_DIR/nini-agents" "$tool/$profile"
+    } > "$temporary" || { rm -f "$temporary"; return 1; }
+    chmod 755 "$temporary" || { rm -f "$temporary"; return 1; }
+    if ln "$temporary" "$short_launcher"; then
+      rm -f "$temporary"
+    else
+      rm -f "$temporary"
+      [ -f "$short_launcher" ] && [ ! -L "$short_launcher" ] || return 1
+    fi
+  fi
 }
 
 # Internal endpoint used locally and through authenticated SSH. Every path is

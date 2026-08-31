@@ -123,6 +123,12 @@ make_legacy_profile() {
   [ "$(find "$MULTICLI_SCRATCH/local/codex/.inactive" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" -eq 1 ]
   grep -q 'nini-agents' "$MULTICLI_SCRATCH/remote/bin/codex-account-a"
   ! grep -q 'multi-cli' "$MULTICLI_SCRATCH/remote/bin/codex-account-a"
+  [ -x "$MULTICLI_SCRATCH/remote/bin/account-a" ]
+  cmp -s "$MULTICLI_SCRATCH/remote/bin/codex-account-a" "$MULTICLI_SCRATCH/remote/bin/account-a"
+
+  mkdir -p "$MULTICLI_SCRATCH/local/bin"
+  printf 'existing short alias\n' > "$MULTICLI_SCRATCH/local/bin/account-a"
+  chmod +x "$MULTICLI_SCRATCH/local/bin/account-a"
 
   run multicli move codex/account-a mint
   [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
@@ -131,6 +137,8 @@ make_legacy_profile() {
   [ "$(find "$MULTICLI_SCRATCH/local/codex/.inactive" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" -eq 1 ]
   [ "$(find "$MULTICLI_SCRATCH/remote/codex/.inactive" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" -eq 1 ]
   cmp -s "$MULTICLI_SCRATCH/local/codex/account-a/auth.json" "$MULTICLI_SCRATCH/remote/codex/.inactive"/*/auth.json
+  [ -x "$MULTICLI_SCRATCH/local/bin/account-a" ]
+  [ "$(cat "$MULTICLI_SCRATCH/local/bin/account-a")" = "existing short alias" ]
 
   teardown
   setup

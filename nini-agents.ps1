@@ -1143,8 +1143,10 @@ function New-AliasScript {
     New-Item -ItemType Directory -Force -Path $aliasDir | Out-Null
     $aliasPath = Join-Path $aliasDir "$Tool-$Name.cmd"
     $scriptPath = $PSCommandPath
+    $profileRoot = $BASE -replace '%', '%%'
 @"
 @echo off
+set "MULTICLI_HOME=$profileRoot"
 powershell.exe -ExecutionPolicy Bypass -File "$scriptPath" launch $Tool/$Name %*
 "@ | Set-Content -Path $aliasPath -Encoding ASCII
 
@@ -1152,6 +1154,7 @@ powershell.exe -ExecutionPolicy Bypass -File "$scriptPath" launch $Tool/$Name %*
     if (-not (Test-Path $shortAliasPath)) {
 @"
 @echo off
+set "MULTICLI_HOME=$profileRoot"
 powershell.exe -ExecutionPolicy Bypass -File "$scriptPath" launch $Tool/$Name %*
 "@ | Set-Content -Path $shortAliasPath -Encoding ASCII
     }
@@ -2390,6 +2393,10 @@ function Invoke-Migrate {
     Import-Module (Resolve-MultiCliModulePath 'MultiCli.Migration.psm1') -Force
     $result = Invoke-MultiCliMigration -Adapter $adapter -ProfileDir $profileDir -DryRun:$dryRun -PreferProfile:$preferProfile -PreserveUnknown:$preserveUnknown
     foreach ($line in @($result.Lines)) { Write-Host $line }
+    if (-not $dryRun) {
+        New-AliasScript -Tool $p.Tool -Name $p.Name
+        if (-not $result.Migrated) { Write-Host "Ensured profile aliases for '$Spec'." }
+    }
     if ($result.Migrated) { Write-Host "Migrated $Spec to schema-v2 (accountOverlay)." }
 }
 

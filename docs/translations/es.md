@@ -186,6 +186,10 @@ Cada perfil recibe un atajo como `claude-cli-work`.
 | macOS y Linux | `~/MultiCliProfiles/bin/` |
 | Windows | `~/MultiCliProfiles/bin/`, además de accesos directos del menú Inicio para perfiles gráficos |
 
+Los instaladores registran este directorio en el `PATH` del usuario. La creación,
+migración, importación portable y movimiento entre dispositivos generan el comando
+canónico `herramienta-perfil` y el comando corto `perfil` sin sobrescribir colisiones.
+
 ## Configuración
 
 | Variable | Valor predeterminado | Función |

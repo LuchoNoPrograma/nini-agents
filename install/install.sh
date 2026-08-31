@@ -151,6 +151,38 @@ ensure_jq() {
   exit 1
 }
 
+ensure_profile_alias_path() {
+  local alias_dir="${MULTICLI_HOME:-$HOME/MultiCliProfiles}/bin"
+  local shell_name="${SHELL:-}" shell_profile path_line
+  shell_name="${shell_name##*/}"
+  case "$shell_name" in
+    bash) shell_profile="$HOME/.bashrc" ;;
+    zsh)  shell_profile="$HOME/.zshrc" ;;
+    *)    shell_profile="$HOME/.profile" ;;
+  esac
+
+  path_line="$(printf 'export PATH=%q:"$PATH"' "$alias_dir")"
+  if grep -Fqx "$path_line" "$shell_profile" 2>/dev/null; then
+    echo "Profile alias directory is already configured: $alias_dir"
+    return 0
+  fi
+  if [ -L "$shell_profile" ] || { [ -e "$shell_profile" ] && [ ! -f "$shell_profile" ]; }; then
+    echo "WARNING: cannot update $shell_profile safely. Add this directory to PATH manually: $alias_dir" >&2
+    return 0
+  fi
+  mkdir -p "$(dirname "$shell_profile")"
+  if {
+    printf '\n# Nini Agents profile aliases\n'
+    printf '%s\n' "$path_line"
+  } >> "$shell_profile"; then
+    PATH="$alias_dir:$PATH"
+    export PATH
+    echo "Added $alias_dir to PATH in $shell_profile. Restart your terminal to use profile aliases."
+  else
+    echo "WARNING: could not update $shell_profile. Add this directory to PATH manually: $alias_dir" >&2
+  fi
+}
+
 local_install=false
 for arg in "$@"; do
   case "$arg" in
@@ -215,6 +247,8 @@ printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$INSTALL_DIR/nini-agents" > "$BIN_
 printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$INSTALL_DIR/multi-cli" > "$LEGACY_BIN_LINK"
 chmod +x "$BIN_LINK"
 chmod +x "$LEGACY_BIN_LINK"
+
+ensure_profile_alias_path
 
 echo ""
 echo "Installed Nini Agents to $INSTALL_DIR"

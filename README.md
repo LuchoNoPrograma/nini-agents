@@ -345,6 +345,10 @@ Each profile gets a shortcut such as `claude-cli-work`.
 | macOS and Linux | `~/MultiCliProfiles/bin/` |
 | Windows | `~/MultiCliProfiles/bin/`, plus Start Menu shortcuts for GUI profiles |
 
+The installers register this directory on the user `PATH`. Profile creation,
+migration, portable import, and cross-device movement create the canonical
+`tool-profile` command and the collision-safe short `profile` command.
+
 ## Configuration
 
 | Variable | Default | Purpose |

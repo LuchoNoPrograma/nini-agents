@@ -1301,22 +1301,42 @@ cmd_auth() {
 create_shell_alias() {
   local tool="$1" name="$2"
   local adir="$(alias_dir)"
-  mkdir -p "$adir"
   local apath="$adir/$tool-$name"
   local launcher="$SCRIPT_DIR/nini-agents"
-  cat > "$apath" <<ALIAS
+  local short_alias="$adir/$name" temporary
+  [ ! -L "$adir" ] || { echo "Alias directory is a symbolic link: $adir" >&2; return 1; }
+  mkdir -p "$adir" || return 1
+  [ -d "$adir" ] && [ ! -L "$adir" ] || return 1
+  [ ! -e "$apath" ] || { [ -f "$apath" ] && [ ! -L "$apath" ]; } || {
+    echo "Canonical alias is not a regular file: $apath" >&2
+    return 1
+  }
+  temporary="$(mktemp "$adir/.nini-alias.XXXXXX")" || return 1
+  cat > "$temporary" <<ALIAS
 #!/usr/bin/env bash
+export MULTICLI_HOME=$(printf '%q' "$BASE")
 exec "$launcher" launch "$tool/$name" "\$@"
 ALIAS
-  chmod +x "$apath"
+  chmod +x "$temporary" || { rm -f "$temporary"; return 1; }
+  mv "$temporary" "$apath" || { rm -f "$temporary"; return 1; }
 
-  local short_alias="$adir/$name"
-  if [ ! -f "$short_alias" ]; then
-    cat > "$short_alias" <<ALIAS
+  if [ ! -e "$short_alias" ] && [ ! -L "$short_alias" ]; then
+    temporary="$(mktemp "$adir/.nini-alias.XXXXXX")" || return 1
+    cat > "$temporary" <<ALIAS
 #!/usr/bin/env bash
+export MULTICLI_HOME=$(printf '%q' "$BASE")
 exec "$launcher" launch "$tool/$name" "\$@"
 ALIAS
-    chmod +x "$short_alias"
+    chmod +x "$temporary" || { rm -f "$temporary"; return 1; }
+    if ln "$temporary" "$short_alias"; then
+      rm -f "$temporary"
+    else
+      rm -f "$temporary"
+      [ -f "$short_alias" ] && [ ! -L "$short_alias" ] || return 1
+    fi
+  elif [ -L "$short_alias" ] || [ ! -f "$short_alias" ]; then
+    echo "Short alias is not a regular file: $short_alias" >&2
+    return 1
   fi
 }
 

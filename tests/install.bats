@@ -103,3 +103,36 @@ teardown() {
   [[ "$output" == *"Primary launcher at $NINI_AGENTS_BIN_LINK"* ]]
   [[ "$output" == *"Compatibility launcher at $MULTICLI_BIN_LINK"* ]]
 }
+
+@test "local install registers the profile alias directory idempotently" {
+  local alias_dir="$MULTICLI_HOME/bin"
+
+  run env SHELL=/bin/bash NINI_AGENTS_BIN_LINK="$NINI_AGENTS_BIN_LINK" MULTICLI_BIN_LINK="$MULTICLI_BIN_LINK" \
+    "$GIT_BASH_BIN" "$MULTICLI_REPO_ROOT/install/install.sh" --local
+
+  [ "$status" -eq 0 ]
+  [ -f "$HOME/.bashrc" ]
+  grep -Fq "export PATH=$alias_dir:\"\$PATH\"" "$HOME/.bashrc"
+  [[ "$output" == *"Added $alias_dir to PATH in $HOME/.bashrc"* ]]
+
+  run env SHELL=/bin/bash NINI_AGENTS_BIN_LINK="$NINI_AGENTS_BIN_LINK" MULTICLI_BIN_LINK="$MULTICLI_BIN_LINK" \
+    "$GIT_BASH_BIN" "$MULTICLI_REPO_ROOT/install/install.sh" --local
+
+  [ "$status" -eq 0 ]
+  [ "$(grep -Fc "$alias_dir" "$HOME/.bashrc")" -eq 1 ]
+  [[ "$output" == *"Profile alias directory is already configured: $alias_dir"* ]]
+}
+
+@test "local install does not follow a shell-profile symlink" {
+  local outside="$MULTICLI_SCRATCH/outside-bashrc"
+  printf 'keep me\n' > "$outside"
+  ln -s "$outside" "$HOME/.bashrc"
+
+  run env SHELL=/bin/bash NINI_AGENTS_BIN_LINK="$NINI_AGENTS_BIN_LINK" MULTICLI_BIN_LINK="$MULTICLI_BIN_LINK" \
+    "$GIT_BASH_BIN" "$MULTICLI_REPO_ROOT/install/install.sh" --local
+
+  [ "$status" -eq 0 ]
+  [ -L "$HOME/.bashrc" ]
+  [ "$(cat "$outside")" = "keep me" ]
+  [[ "$output" == *"cannot update $HOME/.bashrc safely"* ]]
+}
