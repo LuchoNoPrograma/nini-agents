@@ -60,6 +60,24 @@ JSON
   [ "$output" = "$local_bin" ]
 }
 
+@test "Codex binary discovery prefers PATH before fixed fallback installs" {
+  local path_bin="$MULTICLI_SCRATCH/path-bin"
+  local selected_codex="$path_bin/codex"
+  local stale_codex="$HOME/.npm-global/bin/codex"
+  mkdir -p "$path_bin" "$(dirname "$stale_codex")"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$selected_codex"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$stale_codex"
+  chmod +x "$selected_codex" "$stale_codex"
+  cp "$MULTICLI_REPO_ROOT/ai-tools/codex/adapter.json" "$MULTICLI_TOOLS_DIR/codex/adapter.json"
+
+  run env HOME="$HOME" PATH="$path_bin:/usr/bin:/bin" MULTICLI_PLATFORM=linux \
+    MULTICLI_TOOLS_DIR="$MULTICLI_TOOLS_DIR" \
+    bash -c 'multicli_bin="$1"; set -- help; source "$multicli_bin" >/dev/null; find_adapter_binary codex' _ "$MULTICLI_BIN"
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "$selected_codex" ]
+}
+
 @test "launch_sandbox_user announces first launch on Linux and macOS" {
   local platform
   for platform in linux macos; do

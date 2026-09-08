@@ -1,21 +1,8 @@
-<#
-.SYNOPSIS
-  Entry point for the PowerShell coverage gate.
-
-.DESCRIPTION
-  Delegates to Invoke-ModuleCoverage.ps1, which runs the Pester 3.x suite
-  in-process against lib/*.psm1, applies the documented-exception list, writes
-  JSON and Cobertura reports, and exits nonzero on test, module, or changed-line
-  coverage failures.
-
-  USAGE
-    powershell -NoProfile -ExecutionPolicy Bypass -File tests/coverage/Run-PowerShellCoverage.ps1 [-MinimumPercent 95]
-#>
-
+<# Runs the full Pester suite and changed-line coverage in one pass. #>
 param(
-    [double]$MinimumPercent = 95
+    [ValidateRange(0, 100)][double]$MinimumPercent = 90,
+    [string[]]$TestPath
 )
-
 $ErrorActionPreference = 'Stop'
-& (Join-Path $PSScriptRoot 'Invoke-ModuleCoverage.ps1') -MinimumPercent $MinimumPercent
+& (Join-Path $PSScriptRoot 'Invoke-ModuleCoverage.ps1') -MinimumPercent $MinimumPercent -TestPath $TestPath
 exit $LASTEXITCODE

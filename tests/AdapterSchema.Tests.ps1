@@ -86,6 +86,9 @@ Describe 'adapter schema validation' {
     It 'isolates main Codex auth and declares shared MCP OAuth state explicitly' {
         $codex = Get-Content -LiteralPath (Join-Path $script:RepoRoot 'ai-tools\codex\adapter.json') -Raw | ConvertFrom-Json
 
+        @($codex.binary.windows)[0] | Should Be 'codex'
+        @($codex.binary.macos)[0] | Should Be 'codex'
+        @($codex.binary.linux)[0] | Should Be 'codex'
         (@($codex.binary.macos) -contains '$HOME/.local/bin/codex') | Should Be $true
         (@($codex.binary.linux) -contains '$HOME/.local/bin/codex') | Should Be $true
         (@($codex.normalState.sharedPaths) -contains 'rules') | Should Be $true

@@ -24,7 +24,7 @@ profile credential.
 npm i -g @openai/codex
 ```
 
-Binary discovery: `%APPDATA%\npm\codex.cmd` (Windows); `/usr/local/bin/codex`, `$HOME/.npm-global/bin/codex`, or `$HOME/.local/bin/codex` (macOS); `$HOME/.npm-global/bin/codex`, `/usr/local/bin/codex`, or `$HOME/.local/bin/codex` (Linux); then `codex` on PATH.
+Binary discovery prefers the operator-selected `codex` on `PATH`. If it is not available, Nini Agents falls back to `%APPDATA%\npm\codex.cmd` or `%APPDATA%\npm\codex` (Windows); `/usr/local/bin/codex`, `$HOME/.npm-global/bin/codex`, or `$HOME/.local/bin/codex` (macOS); and `$HOME/.npm-global/bin/codex`, `/usr/local/bin/codex`, or `$HOME/.local/bin/codex` (Linux).
 
 ## Quickstart
 
@@ -36,6 +36,38 @@ nini-agents launch codex/personal
 ```
 
 Conversations are shared normal state, so `nini-agents continue` is not needed between schema-v2 profiles (it remains available for legacy profiles).
+
+## Authenticate and inspect MCP servers
+
+Use the managed MCP entrypoint for login and status checks:
+
+```bash
+nini-agents mcp codex/work login figma
+nini-agents mcp codex/work list
+nini-agents mcp codex/work -- get figma --json
+```
+
+`mcp` runs `codex mcp` through the same profile launch path as `launch` and
+`exec`. It uses the adapter's binary selection, `CODEX_HOME`, cleared
+environment, and enforced credential arguments, rather than implementing a
+second OAuth client. It preserves the child streams and exit code. Use the
+optional outer `--` before the MCP command to pass vendor options such as
+`--json` without selecting Nini Agents' JSON envelope.
+
+Login from one standard account-overlay profile writes the shared MCP store;
+later processes and other standard Codex profiles read that same store.
+Legacy whole-root and `--isolated` profiles keep their existing separate
+credential boundary. Primary Codex account credentials remain profile-local.
+
+Do not substitute a bare `codex mcp login` when authenticating a Nini
+Agents-managed session. A child shell may inherit `CODEX_HOME`, but it does
+not inherit the parent's `-c mcp_oauth_credentials_store="file"` argument.
+Codex can then save OAuth to the OS keyring while managed sessions read the
+file store, making a successful login appear lost after restart.
+`nini-agents exec codex/work -- mcp login figma` is an equivalent existing
+entrypoint for integrations. The new command does not intercept bare Codex
+invocations or copy credentials between stores; use the managed entrypoint
+for future authentications.
 
 ## Shared permission defaults
 

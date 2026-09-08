@@ -21,6 +21,7 @@
 
 $script:RepoRoot = Split-Path -Parent $PSScriptRoot
 $script:LibDir = Join-Path $script:RepoRoot 'lib'
+. (Join-Path $PSScriptRoot 'helpers\pester-policy.ps1')
 
 # Production contract: nini-agents.ps1 defines Resolve-PathToken at top level;
 # MultiCli.Runtime calls it from module scope and finds it via the global
@@ -932,7 +933,7 @@ Import-Module '$modulePath' -Force
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 
-    It 'Remove-RuntimeOverlay deletes reparse-point files without following them' {
+    It 'Remove-RuntimeOverlay deletes reparse-point files without following them' -Skip:(-not (Test-PesterFileSymlink)) {
         $scratch = New-RuntimeScratch
         try {
             $adapter = '{"normalState":{"sharedPaths":["a.txt"]},"account":{"credentialFiles":[]}}' | ConvertFrom-Json
@@ -942,12 +943,7 @@ Import-Module '$modulePath' -Force
             $linkTarget = Join-Path $scratch.Root 'target.txt'
             Set-Content -LiteralPath $linkTarget -Value 'target-content' -Encoding ASCII
             $link = Join-Path $runtimeRoot 'linked.txt'
-            try {
-                New-Item -ItemType SymbolicLink -Path $link -Target $linkTarget -ErrorAction Stop | Out-Null
-            } catch {
-                Write-Host 'Host cannot create file symlinks; the privileged coverage exception remains active.'
-                return
-            }
+            New-Item -ItemType SymbolicLink -Path $link -Target $linkTarget -ErrorAction Stop | Out-Null
 
             Invoke-ModuleInternal 'MultiCli.Runtime' { param($a, $r) Remove-RuntimeOverlay -Adapter $a -RuntimeRoot $r } @($adapter, $runtimeRoot)
 

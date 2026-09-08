@@ -1618,8 +1618,9 @@ function Get-MovePackageProcessState {
 }
 
 function Assert-MovePackageIdle {
-    param($Adapter, [string]$ProfilePath, [scriptblock]$ProcessProbe)
+    param($Adapter, [string]$ProfilePath, [scriptblock]$ProcessProbe, [switch]$Force)
     $state = Get-MovePackageProcessState -Adapter $Adapter -ProfilePath $ProfilePath -ProcessProbe $ProcessProbe
+    if ($state -eq 'busy' -and $Force) { throw '--force cannot bypass credential safety while profile processes are active.' }
     if ($state -eq 'busy') { throw 'An active tool process is using this profile. Close it and retry.' }
     if ($state -ne 'idle') { throw 'Could not prove that the tool is stopped. No ownership change was made.' }
 }
@@ -1684,19 +1685,20 @@ function Undo-MovePackageState {
 }
 
 function Export-MultiCliMovePackage {
-    param($Adapter, [string]$ProfileDir, [string]$OutPath, [string]$ProfileName, [scriptblock]$ProcessProbe)
+    param($Adapter, [string]$ProfileDir, [string]$OutPath, [string]$ProfileName, [scriptblock]$ProcessProbe, [switch]$DryRun, [switch]$Force)
     if ($Adapter.account.mechanism -ne 'fileOverlay') { throw "Adapter '$($Adapter.id)' cannot be moved in a credential-bearing package." }
     if ($ProfileName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Invalid profile name '$ProfileName'." }
     if (-not (Test-Path -LiteralPath $ProfileDir -PathType Container)) { throw "Profile '$ProfileName' does not exist." }
     $profileItem = Get-Item -LiteralPath $ProfileDir -Force
     if ($profileItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw 'Profile source cannot be a link.' }
     if (Test-Path -LiteralPath $OutPath) { throw "Refusing to overwrite existing package '$OutPath'." }
-    Assert-MovePackageIdle -Adapter $Adapter -ProfilePath $ProfileDir -ProcessProbe $ProcessProbe
+    Assert-MovePackageIdle -Adapter $Adapter -ProfilePath $ProfileDir -ProcessProbe $ProcessProbe -Force:$Force
     $validation = Test-MoveProfile -Adapter $Adapter -ProfilePath $ProfileDir
     if (-not $validation.Valid) { throw "Profile failed credential and structure validation: $($validation.Code)" }
     $outFull = [System.IO.Path]::GetFullPath($OutPath)
     $profileFull = [System.IO.Path]::GetFullPath($ProfileDir)
     if (Test-TransferPathWithin -Child $outFull -Root $profileFull) { throw 'Move package cannot be written inside the source profile.' }
+    if ($DryRun) { return [pscustomobject]@{ Preflight = $true; ProfileName = $ProfileName } }
     $outParent = Split-Path -Parent $outFull
     if ($outParent -and -not (Test-Path -LiteralPath $outParent)) { New-Item -ItemType Directory -Force -Path $outParent | Out-Null }
     $packageId = [guid]::NewGuid().ToString()
@@ -1726,7 +1728,7 @@ function Export-MultiCliMovePackage {
         if (Test-Path -LiteralPath $backup) { throw 'Inactive recovery destination already exists.' }
         New-Item -ItemType Directory -Path $lock -ErrorAction Stop | Out-Null
         try {
-            Assert-MovePackageIdle -Adapter $Adapter -ProfilePath $ProfileDir -ProcessProbe $ProcessProbe
+            Assert-MovePackageIdle -Adapter $Adapter -ProfilePath $ProfileDir -ProcessProbe $ProcessProbe -Force:$Force
             if (-not (Test-MoveTreesEqual -Adapter $Adapter -Left $ProfileDir -Right $profileStage)) { throw 'Profile changed while packaging.' }
             $currentState = Join-Path $temp 'current-state'
             Copy-MovePackageState -Adapter $Adapter -Mode $validation.Mode -Destination $currentState

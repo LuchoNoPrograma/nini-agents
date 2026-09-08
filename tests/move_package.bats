@@ -165,3 +165,46 @@ make_package_profile() {
     [ "$status" -ne 0 ]
   done
 }
+
+@test "forced portable export refuses busy credentials without creating a replica" {
+  make_package_profile
+  busy_probe() { return 0; }
+  run move_package_export "$MANIFEST" "$SOURCE_ROOT/account-a" "$PACKAGE" account-a busy_probe true
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'credential safety'* ]]
+  [ ! -e "$PACKAGE" ]
+  [ -f "$SOURCE_ROOT/account-a/auth/auth.json" ]
+  [ ! -e "$SOURCE_ROOT/.inactive" ]
+}
+
+@test "force rechecks activity under the export lock and removes the candidate ZIP" {
+  make_package_profile
+  late_probe() {
+    if [ -d "$SOURCE_ROOT/.move-lock.account-a" ]; then return 0; fi
+    return 1
+  }
+  run move_package_export "$MANIFEST" "$SOURCE_ROOT/account-a" "$PACKAGE" account-a late_probe true
+  [ "$status" -ne 0 ]
+  [ ! -e "$PACKAGE" ]
+  [ -f "$SOURCE_ROOT/account-a/auth/auth.json" ]
+  [ ! -e "$SOURCE_ROOT/.inactive" ]
+  [ ! -e "$SOURCE_ROOT/.move-lock.account-a" ]
+}
+
+@test "forced portable export rejects inconclusive process probes before writing a ZIP" {
+  make_package_profile
+  unknown_probe() { return 2; }
+  run move_package_export "$MANIFEST" "$SOURCE_ROOT/account-a" "$PACKAGE" account-a unknown_probe true
+  [ "$status" -ne 0 ]
+  [ ! -e "$PACKAGE" ]
+  [ -f "$SOURCE_ROOT/account-a/auth/auth.json" ]
+}
+
+@test "forced portable export still rejects unsafe profile content" {
+  make_package_profile
+  printf 'unexpected\n' > "$SOURCE_ROOT/account-a/unknown.txt"
+  run move_package_export "$MANIFEST" "$SOURCE_ROOT/account-a" "$PACKAGE" account-a idle_probe true
+  [ "$status" -ne 0 ]
+  [ ! -e "$PACKAGE" ]
+  [ -f "$SOURCE_ROOT/account-a/auth/auth.json" ]
+}

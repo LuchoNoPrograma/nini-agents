@@ -177,12 +177,11 @@ remote_move_artifact_path() {
   printf '%s/%s\n' "$root" "${relative//\\//}"
 }
 
-# Return 0 when a profile is busy, 1 when it is proven idle, and 2 when the
-# platform cannot prove either state. Values are compared but never printed.
-remote_move_process_probe() {
+# Build exact environment markers without printing their values.
+remote_move_process_markers() {
   local manifest="$1" profile="$2" metadata profile_id="" mode=legacy runtime_root shared_root auth_dir
-  local proc command_line environment key raw expanded candidate
-  local probes=()
+  local key raw expanded
+  REMOTE_MOVE_PROCESS_MARKERS=()
   metadata="$profile/.profile.json"
   if [ -f "$metadata" ] && [ ! -L "$metadata" ]; then
     profile_id="$(runtime_json_str '.profileId' "$metadata")"
@@ -197,31 +196,92 @@ remote_move_process_probe() {
     case "$raw" in
       *'{profileDir}'*|*'{profileId}'*|*'{authDir}'*|*'{runtimeRoot}'*)
         expanded="$(runtime_expand_value "$raw" "$profile" "$profile_id" "$auth_dir" "$runtime_root" "$shared_root")"
-        probes+=("$key=$expanded")
+        REMOTE_MOVE_PROCESS_MARKERS+=("$key=$expanded")
         # A destination may be absent while a stale schema-v2 process still
         # points at its former runtime. Probe both whole-root and overlay forms.
         if [ ! -e "$metadata" ] && [[ "$raw" == *'{runtimeRoot}'* ]]; then
           expanded="$(runtime_expand_value "$raw" "$profile" "$profile_id" "$auth_dir" "$profile/.runtime" "$shared_root")"
-          probes+=("$key=$expanded")
+          REMOTE_MOVE_PROCESS_MARKERS+=("$key=$expanded")
         fi
         ;;
     esac
   done < <(jq -r '.isolation.env // {} | to_entries[] | [.key, .value] | @tsv' "$manifest" 2>/dev/null | tr -d '\r')
-  [ -z "$profile_id" ] || probes+=("MULTICLI_PROFILE_ID=$profile_id")
-  [ "${#probes[@]}" -gt 0 ] || return 2
-  if [ -d /proc ]; then
-    for proc in /proc/[0-9]*; do
-      [ -r "$proc/environ" ] || continue
-      while IFS= read -r -d '' environment; do
-        for candidate in "${probes[@]}"; do [ "$environment" != "$candidate" ] || return 0; done
-      done 2>/dev/null < "$proc/environ" || true
+  [ -z "$profile_id" ] || REMOTE_MOVE_PROCESS_MARKERS+=("MULTICLI_PROFILE_ID=$profile_id")
+  [ "${#REMOTE_MOVE_PROCESS_MARKERS[@]}" -gt 0 ]
+}
+
+# Read stat without printing command arguments, environment values or paths.
+# starttime (field 22) identifies the process incarnation, not just its PID.
+remote_move_process_stat() {
+  local value="" rest
+  { IFS= read -r -d '' value < "/proc/$1/stat"; } 2>/dev/null || [ -n "$value" ] || return 1
+  rest=${value##*) }
+  read -r -a REMOTE_MOVE_PROCESS_STAT <<< "$rest"
+  [ "${#REMOTE_MOVE_PROCESS_STAT[@]}" -ge 20 ] || return 1
+  REMOTE_MOVE_PROCESS_NAME=${value#*(}
+  REMOTE_MOVE_PROCESS_NAME=${REMOTE_MOVE_PROCESS_NAME%)*}
+}
+
+# Inherited markers also identify orphaned background jobs after Codex exits.
+# Rows are private bookkeeping; only PID, PPID and the sanitized name are shown.
+remote_move_process_collect() {
+  local proc pid environment candidate matched start parent name unknown=0 row unreadable
+  local unreadable_rows=()
+  REMOTE_MOVE_PROCESS_ROWS=()
+  REMOTE_MOVE_PROCESS_UNREADABLE=()
+  remote_move_process_markers "$1" "$2" || return 2
+  [ -d /proc/self ] || return 2
+  for proc in /proc/[0-9]*; do
+    [ -O "$proc" ] || continue
+    pid=${proc##*/}
+    remote_move_process_stat "$pid" || continue
+    [ "${REMOTE_MOVE_PROCESS_STAT[0]}" != Z ] || continue
+    start=${REMOTE_MOVE_PROCESS_STAT[19]}; parent=${REMOTE_MOVE_PROCESS_STAT[1]}; name=$REMOTE_MOVE_PROCESS_NAME
+    matched=false
+    if [ ! -r "$proc/environ" ]; then
+      [ ! -d "$proc" ] || unreadable_rows+=("$pid|$parent")
+      continue
+    fi
+    # NUL delimiters matter: a profile named work must not match work-extra.
+    while IFS= read -r -d '' environment; do
+      for candidate in "${REMOTE_MOVE_PROCESS_MARKERS[@]}"; do
+        [ "$environment" != "$candidate" ] || matched=true
+      done
+    done 2>/dev/null < "$proc/environ"
+    [ "$matched" = true ] || continue
+    remote_move_process_stat "$pid" || continue
+    [ "${REMOTE_MOVE_PROCESS_STAT[19]}" = "$start" ] || { unknown=1; continue; }
+    name=$(printf '%s' "$name" | LC_ALL=C tr -cd '[:alnum:]_. -')
+    REMOTE_MOVE_PROCESS_ROWS+=("$pid|$parent|$start|$name")
+  done
+  # An unrelated non-dumpable desktop process must not block every profile.
+  # Retain the existing accessible-marker scope; fail closed when an unreadable
+  # child can actually be linked to one of the matched profile processes.
+  for unreadable in "${unreadable_rows[@]}"; do
+    IFS='|' read -r pid parent <<< "$unreadable"
+    for row in "${REMOTE_MOVE_PROCESS_ROWS[@]}"; do
+      if [ "${row%%|*}" = "$parent" ]; then
+        REMOTE_MOVE_PROCESS_UNREADABLE+=("$pid"); unknown=1; break
+      fi
     done
-    return 1
+  done
+  [ "$unknown" -eq 0 ] || return 2
+  [ "${#REMOTE_MOVE_PROCESS_ROWS[@]}" -eq 0 ] || return 0
+  return 1
+}
+
+# Return 0 for detected activity, 1 for no matching activity, 2 if inconclusive.
+remote_move_process_probe() {
+  local candidate command_line
+  if [ -d /proc ]; then
+    remote_move_process_collect "$1" "$2"
+    return $?
   fi
+  remote_move_process_markers "$1" "$2" || return 2
   case "$(uname -s 2>/dev/null || true)" in
     Darwin)
       while IFS= read -r command_line; do
-        for candidate in "${probes[@]}"; do
+        for candidate in "${REMOTE_MOVE_PROCESS_MARKERS[@]}"; do
           case "$command_line" in *"$candidate "*|*"$candidate") return 0 ;; esac
         done
       done < <(ps eww -axo command= 2>/dev/null) || return 2
@@ -229,6 +289,58 @@ remote_move_process_probe() {
       ;;
     *) return 2 ;;
   esac
+}
+
+remote_move_process_report() {
+  local manifest=$1 profile=$2 stop=${3:-false} rc row pid parent start name attempt
+  if remote_move_process_collect "$manifest" "$profile"; then rc=0; else rc=$?; fi
+  for row in "${REMOTE_MOVE_PROCESS_ROWS[@]}"; do
+    IFS='|' read -r pid parent start name <<< "$row"
+    printf 'PID %s  PPID %s  %s\n' "$pid" "$parent" "$name"
+  done
+  if [ "$rc" -eq 2 ]; then
+    printf 'Process inspection is inconclusive; no processes were stopped.\n' >&2
+    if [ "${#REMOTE_MOVE_PROCESS_UNREADABLE[@]}" -gt 0 ]; then
+      printf 'Cannot inspect owned PID: %s\n' "${REMOTE_MOVE_PROCESS_UNREADABLE[@]}" >&2
+    fi
+    printf 'PID inspection and safe stop require readable Linux /proc entries. Close the session and its background jobs manually, then retry preflight.\n' >&2
+    return 2
+  fi
+  if [ "$rc" -eq 1 ]; then
+    printf 'No processes with this profile marker were found. Run migration preflight again.\n'
+    return 0
+  fi
+  if [ "$stop" != true ]; then
+    printf 'Profile is busy: inherited background processes also block migration. Close them or use the explicit stop command.\n' >&2
+    return 1
+  fi
+  command -v python3 >/dev/null 2>&1 || { printf 'Safe stop requires Python 3.9+ with Linux pidfd support; no signals sent.\n' >&2; return 2; }
+  # Pin every PID before signalling; the helper rechecks identity, ownership,
+  # markers and ancestry. Never use a PID-only kill or a process-group kill.
+  local payload
+  payload=$(printf '%s\n' "${REMOTE_MOVE_PROCESS_ROWS[@]}" | jq -Rn \
+    --argjson markers "$(printf '%s\n' "${REMOTE_MOVE_PROCESS_MARKERS[@]}" | jq -Rn '[inputs]')" \
+    '{markers:$markers,rows:[inputs | split("|") | {pid:.[0],start:.[2]}]}') || return 2
+  printf '%s' "$payload" | python3 "$SCRIPT_DIR/lib/stop-profile-processes.py" || return $?
+  for ((attempt = 0; attempt < 20; attempt++)); do
+    if remote_move_process_collect "$manifest" "$profile"; then rc=0; else rc=$?; fi
+    [ "$rc" -ne 1 ] || { printf 'Profile processes stopped. Run migration preflight again.\n'; return 0; }
+    [ "$rc" -ne 2 ] || { printf 'Post-stop inspection is inconclusive; migration remains blocked.\n' >&2; return 2; }
+    sleep 0.25
+  done
+  printf 'Processes remain active after SIGTERM; migration remains blocked. No SIGKILL was sent.\n' >&2
+  return 1
+}
+
+cmd_processes() {
+  local spec=${1:-} option=${2:-} tool profile stop=false
+  [ "$#" -ge 1 ] && [ "$#" -le 2 ] || { printf 'Usage: nini-agents processes <tool>/<profile> [--stop]\n' >&2; return 2; }
+  case "$option" in '') ;; --stop) stop=true ;; *) return 2 ;; esac
+  case "$spec" in */*) tool=${spec%%/*}; profile=${spec#*/} ;; *) return 2 ;; esac
+  move_safe_component "$tool" && move_safe_component "$profile" || return 2
+  local manifest="$(adapter_path "$tool")" target="$(profile_dir "$tool" "$profile")"
+  [ -f "$manifest" ] && [ -d "$target" ] && [ ! -L "$target" ] || { printf 'Profile or adapter is missing or unsafe.\n' >&2; return 2; }
+  remote_move_process_report "$manifest" "$target" "$stop"
 }
 
 remote_move_write_launcher() {
@@ -318,6 +430,15 @@ remote_move_endpoint() {
   [ "$(runtime_json_str '.account.mechanism' "$manifest")" = fileOverlay ] || return 67
 
   case "$action" in
+    processes|stop-processes)
+      [ -d "$target" ] && [ ! -L "$target" ] || return 70
+      if [ "$action" = stop-processes ]; then
+        remote_move_process_report "$manifest" "$target" true
+      else
+        remote_move_process_report "$manifest" "$target" false
+      fi
+      return $?
+      ;;
     health)
       case "$(uname -s 2>/dev/null || true)" in Linux|Darwin) ;; *) return 68 ;; esac
       command -v jq >/dev/null 2>&1 && command -v rsync >/dev/null 2>&1 || return 69
@@ -454,7 +575,7 @@ remote_move_rollback_active_destination() {
 remote_move_execute() {
   local json_mode="$1"; shift
   local spec="${1:-}" destination_device="${2:-}"; shift 2 2>/dev/null || true
-  local dry_run=false discard_source_backup=false config="${NINI_AGENTS_DEVICES_CONFIG:-${CODEXPORTER_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/nini-agents/devices.conf}}"
+  local dry_run=false force=false discard_source_backup=false config="${NINI_AGENTS_DEVICES_CONFIG:-${CODEXPORTER_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/nini-agents/devices.conf}}"
   local tool profile local_root source_location source_ssh source_root destination_location destination_ssh destination_root
   local source_info operation local_digest remote_digest source_device rc
   MOVE_PROFILE_FORMAT=unknown
@@ -465,6 +586,7 @@ remote_move_execute() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --dry-run) dry_run=true ;;
+      --force) force=true ;;
       --discard-source-backup) discard_source_backup=true ;;
       --devices-config|--config)
         shift
@@ -475,6 +597,10 @@ remote_move_execute() {
     esac
     shift
   done
+  if [ "$force" = true ]; then
+    discard_source_backup=false
+    printf 'Notice: --force cannot bypass credential safety. Active or unclassified profile processes still block movement; the source backup is retained.\n' >&2
+  fi
   case "$spec" in */*) tool="${spec%%/*}"; profile="${spec#*/}" ;; *) remote_move_fail_result invalid_identifier preflight_rejected unknown 'Move requires <tool>/<profile>.'; return 1 ;; esac
   move_safe_component "$tool" && move_safe_component "$profile" && move_safe_component "$destination_device" || {
     remote_move_fail_result invalid_identifier preflight_rejected unknown 'Tool, profile, and destination must be safe identifiers.'; return 1;
@@ -532,7 +658,7 @@ remote_move_execute() {
   MOVE_PROFILE_FORMAT="${source_info%%|*}"
   MOVE_PROFILE_MODE="${source_info#*|}"
   if remote_move_call "$source_location" "$source_ssh" probe "$tool" "$source_root" "$profile" unused >/dev/null 2>&1; then
-    remote_move_fail_result process_active preflight_rejected "$MOVE_PROFILE_FORMAT" 'The source profile is in use.'; return 1
+    remote_move_fail_result process_active preflight_rejected "$MOVE_PROFILE_FORMAT" 'The source profile is in use; --force cannot bypass credential safety.'; return 1
   else rc=$?; [ "$rc" -eq 1 ] || { remote_move_fail_result process_probe_failed preflight_rejected "$MOVE_PROFILE_FORMAT" 'The source process probe was inconclusive.'; return 1; }; fi
   remote_move_call "$destination_location" "$destination_ssh" prepare-destination "$tool" "$destination_root" "$profile" unused >/dev/null 2>&1 || {
     remote_move_fail_result destination_unavailable preflight_rejected "$MOVE_PROFILE_FORMAT" 'The destination is active, unsafe, busy, or has conflicting artifacts.'; return 1;
@@ -584,7 +710,7 @@ remote_move_execute() {
   }
   if remote_move_call "$source_location" "$source_ssh" probe "$tool" "$source_root" "$profile" unused >/dev/null 2>&1; then
     remote_move_release_locks "$source_location" "$source_ssh" "$source_root" "$profile" "$tool" "$destination_location" "$destination_ssh" "$destination_root"
-    remote_move_fail_result process_appeared staging_preserved "$MOVE_PROFILE_FORMAT" 'A source process appeared during the transaction.'; return 1
+    remote_move_fail_result process_appeared staging_preserved "$MOVE_PROFILE_FORMAT" 'A source process appeared during the transaction; --force cannot bypass credential safety.'; return 1
   else rc=$?; if [ "$rc" -ne 1 ]; then remote_move_release_locks "$source_location" "$source_ssh" "$source_root" "$profile" "$tool" "$destination_location" "$destination_ssh" "$destination_root"; remote_move_fail_result process_probe_failed staging_preserved "$MOVE_PROFILE_FORMAT" 'The source process probe became inconclusive.'; return 1; fi; fi
   if remote_move_call "$destination_location" "$destination_ssh" probe "$tool" "$destination_root" "$profile" unused >/dev/null 2>&1; then
     remote_move_release_locks "$source_location" "$source_ssh" "$source_root" "$profile" "$tool" "$destination_location" "$destination_ssh" "$destination_root"
@@ -644,26 +770,51 @@ cmd_move() {
     return 0
   fi
   printf 'Error: %s [%s; %s]\n' "$REMOTE_MOVE_MESSAGE" "$MOVE_RESULT_CODE" "$MOVE_RESULT_STATE" >&2
+  if [ "$MOVE_RESULT_CODE" = process_active ] || [ "$MOVE_RESULT_CODE" = process_probe_failed ]; then
+    remote_move_devices_command processes "$1" --device "$REMOTE_MOVE_OWNER" --devices-config "$REMOTE_MOVE_CONFIG" || true
+    printf 'After reviewing the PIDs, run: nini-agents devices processes %q --device %q --devices-config %q --stop\n' "$1" "$REMOTE_MOVE_OWNER" "$REMOTE_MOVE_CONFIG" >&2
+  fi
   return 1
 }
 
 remote_move_devices_command() {
   local subcommand="${1:-}"; shift || true
+  local device="" stop=false action
   local tool=codex spec config="${NINI_AGENTS_DEVICES_CONFIG:-${CODEXPORTER_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/nini-agents/devices.conf}}" profile root state index failed=0 local_digest="" remote_digest=""
   case "$subcommand" in
     list|doctor) if [ "$#" -gt 0 ] && [[ "$1" != --* ]]; then tool="$1"; shift; fi ;;
-    status) spec="${1:-}"; shift || true; case "$spec" in */*) tool="${spec%%/*}"; profile="${spec#*/}" ;; *) remote_move_error 'Status requires <tool>/<profile>.'; return 2 ;; esac ;;
-    *) remote_move_error 'Usage: nini-agents devices <list|status|doctor> ...'; return 2 ;;
+    status|processes) spec="${1:-}"; shift || true; case "$spec" in */*) tool="${spec%%/*}"; profile="${spec#*/}" ;; *) remote_move_error 'Status/processes requires <tool>/<profile>.'; return 2 ;; esac ;;
+    *) remote_move_error 'Usage: nini-agents devices <list|status|processes|doctor> ...'; return 2 ;;
   esac
   while [ "$#" -gt 0 ]; do
-    case "$1" in --devices-config|--config) shift; [ "$#" -gt 0 ] || return 2; config="$1" ;; *) remote_move_error "Unknown devices option '$1'."; return 2 ;; esac
+    case "$1" in
+      --devices-config|--config) shift; [ "$#" -gt 0 ] || return 2; config="$1" ;;
+      --device) [ "$subcommand" = processes ] || return 2; shift; [ "$#" -gt 0 ] || return 2; device="$1" ;;
+      --stop) [ "$subcommand" = processes ] || return 2; stop=true ;;
+      *) remote_move_error "Unknown devices option '$1'."; return 2 ;;
+    esac
     shift
   done
   move_safe_component "$tool" || return 2
-  [ "$subcommand" != status ] || move_safe_component "$profile" || return 2
+  case "$subcommand" in status|processes) move_safe_component "$profile" || return 2 ;; esac
   remote_move_load_config "$config" || return 1
   root="$(remote_move_tool_root "$REMOTE_MOVE_LOCAL_CONFIG_ROOT" "$tool")" || return 1
   case "$subcommand" in
+    processes)
+      [ -n "$device" ] || device=$REMOTE_MOVE_THIS_DEVICE
+      move_safe_component "$device" || return 2
+      action=processes
+      [ "$stop" != true ] || action=stop-processes
+      printf 'Processes for %s on %s:\n' "$spec" "$device"
+      if [ "$device" = "$REMOTE_MOVE_THIS_DEVICE" ]; then
+        remote_move_call local '' "$action" "$tool" "$root" "$profile" unused
+      else
+        remote_move_find_device "$device" || return 1
+        root="$(remote_move_tool_root "$REMOTE_MOVE_FOUND_CONFIG_ROOT" "$tool")" || return 1
+        remote_move_call remote "$REMOTE_MOVE_FOUND_SSH" "$action" "$tool" "$root" "$profile" unused
+      fi
+      return $?
+      ;;
     list)
       printf "Active %s profiles on %s:\n" "$tool" "$REMOTE_MOVE_THIS_DEVICE"
       if [ -d "$root" ] && [ ! -L "$root" ]; then

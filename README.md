@@ -119,6 +119,7 @@ See platform limits in the [support matrix](docs/support-matrix.md). Run `nini-a
 | `nini-agents auth set <tool>/<profile>` | Store a process secret in the OS credential store |
 | `nini-agents auth status <tool>/<profile>` | Check whether that secret exists |
 | `nini-agents auth clear <tool>/<profile>` | Remove that secret |
+| `nini-agents mcp codex/<profile> [--] <command> [args...]` | Run Codex MCP login and management with the profile's credential store |
 | `nini-agents permissions show` | Show the shared Codex permission default |
 | `nini-agents permissions set <read-only\|workspace\|full-access>` | Save the shared Codex permission default for new sessions |
 | `nini-agents continue <tool> <src> <dest> [--dry-run] [--no-merge]` | Copy supported session state, never credentials |
@@ -128,6 +129,8 @@ See platform limits in the [support matrix](docs/support-matrix.md). Run `nini-a
 | `nini-agents import <archive> <tool>/<name>` | Import a schema-v2 archive |
 | `nini-agents move-export <tool>/<name> [package.zip]` | Create an unencrypted portable ZIP with credentials, chats, and adapter-declared global state; deactivate the source after verification |
 | `nini-agents move-import <package.zip> <tool>/<name>` | Verify and install a portable move ZIP on Linux, macOS, or Windows |
+| `nini-agents move-check <tool>/<name>` | Check portable-export process and profile prerequisites without writing files |
+| `nini-agents processes <tool>/<name> [--stop]` | Inspect inherited profile jobs; explicitly request safe SIGTERM on Linux |
 | `nini-agents move <tool>/<name> <device> [--dry-run] [--discard-source-backup] [--devices-config <path>]` | Move a legacy or schema-v2 filesystem-credential profile to one configured device |
 | `nini-agents devices list [tool]` | List active local profiles through the device registry |
 | `nini-agents devices status <tool>/<name>` | Show active/absent/inaccessible state on every configured device |
@@ -209,6 +212,66 @@ remain in the source backup until any requested backup discard succeeds.
 
 ### Portable offline move ZIPs
 
+`--force` is accepted for compatibility but **never bypasses process safety**.
+An active profile process, including a Codex session, app-server or inherited
+background job, still blocks `move`, `move-check` and `move-export`. Process
+names cannot establish that a child no longer has credentials or profile access.
+Inconclusive probes remain blocking. Both initial checks and rechecks under the
+transaction lock enforce this rule. `move --force` retains the source backup
+even if `--discard-source-backup` was requested; it never sends signals.
+
+Recovery ZIPs and `.inactive/` backups contain credentials. "Inactive" describes
+a filesystem ownership state, not token revocation: these copies may still be
+usable and require protection. Migration never logs out or changes tokens.
+Detected activity prevents export or activation even with `--force`; activity
+that appears during portable packaging causes the candidate ZIP to be removed
+while the original profile remains active. This does not claim that unknown
+external copies, remote sessions or deliberately hidden processes are revoked.
+
+Background servers and other jobs can inherit the profile environment and
+outlive the Codex session that launched them. On Linux, a blocked human-readable
+preflight now lists their PID, parent PID and sanitized process name. Inspect
+them before requesting termination from an independent terminal:
+
+```bash
+nini-agents processes codex/work
+nini-agents processes codex/work --stop
+# The configured device root may differ from the local MULTICLI_HOME:
+nini-agents devices processes codex/work --device ubuntu --devices-config ./devices.conf
+nini-agents devices processes codex/work --device ubuntu --devices-config ./devices.conf --stop
+nini-agents move-check codex/work
+```
+
+`processes` returns nonzero for detected activity or inconclusive inspection.
+`--stop` requires Python 3.9+ with Linux pidfd support on the selected device.
+It verifies every selected process's start time, owner and profile marker,
+refuses its own ancestor session before sending any signal, and uses pinned
+process handles to avoid signalling a recycled PID. It sends SIGTERM only,
+then checks again; stubborn or respawned jobs keep migration blocked. It does
+not move profiles, remove credentials or escalate to SIGKILL. A stop can
+interrupt in-progress jobs or servers, so inspect the list first.
+
+Detection is scoped to accessible same-user processes with exact inherited
+profile markers, including orphaned jobs. Unreadable children of identified
+processes make inspection inconclusive; unrelated non-dumpable processes do
+not block every profile. Jobs which clear their markers cannot be attributed
+reliably. Scheduled tasks and automatic process stopping on macOS/Windows are
+outside this capability. Normal migration revalidation remains mandatory.
+
+`move-check` (also `move-export <tool>/<name> --dry-run`) checks process and
+profile prerequisites without creating a ZIP or changing ownership. It is
+not a reservation or a complete simulation of copying shared state. Consumers
+should use the dedicated `move-check` command so an older launcher fails on an
+unknown command instead of interpreting a new flag as an output filename.
+Codexporter checks every selected profile before starting a batch export;
+activity can still change afterward and each real export rechecks it.
+
+Focused verification: `bash tests/run-bats.sh tests/profile_processes.bats
+tests/remote_move.bats tests/move_package.bats` and
+`python3 tests/test_stop_profile_processes.py`. These tests create disposable
+profiles and processes. Windows portable preflight cases live in
+`tests/MovePackage.Tests.ps1`.
+
 Use the separate offline movement commands when SSH is unavailable or the
 destination is Windows:
 
@@ -237,6 +300,24 @@ successful import, the ZIP is also retained as a recovery copy. Offline media
 cannot enforce a single destination if the same ZIP is replayed, so delete or
 secure every extra copy once ownership is confirmed. Windows implementation is
 present but was not executed in this Linux checkout.
+
+### Codex MCP authentication
+
+Authenticate MCP servers through the profile so login and later sessions use
+the same credential storage:
+
+```bash
+nini-agents mcp codex/work login figma
+nini-agents mcp codex/work list
+nini-agents mcp codex/work -- get figma --json
+```
+
+The command delegates to the same runtime as `launch` and `exec`, including
+the enforced file credential policy. Standard Codex profiles share MCP OAuth;
+isolated profiles retain their own store. A bare `codex mcp login` bypasses
+Nini Agents and can save to a different store, even inside a managed session:
+`CODEX_HOME` is inherited, but the parent's `-c` options are not. See the
+[Codex guide](docs/adapters/codex.md#authenticate-and-inspect-mcp-servers).
 
 ### Shared Codex permissions
 

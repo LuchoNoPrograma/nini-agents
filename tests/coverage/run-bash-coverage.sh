@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUTPUT_DIR="${BASH_COVERAGE_OUTPUT:-${TMPDIR:-/tmp}/multi-cli-coverage/bash}"
-MINIMUM_PERCENT="${BASH_COVERAGE_MINIMUM:-95}"
+MINIMUM_PERCENT="${BASH_COVERAGE_MINIMUM:-90}"
 BASELINE="${COVERAGE_BASELINE:-}"
 CHANGED_REPORT="${BASH_COVERAGE_CHANGED_REPORT:-$OUTPUT_DIR/changed-lines.json}"
 export BASH_COVERAGE_OUTPUT="$OUTPUT_DIR"
@@ -33,7 +33,7 @@ rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 (
   cd "$REPO_ROOT"
-  bashcov --root "$REPO_ROOT" -- "$REPO_ROOT/tests/run-bats.sh"
+  bashcov --root "$REPO_ROOT" -- "$REPO_ROOT/tests/run-bats.sh" "$@"
 )
 
 SUMMARY="$OUTPUT_DIR/.resultset.json"

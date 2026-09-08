@@ -428,6 +428,22 @@ function Read-RedirectedLine {
     return (New-Object Text.UTF8Encoding($false, $true)).GetString($bytes.ToArray(), $offset, $bytes.Count - $offset)
 }
 
+# MCP commands reuse the session launch path, including enforced credential storage.
+function Invoke-Mcp {
+    param([string]$Spec, [string[]]$McpArgs = @())
+    if ($McpArgs.Count -gt 0 -and $McpArgs[0] -eq '--') {
+        $McpArgs = @($McpArgs | Select-Object -Skip 1)
+    }
+    if (-not $Spec -or $McpArgs.Count -eq 0) {
+        throw 'Usage: nini-agents mcp codex/<profile> [--] <command> [args...]'
+    }
+    $profile = Split-ProfileSpec $Spec
+    if ($profile.Tool -cne 'codex') {
+        throw 'MCP management currently requires a Codex profile (codex/<profile>).'
+    }
+    Invoke-Launch -Spec $Spec -BinaryArgs (@('mcp') + @($McpArgs)) -MachineExec
+}
+
 # nini-agents auth set|status|clear: manage a process-secret profile's
 # credential in the OS store, keyed by the profile's stable profileId.
 function Invoke-Auth {
@@ -2333,7 +2349,18 @@ function Invoke-Import {
 # the original profile identity, includes declared chats/global state, and
 # deactivates the source only after ZIP self-verification.
 function Invoke-MoveExport {
-    param([string]$Spec, [string]$OutPath)
+    param([string]$Spec, [string]$OutPath, [string[]]$Options)
+    $dryRun = $false
+    $force = $false
+    $output = ''
+    foreach ($option in @($OutPath) + @($Options)) {
+        if (-not $option) { continue }
+        if ($option -eq '--dry-run') { $dryRun = $true }
+        elseif ($option -eq '--force') { $force = $true }
+        elseif ($option.StartsWith('--') -or $output) { throw "Unknown or duplicate move-export argument: $option" }
+        else { $output = $option }
+    }
+    $OutPath = $output
     if (-not $Spec) { throw 'Usage: nini-agents move-export <tool>/<name> [package.zip]' }
     $p = Split-ProfileSpec $Spec
     Test-ProfileName $p.Name
@@ -2342,7 +2369,11 @@ function Invoke-MoveExport {
     if (-not (Test-Path -LiteralPath $source -PathType Container)) { throw "Profile '$Spec' does not exist" }
     if (-not $OutPath) { $OutPath = ".\$($p.Tool)-$($p.Name)-move.zip" }
     Import-Module (Resolve-MultiCliModulePath 'MultiCli.Transfer.psm1') -Force
-    $result = Export-MultiCliMovePackage -Adapter $adapter -ProfileDir $source -OutPath $OutPath -ProfileName $p.Name
+    $result = Export-MultiCliMovePackage -Adapter $adapter -ProfileDir $source -OutPath $OutPath -ProfileName $p.Name -DryRun:$dryRun -Force:$force
+    if ($dryRun) {
+        Write-Host "Export preflight passed for '$Spec'; no files were written. Activity will be rechecked during export."
+        return
+    }
     Write-Host "Moved '$Spec' into unencrypted package '$($result.ArchivePath)'."
     Write-Host "Source profile is inactive; recovery backup: $($result.BackupPath)"
     Write-Warning 'The ZIP contains credentials, chats, and declared global state. Protect it like a password.'
@@ -2447,6 +2478,7 @@ COMMANDS
   rename <tool>/<old> <tool>/<new>                      Rename
   delete <tool>/<name>                                  Delete (confirms)
   auth set|status|clear <tool>/<name>                   Manage a process-secret credential
+  mcp codex/<name> [--] <command> [args...]             Run Codex MCP commands with the profile credential store
   permissions show | set <read-only|workspace|full-access>
                                                         Manage shared Codex defaults
   clone <tool>/<src> <tool>/<dest>                      Clone
@@ -2454,7 +2486,8 @@ COMMANDS
   template list | delete <name>                         Manage templates
   export <tool>/<name> [path]                           Export to .zip
   import <archive> <tool>/<name>                        Import from .zip
-  move-export <tool>/<name> [package.zip]               Create an unencrypted credential/chat/state ZIP and deactivate source
+  move-export <tool>/<name> [package.zip] [--dry-run] [--force]   Create an unencrypted credential/chat/state ZIP and deactivate source
+  move-check <tool>/<name> [--force]                  Check portable export without writing files
   move-import <package.zip> <tool>/<name>               Verify and install a portable move ZIP
   move <tool>/<name> <device> [--dry-run]               Cross-device move (Bash transport only)
   devices list|status|doctor                            Device fleet commands (Bash transport only)
@@ -2499,7 +2532,7 @@ Register-ArgumentCompleter -Native -CommandName nini-agents,multi-cli -ScriptBlo
     param(`$wordToComplete, `$commandAst, `$cursorPosition)
     `$base = if (`$env:MULTICLI_HOME) { `$env:MULTICLI_HOME } else { Join-Path `$env:USERPROFILE 'MultiCliProfiles' }
     `$tools = (Get-ChildItem -Directory '$ToolsDir' -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path `$_.FullName 'adapter.json') }).Name
-    `$cmds = @('new','launch','exec','continue','migrate','list','status','rename','delete','clone','auth','permissions','template','export','import','move-export','move-import','move','devices','tools','doctor','stats','completion','help','version')
+    `$cmds = @('new','launch','exec','continue','migrate','list','status','rename','delete','clone','auth','mcp','permissions','template','export','import','move-check','move-export','move-import','move','devices','tools','doctor','stats','completion','help','version')
     `$specs = @()
     foreach (`$t in `$tools) {
         `$dir = Join-Path `$base `$t
@@ -2599,7 +2632,7 @@ $Cmd = if ($normalizedTokens.Count -gt 0) { [string]$normalizedTokens[0] } else 
 $Arg1 = if ($normalizedTokens.Count -gt 1) { [string]$normalizedTokens[1] } else { $null }
 $Arg2 = if ($normalizedTokens.Count -gt 2) { [string]$normalizedTokens[2] } else { $null }
 $ForwardArgs = if ($normalizedTokens.Count -gt 3) { @($normalizedTokens[3..($normalizedTokens.Count - 1)]) } else { @() }
-$script:NiniMachineExecRequested = ($Cmd -eq 'exec')
+$script:NiniMachineExecRequested = ($Cmd -eq 'exec' -or $Cmd -eq 'mcp')
 
 if ($jsonOutput) {
     try {
@@ -2626,6 +2659,12 @@ try {
             $action = $Arg1
             $spec = $Arg2
             Invoke-Auth -Action $action -Spec $spec
+        }
+        'mcp' {
+            $forward = @()
+            if ($Arg2) { $forward += $Arg2 }
+            if ($ForwardArgs) { $forward += $ForwardArgs }
+            Invoke-Mcp -Spec $Arg1 -McpArgs $forward
         }
         'permissions' {
             $subcommand = if ($Arg1) { $Arg1 } else { 'show' }
@@ -2672,7 +2711,11 @@ try {
         }
         'export'  { Invoke-Export $Arg1 $Arg2 }
         'import'  { Invoke-Import $Arg1 $Arg2 }
-        'move-export' { Invoke-MoveExport $Arg1 $Arg2 }
+        'move-check' {
+            if (($Arg2 -and $Arg2 -ne '--force') -or $ForwardArgs.Count -gt 0) { throw 'Usage: nini-agents move-check <tool>/<name> [--force]' }
+            Invoke-MoveExport $Arg1 '--dry-run' @($Arg2)
+        }
+        'move-export' { Invoke-MoveExport $Arg1 $Arg2 $ForwardArgs }
         'move-import' { Invoke-MoveImport $Arg1 $Arg2 }
         'move'    { throw 'Cross-device SSH movement is currently supported by the Bash launcher on Linux and macOS.' }
         'devices' { throw 'Device fleet commands are currently supported by the Bash launcher on Linux and macOS.' }

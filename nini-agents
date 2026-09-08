@@ -1242,6 +1242,20 @@ cmd_clone() {
   echo "Cloned '$src' to '$dest'"
 }
 
+# MCP subcommands must enter through the same profile launch path as sessions.
+# Inheriting CODEX_HOME alone does not inherit the adapter's credential policy.
+cmd_mcp() {
+  local spec="${1:-}"
+  [ -n "$spec" ] || abort "Usage: nini-agents mcp codex/<profile> [--] <command> [args...]"
+  shift
+  if [ "${1:-}" = -- ]; then shift; fi
+  [ "$#" -gt 0 ] || abort "Usage: nini-agents mcp codex/<profile> [--] <command> [args...]"
+  split_profile_spec "$spec"
+  [ "$TOOL" = codex ] || abort "MCP management currently requires a Codex profile (codex/<profile>)."
+  NINI_MACHINE_EXEC=true
+  cmd_launch "$spec" mcp "$@"
+}
+
 # nini-agents auth set|status|clear: manage a process-secret profile's
 # credential in the OS store, keyed by the profile's stable profileId.
 # 'set' reads the secret from the tty (hidden) or stdin, never from argv.
@@ -2512,15 +2526,31 @@ cmd_import() {
 }
 
 cmd_move_export() {
-  local spec="${1:-}" out="${2:-}"
+  local spec="${1:-}" out="" dry_run=false force=false option
   [ -n "$spec" ] || abort "Usage: nini-agents move-export <tool>/<name> [package.zip]"
+  shift
+  for option in "$@"; do
+    case "$option" in
+      --dry-run) dry_run=true ;;
+      --force) force=true ;;
+      --*) abort "Unknown move-export option '$option'" ;;
+      *) [ -z "$out" ] || abort 'Only one output package is accepted'; out=$option ;;
+    esac
+  done
   split_profile_spec "$spec"
   validate_name "$NAME"
   local manifest="$(adapter_path "$TOOL")" source="$(profile_dir "$TOOL" "$NAME")"
   [ -f "$manifest" ] || abort "Unknown tool '$TOOL'"
   [ -d "$source" ] || abort "Profile '$spec' does not exist"
+  if [ "$dry_run" = true ]; then
+    move_package_probe_idle remote_move_process_probe "$manifest" "$source" "$force" || abort "$MOVE_PACKAGE_ERROR"
+    move_validate_profile "$manifest" "$source" || abort 'Profile failed credential and structure validation.'
+    [ -z "$out" ] || { [ ! -e "$out" ] && [ ! -L "$out" ]; } || abort 'Output package already exists.'
+    echo "Export preflight passed for '$spec'; no files were written. Activity will be rechecked during export."
+    return 0
+  fi
   [ -n "$out" ] || out="./$TOOL-$NAME-move.zip"
-  if ! move_package_export "$manifest" "$source" "$out" "$NAME" remote_move_process_probe; then
+  if ! move_package_export "$manifest" "$source" "$out" "$NAME" remote_move_process_probe "$force"; then
     abort "${MOVE_PACKAGE_ERROR:-Portable move export failed.}"
   fi
   echo "Moved '$spec' into unencrypted package '$out'."
@@ -2597,15 +2627,18 @@ COMMANDS
                                                         Migrate a legacy profile to schema-v2
   continue <tool> <src> <dest> [--no-merge] [--dry-run] Copy session state (src/dest may be 'base')
   auth set|status|clear <tool>/<profile>                Manage process-secret credentials (OS store)
+  mcp codex/<profile> [--] <command> [args...]          Run Codex MCP commands with the profile's credential store
   permissions show | set <read-only|workspace|full-access>
                                                         Manage shared Codex defaults
   template save <tool>/<profile> <name>                 Save as template
   template list | delete <name>                         Manage templates
   export <tool>/<name> [path]                           Export to .tar.gz
   import <archive> <tool>/<name>                        Import from archive
-  move-export <tool>/<name> [package.zip]               Create an unencrypted credential/chat/state ZIP and deactivate source
+  move-export <tool>/<name> [package.zip] [--dry-run] [--force]   Create an unencrypted credential/chat/state ZIP and deactivate source
+  move-check <tool>/<name> [--force]                  Check portable export without writing files
+  processes <tool>/<name> [--stop]                     Inspect inherited jobs; explicit safe stop on Linux
   move-import <package.zip> <tool>/<name>               Verify and install a portable move ZIP
-  move <tool>/<name> <device> [--dry-run] [--discard-source-backup] [--devices-config <path>]
+  move <tool>/<name> <device> [--dry-run] [--force] [--discard-source-backup] [--devices-config <path>]
                                                         Move one filesystem-credential profile between devices
   devices list [tool] | status <tool>/<name> | doctor [tool]
                                                         Inspect the configured device fleet
@@ -2649,7 +2682,7 @@ _multi_cli_completions() {
   local base="${MULTICLI_HOME:-$HOME/MultiCliProfiles}"
   local script_dir="$(cd "$(dirname "$(command -v nini-agents 2>/dev/null || echo .)")" && pwd)"
   local tools_dir="${MULTICLI_TOOLS_DIR:-$script_dir/ai-tools}"
-  local cmds="new launch exec list status rename delete clone migrate continue auth permissions template export import move-export move-import move devices tools doctor stats completion help version"
+  local cmds="new launch exec list status rename delete clone migrate continue auth mcp permissions template export import move-check processes move-export move-import move devices tools doctor stats completion help version"
   local tools="" specs=""
   if [ -d "$tools_dir" ]; then
     for d in "$tools_dir"/*/; do [ -f "$d/adapter.json" ] && tools="$tools $(basename "$d")"; done
@@ -2672,7 +2705,7 @@ COMP
 #compdef nini-agents multi-cli
 _multi_cli() {
   local -a cmds tools specs
-  cmds=(new launch exec list status rename delete clone migrate continue auth permissions template export import move-export move-import move devices tools doctor stats completion help version)
+  cmds=(new launch exec list status rename delete clone migrate continue auth mcp permissions template export import move-check processes move-export move-import move devices tools doctor stats completion help version)
   local base="${MULTICLI_HOME:-$HOME/MultiCliProfiles}"
   local script_dir="$(cd "$(dirname "$(command -v nini-agents 2>/dev/null || echo .)")" && pwd)"
   local tools_dir="${MULTICLI_TOOLS_DIR:-$script_dir/ai-tools}"
@@ -2786,6 +2819,7 @@ shift || true
 case "$cmd" in
   new)        cmd_new "$@" ;;
   auth)       cmd_auth "$@" ;;
+  mcp)        cmd_mcp "$@" ;;
   permissions) cmd_permissions "$@" ;;
   launch)
     spec="${1:-}"; shift || true
@@ -2818,6 +2852,11 @@ case "$cmd" in
   template)   cmd_template "$@" ;;
   export)     cmd_export "$@" ;;
   import)     cmd_import "$@" ;;
+  processes) cmd_processes "$@" ;;
+  move-check)
+    [ "$#" -eq 1 ] || { [ "$#" -eq 2 ] && [ "$2" = --force ]; } || abort 'Usage: nini-agents move-check <tool>/<name> [--force]'
+    cmd_move_export "$@" --dry-run
+    ;;
   move-export) cmd_move_export "$@" ;;
   move-import) cmd_move_import "$@" ;;
   move)       cmd_move "$@" ;;

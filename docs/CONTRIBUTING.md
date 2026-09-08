@@ -44,25 +44,32 @@ For an AI tool definition, follow the [adapter schema](adapter-schema.md). Updat
 
 ## Test the change
 
-Run the checks that match the files and platforms you changed.
+Run the checks that match the files and platforms you changed. For example, for
+a change to profile movement:
 
 On macOS or Linux:
 
 ```bash
-bash scripts/validate-adapters.sh
-bash tests/run-bats.sh
-python3 scripts/validate-docs.py
+bash tests/run-bats.sh tests/move_safety.bats
 ```
 
 On Windows:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Validate-Adapters.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-pester.ps1 -CI
-python scripts/validate-docs.py
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-pester.ps1 -CI -Path MoveSafety.Tests.ps1
 ```
 
-Behavior changes need tests that fail without the change and pass with it. Changed production lines must meet the repository's 95% changed-line coverage requirement. Run the relevant coverage gate:
+For adapter changes, run `scripts/validate-adapters.sh` and
+`scripts/Validate-Adapters.ps1` on their platforms. For documentation changes,
+run `python3 scripts/validate-docs.py`.
+
+Behavior changes need a test that detects the concrete regression and adds a
+behavior or failure condition not already covered. Do not add tests just to raise
+an aggregate percentage. Changed instrumented production lines use a 90%
+coverage threshold; review uncovered behavior according to risk. Credential,
+path, ownership, and rollback guarantees require explicit behavioral assertions.
+See the testing guide for instrumented scopes and host limitations. Run the
+relevant coverage gate (it also runs the tests, so a second full run is unnecessary):
 
 ```bash
 bash tests/coverage/run-bash-coverage.sh

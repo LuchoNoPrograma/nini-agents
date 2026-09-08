@@ -138,7 +138,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--baseline", required=True)
     parser.add_argument("--coverage-root", type=Path, required=True)
-    parser.add_argument("--minimum", type=float, default=95.0)
+    parser.add_argument("--minimum", type=float, default=90.0)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--pathspec", action="append", required=True)
     return parser.parse_args()

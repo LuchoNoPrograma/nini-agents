@@ -314,12 +314,21 @@ move_package_unpack() {
 }
 
 move_package_probe_idle() {
-  local probe="$1" manifest="$2" profile="$3" rc
+  local probe="$1" manifest="$2" profile="$3" force="${4:-false}" rc
   if "$probe" "$manifest" "$profile"; then rc=0; else rc=$?; fi
   case "$rc" in
     1) return 0 ;;
-    0) move_package_error "An active tool process is using the profile. Close it and retry." ;;
-    *) move_package_error "Could not prove that the tool is stopped. No ownership change was made." ;;
+    0)
+      if [ "$force" = true ]; then
+        printf 'Blocked: --force cannot bypass credential safety while profile processes are active.\n' >&2
+      fi
+      if [ "$probe" = remote_move_process_probe ]; then remote_move_process_report "$manifest" "$profile" false >&2 || true; fi
+      move_package_error "An active tool process or inherited background job is using the profile. Inspect with nini-agents processes <tool>/<profile>; add --stop only after reviewing the PIDs."
+      ;;
+    *)
+      if [ "$probe" = remote_move_process_probe ]; then remote_move_process_report "$manifest" "$profile" false >&2 || true; fi
+      move_package_error "Could not prove that the tool is stopped. Inspect with nini-agents processes <tool>/<profile>. No ownership change was made."
+      ;;
   esac
 }
 
@@ -373,14 +382,14 @@ move_package_rollback_state() {
 }
 
 move_package_export() {
-  local manifest="$1" source="$2" out="$3" name="$4" probe="$5"
+  local manifest="$1" source="$2" out="$3" name="$4" probe="$5" force="${6:-false}"
   local temp profile_stage state_stage verify_profile verify_state payload adapter_id package_id mode format
   local out_parent out_abs source_canonical parent_canonical lock backup current_state
   MOVE_PACKAGE_ERROR=""
   move_package_require_commands || return 1
   move_safe_component "$name" || { move_package_error "Invalid profile name '$name'."; return 1; }
   [ -d "$source" ] && [ ! -L "$source" ] || { move_package_error "Profile source does not exist or is linked."; return 1; }
-  move_package_probe_idle "$probe" "$manifest" "$source" || return 1
+  move_package_probe_idle "$probe" "$manifest" "$source" "$force" || return 1
   if ! move_validate_profile "$manifest" "$source"; then move_package_error "Profile failed credential and structure validation."; return 1; fi
   format="$MOVE_PROFILE_FORMAT"; mode="$MOVE_PROFILE_MODE"
   adapter_id="$(runtime_json_str '.id' "$manifest")"
@@ -422,7 +431,7 @@ move_package_export() {
   [ ! -e "$backup" ] && [ ! -L "$backup" ] || { rm -f "$out_abs"; rm -rf "$temp"; move_package_error "Inactive recovery destination already exists."; return 1; }
   if ! mkdir "$lock" 2>/dev/null; then rm -f "$out_abs"; rm -rf "$temp"; move_package_error "Profile movement is locked by another operation."; return 1; fi
   current_state="$temp/current-state"
-  if ! move_package_probe_idle "$probe" "$manifest" "$source" ||
+  if ! move_package_probe_idle "$probe" "$manifest" "$source" "$force" ||
      ! move_validate_profile "$manifest" "$source" ||
      ! move_trees_equal "$manifest" "$source" "$profile_stage" ||
      ! move_package_collect_state "$manifest" "$source" "$mode" "$current_state" ||

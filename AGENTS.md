@@ -95,6 +95,10 @@ multi-cli / multi-cli.ps1
 ## Validacion
 
 - Empezar con pruebas focalizadas. Un cambio funcional necesita una prueba que falle sin el cambio y pase con el.
+- Reutilizar una prueba existente si ya demuestra la regresion. Cada caso nuevo debe aportar un comportamiento o condicion de fallo relevante; no agregar casos solo para subir un porcentaje o comprobar detalles internos sin contrato.
+- Aplicar la politica de `docs/testing.md`: cobertura de lineas modificadas al 90%, agregados informativos y revision explicita de riesgos de credenciales, rutas, ownership y rollback.
+- Los runners de cobertura ya ejecutan las pruebas: no repetir una suite completa por rutina. No agrupar escenarios independientes solo para reducir el contador visible.
+- Registrar las omisiones por capacidad de plataforma como no ejecutadas, nunca como aprobadas. Las omisiones inesperadas siguen siendo fallos de CI.
 - Para Bash usar `bash tests/run-bats.sh <pruebas.bats>` y el gate de cobertura aplicable.
 - Para PowerShell usar `powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-pester.ps1 -CI` cuando el entorno este disponible.
 - Para adapters ejecutar `bash scripts/validate-adapters.sh` y el validador PowerShell cuando corresponda.

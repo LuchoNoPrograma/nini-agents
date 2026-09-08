@@ -187,7 +187,8 @@ jobs:
           # shellcheck disable=SC2046
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
 
-      - name: Run the bats suite
+      # Linux functional tests run once under Bashcov below. Keep performance uninstrumented.
+      - name: Run macOS suite or Linux launch performance
         run: |
           if [ "$(uname -s)" = "Linux" ]; then
             # shellcheck disable=SC2016 # Expand command substitutions in the inner Bash process.
@@ -197,7 +198,7 @@ jobs:
               printf "ci-smoke" | secret-tool store --label=ci-smoke service multicli-ci target smoke
               [ "$(secret-tool lookup service multicli-ci target smoke)" = "ci-smoke" ]
               secret-tool clear service multicli-ci target smoke
-              exec bash tests/run-bats.sh
+              exec bash tests/run-bats.sh tests/launch_performance.bats
             '
           else
             env MULTICLI_MACOS_KEYCHAIN="$HOME/Library/Keychains/$MULTICLI_CI_KEYCHAIN-db" bash tests/run-bats.sh
@@ -239,7 +240,10 @@ jobs:
           sudo gem install "$SIMPLECOV_GEM" --no-document
           sudo gem install --local "$BASHCOV_GEM" --no-document
           bashcov --version
-      - name: Enforce Bash coverage
+      - name: Validate AI tool definitions
+        run: bash scripts/validate-adapters.sh
+
+      - name: Run Bash suite and enforce changed-line coverage
         env:
           COVERAGE_BASELINE: ${{ github.event.pull_request.base.sha || github.event.before || format('origin/{0}', github.event.repository.default_branch) }}
         run: |
@@ -247,7 +251,11 @@ jobs:
           dbus-run-session -- bash -c '
             set -euo pipefail
             printf "\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
-            exec env COVERAGE_BASELINE="$COVERAGE_BASELINE" bash tests/coverage/run-bash-coverage.sh
+            test_files=()
+            for test_file in tests/*.bats; do
+              [ "$test_file" = tests/launch_performance.bats ] || test_files+=("$test_file")
+            done
+            exec env COVERAGE_BASELINE="$COVERAGE_BASELINE" bash tests/coverage/run-bash-coverage.sh "${test_files[@]}"
           '
 
   pester:
@@ -271,16 +279,11 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Validate-Adapters.ps1
 
-      - name: Run the Pester suite
-        timeout-minutes: 30
-        shell: powershell
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-pester.ps1 -CI
-
-      - name: Enforce PowerShell module coverage
+      - name: Run Pester and changed-line coverage once
         shell: powershell
         env:
           COVERAGE_BASELINE: ${{ github.event.pull_request.base.sha || github.event.before || format('origin/{0}', github.event.repository.default_branch) }}
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/coverage/Invoke-ModuleCoverage.ps1 -MinimumPercent 95
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-pester.ps1 -CI -Coverage
 
   windows-install-smoke:
     name: install + run (windows-latest)

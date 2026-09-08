@@ -13,6 +13,16 @@ SPEC.loader.exec_module(MODULE)
 
 
 class ChangedCoverageTests(unittest.TestCase):
+    def test_ninety_percent_is_sufficient_but_a_missed_file_still_fails(self):
+        changed = {"lib/a.sh": set(range(1, 11))}
+        hits = {"lib/a.sh": {line: int(line != 10) for line in range(1, 11)}}
+        self.assertTrue(MODULE.build_report(changed, hits, 90.0)["passed"])
+        hits["lib/a.sh"][9] = 0
+        self.assertFalse(MODULE.build_report(changed, hits, 90.0)["passed"])
+        hits["lib/a.sh"][9] = 1
+        changed["lib/missing.sh"] = {1}
+        self.assertFalse(MODULE.build_report(changed, hits, 90.0)["passed"])
+
     def test_parse_added_lines_tracks_new_ranges_per_file(self):
         diff = """\
 +++ b/lib/example.sh

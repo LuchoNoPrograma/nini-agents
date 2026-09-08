@@ -557,3 +557,127 @@ exit 37
         } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
+
+# Exercise the public MCP entrypoint with the production Codex adapter and a
+# synthetic vendor. No OS keyring or real account is read by these tests.
+function New-McpOverlayFixture {
+    $scratch = New-OverlayScratch
+    New-Item -ItemType Directory -Force -Path (Join-Path $scratch.Tools 'codex') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $script:RepoRoot 'ai-tools\codex\adapter.json') -Destination (Join-Path $scratch.Tools 'codex\adapter.json')
+    $probeScript = Join-Path $scratch.Root 'mcp-probe.ps1'
+    @'
+$options = @{}
+$command = @()
+for ($i = 0; $i -lt $args.Count; $i++) {
+    if ($args[$i] -eq '-c') {
+        $i++
+        $pair = ([string]$args[$i]) -split '=', 2
+        $options[$pair[0]] = $pair[1].Trim('"')
+    } else { $command += $args[$i] }
+}
+@{ home = $env:CODEX_HOME; options = $options; command = $command } |
+    ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $env:CAPTURE_OUTPUT -Encoding UTF8
+if ($options['mcp_oauth_credentials_store'] -ne 'file') { exit 91 }
+if ($options['cli_auth_credentials_store'] -ne 'file') { exit 92 }
+$credential = Join-Path $env:CODEX_HOME '.credentials.json'
+if ($command.Count -gt 1 -and $command[1] -eq 'login') {
+    Set-Content -LiteralPath $credential -Value '{"figma":{"synthetic":true}}' -Encoding ASCII
+    [Console]::Out.WriteLine('login complete')
+} elseif ($command.Count -gt 2 -and $command[1] -eq 'get' -and $command[2] -eq 'missing') {
+    [Console]::Error.WriteLine('server not found')
+    exit 23
+} else {
+    if (-not (Test-Path -LiteralPath $credential)) { exit 93 }
+    $state = Get-Content -LiteralPath $credential -Raw | ConvertFrom-Json
+    if (-not $state.figma.synthetic) { exit 93 }
+    [Console]::Out.WriteLine('authorized')
+}
+'@ | Set-Content -LiteralPath $probeScript -Encoding ASCII
+    $probe = Join-Path $scratch.Root 'mcp-probe.cmd'
+    "@powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$probeScript`" %*" | Set-Content -LiteralPath $probe -Encoding ASCII
+    $scratch | Add-Member -NotePropertyName Probe -NotePropertyValue $probe
+    $scratch | Add-Member -NotePropertyName Capture -NotePropertyValue (Join-Path $scratch.Root 'mcp-capture.json')
+    (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('new', 'codex/account-a', '--no-seed')).ExitCode | Should Be 0
+    return $scratch
+}
+
+Describe 'Codex MCP commands through the profile runtime on Windows' {
+    It 'retains MCP login across restarts and another account without sharing primary auth' {
+        $scratch = New-McpOverlayFixture
+        try {
+            $primary = Join-Path $scratch.Profiles 'codex\account-a\auth\auth.json'
+            Set-Content -LiteralPath $primary -Value '{"synthetic":"primary-account-a"}' -Encoding ASCII
+            $primaryHash = (Get-FileHash -LiteralPath $primary -Algorithm SHA256).Hash
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('mcp', 'codex/account-a', 'login', 'figma', '--scopes', 'scope-a,scope-b') -Probe $scratch.Probe -Capture $scratch.Capture
+            $result.ExitCode | Should Be 0
+            $result.Output.Trim() | Should Be 'login complete'
+            $capture = Get-Content -LiteralPath $scratch.Capture -Raw | ConvertFrom-Json
+            ($capture.command -join '|') | Should Be 'mcp|login|figma|--scopes|scope-a,scope-b'
+            $capture.options.mcp_oauth_credentials_store | Should Be 'file'
+            $capture.home | Should Be (Join-Path $scratch.Profiles 'codex\account-a\.runtime')
+            (Get-FileHash -LiteralPath $primary -Algorithm SHA256).Hash | Should Be $primaryHash
+            (Test-Path -LiteralPath (Join-Path $scratch.UserHome '.codex\.credentials.json')) | Should Be $false
+
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'codex/account-a') -Probe $scratch.Probe -Capture $scratch.Capture
+            $result.ExitCode | Should Be 0
+            $result.Output | Should Match 'authorized'
+            (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('new', 'codex/account-b', '--no-seed')).ExitCode | Should Be 0
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('mcp', 'codex/account-b', '--', 'list', '--json') -Probe $scratch.Probe -Capture $scratch.Capture
+            $result.ExitCode | Should Be 0
+            $result.Output.Trim() | Should Be 'authorized'
+            $capture = Get-Content -LiteralPath $scratch.Capture -Raw | ConvertFrom-Json
+            ($capture.command -join '|') | Should Be 'mcp|list|--json'
+            $shared = Get-Content -LiteralPath (Join-Path $scratch.Profiles '.shared\codex\mcp\.credentials.json') -Raw | ConvertFrom-Json
+            $shared.figma.synthetic | Should Be $true
+            (Get-Item -LiteralPath (Join-Path $scratch.Profiles 'codex\account-b\auth\auth.json')).Length | Should Be 0
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'preserves the enforced file policy against user credential overrides' {
+        $scratch = New-McpOverlayFixture
+        try {
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('mcp', 'codex/account-a', 'login', 'figma', '-c', 'mcp_oauth_credentials_store="keyring"') -Probe $scratch.Probe -Capture $scratch.Capture
+            $result.ExitCode | Should Be 0
+            $capture = Get-Content -LiteralPath $scratch.Capture -Raw | ConvertFrom-Json
+            $capture.options.mcp_oauth_credentials_store | Should Be 'file'
+            $capture.options.sqlite_home | Should Be (Join-Path $scratch.UserHome '.codex')
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'propagates MCP child errors and exit codes' {
+        $scratch = New-McpOverlayFixture
+        try {
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('mcp', 'codex/account-a', 'get', 'missing') -Probe $scratch.Probe -Capture $scratch.Capture
+            $result.ExitCode | Should Be 23
+            $result.Output | Should Match 'server not found'
+            $result.Output | Should Not Match 'Launching'
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects missing MCP arguments and unsupported tools before the child starts' {
+        $scratch = New-McpOverlayFixture
+        try {
+            foreach ($arguments in @(@('mcp'), @('mcp', 'codex/account-a', '--'), @('mcp', 'fixture/account-a', 'list'))) {
+                $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments $arguments -Probe $scratch.Probe -Capture $scratch.Capture
+                $result.ExitCode | Should Be 1
+                $result.Output | Should Match 'Usage:|requires a Codex profile'
+            }
+            (Test-Path -LiteralPath $scratch.Capture) | Should Be $false
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'keeps isolated MCP authorizations out of the shared account store' {
+        $scratch = New-McpOverlayFixture
+        try {
+            (Invoke-OverlayLauncher -Scratch $scratch -Arguments @('new', 'codex/private', '--isolated', '--no-seed')).ExitCode | Should Be 0
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('mcp', 'codex/private', 'login', 'figma') -Probe $scratch.Probe -Capture $scratch.Capture
+            $result.ExitCode | Should Be 0
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('launch', 'codex/private') -Probe $scratch.Probe -Capture $scratch.Capture
+            $result.ExitCode | Should Be 0
+            $result.Output | Should Match 'authorized'
+            (Test-Path -LiteralPath (Join-Path $scratch.Profiles '.shared\codex\mcp\.credentials.json')) | Should Be $false
+            $result = Invoke-OverlayLauncher -Scratch $scratch -Arguments @('mcp', 'codex/account-a', 'list') -Probe $scratch.Probe -Capture $scratch.Capture
+            $result.ExitCode | Should Be 93
+        } finally { Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}

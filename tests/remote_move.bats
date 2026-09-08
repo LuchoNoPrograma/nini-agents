@@ -57,6 +57,11 @@ CONFIG
 }
 
 teardown() {
+  if [ -n "${FORCE_TEST_JOB:-}" ]; then
+    kill "$FORCE_TEST_JOB" 2>/dev/null || true
+    wait "$FORCE_TEST_JOB" 2>/dev/null || true
+    unset FORCE_TEST_JOB
+  fi
   unset NINI_AGENTS_SSH_COMMAND NINI_AGENTS_TEST_REMOTE_COPY_COMMAND NINI_AGENTS_TEST_TAMPER_COPY NINI_AGENTS_TEST_FAIL_BACKUP_DISCARD NINI_AGENTS_DEVICES_CONFIG
   teardown_scratch
 }
@@ -233,6 +238,8 @@ make_legacy_profile() {
   wait "$busy_pid" 2>/dev/null || true
   [ "$status" -ne 0 ]
   [[ "$output" == *"process_active"* ]]
+  [[ "$output" == *"PID $busy_pid "* ]]
+  [[ "$output" == *'--stop'* ]]
   [ ! -e "$MULTICLI_SCRATCH/remote/codex/.staging" ]
 }
 
@@ -335,4 +342,92 @@ make_legacy_profile() {
   run jq -e '.ok == false and .error.code == "ownership_unproven" and .error.details.state == "preflight_rejected"' <<< "$output"
   [ "$status" -eq 0 ]
   [ ! -e "$MULTICLI_SCRATCH/remote/codex/.staging" ]
+}
+
+@test "remote profile processes are reported and stopped through the configured endpoint" {
+  make_legacy_profile "$MULTICLI_SCRATCH/remote/codex"
+  env CODEX_HOME="$MULTICLI_SCRATCH/remote/codex/account-a" sleep 60 >/dev/null 2>&1 3>&- &
+  local job=$!
+  run multicli devices processes codex/account-a --device ubuntu
+  local report_status=$status report_output=$output
+  run multicli devices processes codex/account-a --device ubuntu --stop
+  local stop_status=$status stop_output=$output
+  kill "$job" 2>/dev/null || true
+  wait "$job" 2>/dev/null || true
+  [ "$report_status" -eq 1 ]
+  [[ "$report_output" == *"PID $job "* ]]
+  [ "$stop_status" -eq 0 ] || printf '%s\n' "$stop_output" >&3
+  [[ "$stop_output" == *"SIGTERM sent to PID $job"* ]]
+  [ -f "$MULTICLI_SCRATCH/remote/codex/account-a/auth.json" ]
+  [ ! -e "$MULTICLI_SCRATCH/remote/codex/.inactive" ]
+}
+
+@test "force rejects a busy source without moving credentials or signalling its job" {
+  make_legacy_profile "$MULTICLI_SCRATCH/local/codex"
+  env CODEX_HOME="$MULTICLI_SCRATCH/local/codex/account-a" sleep 180 >/dev/null 2>&1 3>&- &
+  FORCE_TEST_JOB=$!
+  for option in --dry-run --discard-source-backup; do
+    run multicli move codex/account-a ubuntu --force "$option"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *'process_active'* ]]
+    [[ "$output" == *'credential safety'* ]]
+    kill -0 "$FORCE_TEST_JOB"
+    [ -f "$MULTICLI_SCRATCH/local/codex/account-a/auth.json" ]
+    [ ! -e "$MULTICLI_SCRATCH/local/codex/.inactive" ]
+    [ ! -e "$MULTICLI_SCRATCH/remote/codex/.staging" ]
+    [ ! -e "$MULTICLI_SCRATCH/remote/codex/account-a" ]
+  done
+}
+
+@test "force still rejects a busy destination" {
+  make_legacy_profile "$MULTICLI_SCRATCH/local/codex"
+  env CODEX_HOME="$MULTICLI_SCRATCH/remote/codex/account-a" sleep 180 >/dev/null 2>&1 3>&- &
+  FORCE_TEST_JOB=$!
+  run multicli move codex/account-a ubuntu --force
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'destination_unavailable'* ]]
+  [ -f "$MULTICLI_SCRATCH/local/codex/account-a/auth.json" ]
+  [ ! -e "$MULTICLI_SCRATCH/remote/codex/.staging" ]
+  kill -0 "$FORCE_TEST_JOB"
+}
+
+@test "force still rejects changed data after copying" {
+  make_legacy_profile "$MULTICLI_SCRATCH/local/codex"
+  export NINI_AGENTS_TEST_TAMPER_COPY=1
+  run multicli move codex/account-a ubuntu --force
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'integrity_mismatch'* ]]
+  [ -f "$MULTICLI_SCRATCH/local/codex/account-a/auth.json" ]
+  [ ! -e "$MULTICLI_SCRATCH/remote/codex/account-a" ]
+}
+
+@test "force does not treat an inconclusive remote source probe as idle" {
+  make_legacy_profile "$MULTICLI_SCRATCH/remote/codex"
+  cat > "$MULTICLI_SCRATCH/fake-bin/nini-agents" <<WRAPPER
+#!/usr/bin/env bash
+if [[ \${1:-} == _move-endpoint && \${2:-} == probe ]]; then exit 2; fi
+exec "$MULTICLI_BIN" "\$@"
+WRAPPER
+  run multicli move codex/account-a mint --force
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'process_probe_failed'* ]]
+  [ -f "$MULTICLI_SCRATCH/remote/codex/account-a/auth.json" ]
+  [ ! -e "$MULTICLI_SCRATCH/local/codex/.staging" ]
+}
+
+@test "force cannot activate destination when source activity appears under ownership locks" {
+  make_legacy_profile "$MULTICLI_SCRATCH/remote/codex"
+  cat > "$MULTICLI_SCRATCH/fake-bin/nini-agents" <<WRAPPER
+#!/usr/bin/env bash
+if [[ \${1:-} == _move-endpoint && \${2:-} == probe && -d "$MULTICLI_SCRATCH/remote/codex/.move-lock.account-a" ]]; then exit 0; fi
+exec "$MULTICLI_BIN" "\$@"
+WRAPPER
+  run multicli move codex/account-a mint --force
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'process_appeared'* ]]
+  [ -f "$MULTICLI_SCRATCH/remote/codex/account-a/auth.json" ]
+  [ ! -e "$MULTICLI_SCRATCH/remote/codex/.inactive" ]
+  [ ! -e "$MULTICLI_SCRATCH/local/codex/account-a" ]
+  [ ! -e "$MULTICLI_SCRATCH/remote/codex/.move-lock.account-a" ]
+  [ ! -e "$MULTICLI_SCRATCH/local/codex/.move-lock.account-a" ]
 }

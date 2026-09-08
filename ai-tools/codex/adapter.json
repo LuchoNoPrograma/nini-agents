@@ -4,9 +4,9 @@
   "displayName": "OpenAI Codex CLI",
   "kind": "cli",
   "binary": {
-    "windows": ["%APPDATA%\\npm\\codex.cmd", "%APPDATA%\\npm\\codex", "codex"],
-    "macos": ["/usr/local/bin/codex", "$HOME/.npm-global/bin/codex", "$HOME/.local/bin/codex", "codex"],
-    "linux": ["$HOME/.npm-global/bin/codex", "/usr/local/bin/codex", "$HOME/.local/bin/codex", "codex"]
+    "windows": ["codex", "%APPDATA%\\npm\\codex.cmd", "%APPDATA%\\npm\\codex"],
+    "macos": ["$NVM_BIN/codex", "codex", "/usr/local/bin/codex", "$HOME/.npm-global/bin/codex", "$HOME/.local/bin/codex"],
+    "linux": ["$NVM_BIN/codex", "codex", "$HOME/.npm-global/bin/codex", "/usr/local/bin/codex", "$HOME/.local/bin/codex"]
   },
   "isolation": {
     "strategy": "accountOverlay",

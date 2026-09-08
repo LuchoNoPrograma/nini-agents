@@ -52,19 +52,63 @@ Product drivers must prove distinct account identity, overlapping processes, ind
 
 ## Coverage
 
-Changed production lines and every touched PowerShell runtime module require at least 95% coverage. Bash changed-line coverage is enforced at 95%; Bashcov's aggregate report remains diagnostic because Bats launches production Bash in isolated processes and several platform-specific branches cannot execute on one Linux host. Credential, validation, path-safety, overlay, migration, and process-spawn branches may not be excluded from changed-line coverage. A missing local coverage tool is a blocker to a verified completion claim, not a reason to lower the bar.
+Changed instrumented production lines require 90% coverage by default. Aggregate
+and per-module percentages are diagnostic: they do not require 100%, and untouched
+modules do not block a change because of their aggregate percentage. Missing
+coverage for a changed file in the instrumented scope still fails the gate.
+
+Bash measures the launchers and production shell files. Pester 3.x measures
+`lib/*.psm1` in its own process; child launchers, including `nini-agents.ps1`, are
+outside that percentage and must be checked through their behavioral CLI suites.
+Do not interpret module coverage as coverage of the entire Windows CLI.
 
 ```bash
 bash tests/coverage/run-bash-coverage.sh
+# Focus on the changed area; Bats arguments are forwarded:
+COVERAGE_BASELINE=HEAD bash tests/coverage/run-bash-coverage.sh tests/move_safety.bats
 ```
 
 ```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-pester.ps1 -CI -Coverage
+# Equivalent full-suite entrypoint:
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/coverage/Run-PowerShellCoverage.ps1
+# Focused module run:
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/run-pester.ps1 -CI -Coverage -Path MoveSafety.Tests.ps1
 ```
 
-The Bash gate requires Bashcov, Ruby, and Python 3. CI installs the checksum-verified Bashcov 3.3.0 gem; Bashcov supports Bats and tracks nested Bash processes without kcov's Bats/xtrace incompatibilities. The PowerShell gate requires Pester 3.4.
+Both gates execute tests and collect coverage in one pass. CI runs the Windows
+suite once. Linux runs the functional suite once under Bashcov and runs launch
+performance separately without instrumentation. macOS runs its platform suite.
 
-Both gates read `COVERAGE_BASELINE` when CI supplies it and otherwise compare with `HEAD^`. They write machine-readable changed-line reports under `tests/coverage/out/` and fail when a changed production file has no coverage data.
+Bash coverage requires Bashcov, Ruby, and Python 3; CI uses pinned Bashcov 3.3.0
+and SimpleCov 0.22.0. PowerShell coverage requires Pester 3.x (at least 3.4).
+Both gates use `COVERAGE_BASELINE` or `HEAD^` and write reports under the system
+temporary directory (`multi-cli-coverage`) by default. Missing tools must be
+reported as an unexecuted coverage check, never as a passing result.
+
+## Useful tests and platform skips
+
+- A new case must identify the observable regression it detects and the extra
+  protection it provides. Share fixtures or use parameterized inputs; do not join
+  independent scenarios just to reduce the displayed test count.
+- Preserve explicit assertions for credentials, isolation, path containment,
+  ownership, integrity, and rollback. Review uncovered branches in these areas
+  and use targeted mutation checks when useful; a percentage alone is insufficient.
+- Prefer assertions on actual output and resulting state. Avoid checking files
+  written solely by the test or fixing an internal call count without a requirement.
+- Consolidate duplicated contracts within a platform. Bash and PowerShell are
+  separate implementations and need their own evidence.
+- For ordinary changes, stop after the affected checks pass unless failures or
+  new changes justify more testing. Run the full platform suites in CI.
+
+The two non-admin OS-user refusal tests are explicitly skipped on elevated hosts.
+The file-symlink deletion test is explicitly skipped when the host lacks the
+required permission. These three names and reasons are recorded by
+`tests/helpers/pester-policy.ps1`; all other skips, pending and inconclusive
+results fail `-CI` and coverage runs. Failed tests always fail. An empty run or a
+run with no passed tests cannot pass the strict policy. Platform skips remain
+visible and do not count as passed tests or provide evidence for that capability;
+verify the corresponding behavior on a capable host before claiming support.
 
 Transactional profile movement has dedicated hermetic suites. They use only
 synthetic JSON and disposable roots, with injected process probes and

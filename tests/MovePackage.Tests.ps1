@@ -150,3 +150,78 @@ Describe 'portable offline move packages' {
         }
     }
 }
+
+Describe 'portable move preflight' {
+    It 'checks an idle profile without creating output directories or deactivating it' {
+        $scratch = New-MovePackageScratch
+        $previousHome = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = $scratch.SourceHome
+            $adapter = New-MovePackageAdapter
+            $source = New-MovePackageFixture -Scratch $scratch
+            $archive = Join-Path $scratch.Root 'not-created\account-a.zip'
+            $result = Export-MultiCliMovePackage -Adapter $adapter -ProfileDir $source -OutPath $archive -ProfileName 'account-a' -ProcessProbe $script:MovePackageIdleProbe -DryRun
+            $result.Preflight | Should Be $true
+            (Test-Path -LiteralPath (Split-Path -Parent $archive)) | Should Be $false
+            (Test-Path -LiteralPath $source) | Should Be $true
+        } finally {
+            $env:USERPROFILE = $previousHome
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'rejects a busy profile during dry-run without deactivation' {
+        $scratch = New-MovePackageScratch
+        $previousHome = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = $scratch.SourceHome
+            $adapter = New-MovePackageAdapter
+            $source = New-MovePackageFixture -Scratch $scratch
+            $archive = Join-Path $scratch.Root 'account-a.zip'
+            { Export-MultiCliMovePackage -Adapter $adapter -ProfileDir $source -OutPath $archive -ProfileName 'account-a' -ProcessProbe { 'busy' } -DryRun } | Should Throw
+            (Test-Path -LiteralPath $archive) | Should Be $false
+            (Test-Path -LiteralPath $source) | Should Be $true
+        } finally {
+            $env:USERPROFILE = $previousHome
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Describe 'forced portable export' {
+    It 'rejects active credential use with Force in dry-run and real export' {
+        $scratch = New-MovePackageScratch
+        $previousHome = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = $scratch.SourceHome
+            $adapter = New-MovePackageAdapter
+            $source = New-MovePackageFixture -Scratch $scratch
+            $archive = Join-Path $scratch.Root 'forced.zip'
+            { Export-MultiCliMovePackage -Adapter $adapter -ProfileDir $source -OutPath $archive -ProfileName 'account-a' -ProcessProbe { 'busy' } -Force -DryRun } | Should Throw
+            { Export-MultiCliMovePackage -Adapter $adapter -ProfileDir $source -OutPath $archive -ProfileName 'account-a' -ProcessProbe { 'busy' } -Force } | Should Throw
+            (Test-Path -LiteralPath $archive) | Should Be $false
+            (Test-Path -LiteralPath $source) | Should Be $true
+            (Test-Path -LiteralPath (Join-Path $scratch.SourceRoot '.inactive')) | Should Be $false
+        } finally {
+            $env:USERPROFILE = $previousHome
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'still rejects an inconclusive probe even with force' {
+        $scratch = New-MovePackageScratch
+        $previousHome = $env:USERPROFILE
+        try {
+            $env:USERPROFILE = $scratch.SourceHome
+            $adapter = New-MovePackageAdapter
+            $source = New-MovePackageFixture -Scratch $scratch
+            $archive = Join-Path $scratch.Root 'unknown.zip'
+            { Export-MultiCliMovePackage -Adapter $adapter -ProfileDir $source -OutPath $archive -ProfileName 'account-a' -ProcessProbe { 'unknown' } -Force } | Should Throw
+            (Test-Path -LiteralPath $archive) | Should Be $false
+            (Test-Path -LiteralPath $source) | Should Be $true
+        } finally {
+            $env:USERPROFILE = $previousHome
+            Remove-Item -LiteralPath $scratch.Root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}

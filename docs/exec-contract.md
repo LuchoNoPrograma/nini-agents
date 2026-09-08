@@ -8,6 +8,12 @@ protocol owns stdout, such as Codex app-server JSON-RPC.
 nini-agents exec codex/work -- app-server --stdio
 ```
 
+For Codex MCP authentication and management, `nini-agents mcp codex/work
+login figma` is a convenience entrypoint to this same launch path with `mcp`
+prefixed to the child arguments. It also preserves machine-clean streams and
+the child exit status; it does not implement a separate credential policy.
+See [MCP authentication](adapters/codex.md#authenticate-and-inspect-mcp-servers).
+
 ## Supported boundary
 
 The v1 contract accepts only adapters with all of these properties:
