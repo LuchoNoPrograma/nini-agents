@@ -22,6 +22,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in -o) shift 2 ;; -*) shift ;; *) break ;; esac
 done
 [ "$#" -gt 0 ] || exit 2
+[ "$1" != fixture-offline ] || exit 255
 shift
 command_line="$*"
 exec bash -c "$command_line"
@@ -430,4 +431,92 @@ WRAPPER
   [ ! -e "$MULTICLI_SCRATCH/local/codex/account-a" ]
   [ ! -e "$MULTICLI_SCRATCH/remote/codex/.move-lock.account-a" ]
   [ ! -e "$MULTICLI_SCRATCH/local/codex/.move-lock.account-a" ]
+}
+
+@test "local move ignores an unrelated offline device but probes the selected destination" {
+  make_legacy_profile "$MULTICLI_SCRATCH/local/codex"
+  printf 'device|other|fixture-offline|%s/other\n' "$MULTICLI_SCRATCH" >> "$NINI_AGENTS_DEVICES_CONFIG"
+
+  run multicli move codex/account-a ubuntu --dry-run
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [[ "$output" == *"no files were copied or activated"* ]]
+  [ ! -e "$MULTICLI_SCRATCH/remote/codex/.staging" ]
+
+  run multicli move codex/account-a other --dry-run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Destination 'other' is unreachable"* ]]
+  [ -d "$MULTICLI_SCRATCH/local/codex/account-a" ]
+
+  run multicli move codex/account-a ubuntu
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [ ! -e "$MULTICLI_SCRATCH/local/codex/account-a" ]
+  [ -f "$MULTICLI_SCRATCH/remote/codex/account-a/auth.json" ]
+}
+
+@test "unknown move destination is rejected before unrelated SSH discovery" {
+  printf 'device|other|fixture-offline|%s/other\n' "$MULTICLI_SCRATCH" >> "$NINI_AGENTS_DEVICES_CONFIG"
+  run multicli move codex/account-a missing --dry-run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Device 'missing' is not configured"* ]]
+}
+
+@test "retry recognizes a validated destination before an unrelated offline device" {
+  make_legacy_profile "$MULTICLI_SCRATCH/remote/codex"
+  cat > "$NINI_AGENTS_DEVICES_CONFIG" <<CONFIG
+this_device|mint
+profiles_home|$MULTICLI_SCRATCH/local
+device|offline|fixture-offline|$MULTICLI_SCRATCH/other
+device|ubuntu|fixture-remote|$MULTICLI_SCRATCH/remote
+CONFIG
+  mkdir -p "$MULTICLI_SCRATCH/local/codex/.inactive/prior.keep"
+  printf 'keep\n' > "$MULTICLI_SCRATCH/local/codex/.inactive/prior.keep/sentinel"
+  for option in --dry-run --discard-source-backup; do
+    run multicli --json move codex/account-a ubuntu "$option"
+    [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+    printf '%s' "$output" | jq -e '.ok and .data.code == "already_at_destination" and .data.state == "unchanged"' >/dev/null
+    [ ! -e "$MULTICLI_SCRATCH/local/codex/account-a" ]
+    [ -f "$MULTICLI_SCRATCH/remote/codex/account-a/auth.json" ]
+    [ ! -e "$MULTICLI_SCRATCH/remote/codex/.staging" ]
+    [ ! -e "$MULTICLI_SCRATCH/remote/codex/.move-lock.account-a" ]
+    [ "$(cat "$MULTICLI_SCRATCH/local/codex/.inactive/prior.keep/sentinel")" = keep ]
+  done
+}
+
+@test "retry rejects a duplicate local and destination profile" {
+  make_legacy_profile "$MULTICLI_SCRATCH/local/codex"
+  make_legacy_profile "$MULTICLI_SCRATCH/remote/codex"
+  run multicli --json move codex/account-a ubuntu
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | jq -e '.error.code == "ownership_unproven"' >/dev/null
+  [ -f "$MULTICLI_SCRATCH/local/codex/account-a/auth.json" ]
+  [ -f "$MULTICLI_SCRATCH/remote/codex/account-a/auth.json" ]
+  [ ! -e "$MULTICLI_SCRATCH/remote/codex/.staging" ]
+}
+
+@test "retry validates existing destination instead of trusting directory presence" {
+  make_legacy_profile "$MULTICLI_SCRATCH/remote/codex"
+  rm "$MULTICLI_SCRATCH/remote/codex/account-a/auth.json"
+  run multicli --json move codex/account-a ubuntu
+  [ "$status" -ne 0 ]
+  printf '%s' "$output" | jq -e '.error.code == "missing_credential"' >/dev/null
+  [ -d "$MULTICLI_SCRATCH/remote/codex/account-a" ]
+  [ ! -e "$MULTICLI_SCRATCH/remote/codex/.staging" ]
+}
+
+@test "retry to local destination is also a no-op despite an offline registry entry" {
+  make_legacy_profile "$MULTICLI_SCRATCH/local/codex"
+  printf 'device|other|fixture-offline|%s/other\n' "$MULTICLI_SCRATCH" >> "$NINI_AGENTS_DEVICES_CONFIG"
+  run multicli move codex/account-a mint
+  [ "$status" -eq 0 ] || printf '%s\n' "$output" >&3
+  [[ "$output" == *"already at destination 'mint'"* ]]
+  [ -f "$MULTICLI_SCRATCH/local/codex/account-a/auth.json" ]
+  [ ! -e "$MULTICLI_SCRATCH/local/codex/.staging" ]
+}
+
+@test "source discovery still fails closed when neither participant has the profile" {
+  printf 'device|other|fixture-offline|%s/other\n' "$MULTICLI_SCRATCH" >> "$NINI_AGENTS_DEVICES_CONFIG"
+  run multicli move codex/account-a ubuntu --dry-run
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Source discovery: device 'other' is unreachable"* ]]
+  [ ! -e "$MULTICLI_SCRATCH/remote/codex/.staging" ]
 }

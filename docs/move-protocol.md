@@ -30,6 +30,22 @@ the remote adapter SHA-256 to match before any remote validation or mutation.
 The public JSON response uses envelope v1 and contains only `code`, `state`,
 and `format`.
 
+The device argument selects the destination through its registry SSH target;
+there is no default destination. With an active local source, ownership checks
+cover the local source and the selected destination only. Unrelated registry
+entries may be offline. This is a transaction-scoped check, not a global audit
+of copies on other machines. Duplicate active profiles on the two participants
+still reject the move. The selected destination is checked before unrelated
+registry entries, even if there is no local source. If the profile exists only
+at that destination, the engine verifies adapter compatibility and validates the
+profile, then returns success with code `already_at_destination` and state
+`unchanged`. This read-only retry does not copy files, check for idle processes,
+create staging/locks, or remove prior backups, even with `--discard-source-backup`.
+It reports current presence, not completion or cleanup of an earlier transaction.
+Only if neither participant has the profile does remote-source discovery require
+conclusive checks across the registry. Unknown destinations fail
+before SSH discovery. `devices status` remains a registry-wide inspection.
+
 ## Implementations
 
 - Bash 3.2+: `move_profile_transaction` in `lib/transfer.sh`; public SSH
@@ -182,6 +198,7 @@ States:
 | State | Meaning |
 |---|---|
 | `validated` | Dry-run preflights succeeded; nothing was copied or moved. |
+| `unchanged` | A validated profile is already at the selected destination; this attempt changed nothing. |
 | `preflight_rejected` | No staging or ownership transition was allowed. |
 | `source_active` | The source remains the only active owner. |
 | `staging_preserved` | Source remains active and a recoverable candidate may remain. |

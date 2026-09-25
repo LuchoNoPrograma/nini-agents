@@ -496,7 +496,7 @@ remote_move_location_state() {
 }
 
 remote_move_locate_owner() {
-  local tool="$1" profile="$2" local_root index state root
+  local tool="$1" profile="$2" destination="${3:-}" local_root index state root
   REMOTE_MOVE_OWNER=""
   REMOTE_MOVE_OWNER_COUNT=0
   local_root="$(remote_move_tool_root "$REMOTE_MOVE_LOCAL_CONFIG_ROOT" "$tool")" || return 1
@@ -506,19 +506,38 @@ remote_move_locate_owner() {
     remote_move_error "Cannot inspect the local profile root."
     return 1
   fi
-  for ((index = 0; index < ${#REMOTE_MOVE_DEVICE_NAMES[@]}; index++)); do
-    root="$(remote_move_tool_root "${REMOTE_MOVE_DEVICE_ROOTS[$index]}" "$tool")" || return 1
-    if ! state="$(remote_move_location_state remote "${REMOTE_MOVE_DEVICE_SSH[$index]}" "$tool" "$root" "$profile")"; then
-      remote_move_error "Device '${REMOTE_MOVE_DEVICE_NAMES[$index]}' is unreachable or failed its ownership probe."
+  # Inspect the selected destination before discovering a remote source. A
+  # retry may have no local source because the previous move already finished.
+  if [ -n "$destination" ] && [ "$destination" != "$REMOTE_MOVE_THIS_DEVICE" ]; then
+    remote_move_find_device "$destination" || return 1
+    root="$(remote_move_tool_root "$REMOTE_MOVE_FOUND_CONFIG_ROOT" "$tool")" || return 1
+    if ! state="$(remote_move_location_state remote "$REMOTE_MOVE_FOUND_SSH" "$tool" "$root" "$profile")"; then
+      remote_move_error "Destination '$destination' is unreachable or failed its ownership probe."
       return 1
     fi
     if [ "$state" = active ]; then
-      REMOTE_MOVE_OWNER="${REMOTE_MOVE_DEVICE_NAMES[$index]}"
+      REMOTE_MOVE_OWNER="$destination"
       REMOTE_MOVE_OWNER_COUNT=$((REMOTE_MOVE_OWNER_COUNT + 1))
     fi
-  done
+  fi
+  # Local source + destination form the transaction boundary. If neither has
+  # the profile, discovery still requires conclusive checks across the registry.
+  if [ -z "$destination" ] || [ "$REMOTE_MOVE_OWNER_COUNT" -eq 0 ]; then
+    for ((index = 0; index < ${#REMOTE_MOVE_DEVICE_NAMES[@]}; index++)); do
+      [ "${REMOTE_MOVE_DEVICE_NAMES[$index]}" != "$destination" ] || continue
+      root="$(remote_move_tool_root "${REMOTE_MOVE_DEVICE_ROOTS[$index]}" "$tool")" || return 1
+      if ! state="$(remote_move_location_state remote "${REMOTE_MOVE_DEVICE_SSH[$index]}" "$tool" "$root" "$profile")"; then
+        remote_move_error "Source discovery: device '${REMOTE_MOVE_DEVICE_NAMES[$index]}' is unreachable or failed its ownership probe."
+        return 1
+      fi
+      if [ "$state" = active ]; then
+        REMOTE_MOVE_OWNER="${REMOTE_MOVE_DEVICE_NAMES[$index]}"
+        REMOTE_MOVE_OWNER_COUNT=$((REMOTE_MOVE_OWNER_COUNT + 1))
+      fi
+    done
+  fi
   [ "$REMOTE_MOVE_OWNER_COUNT" -gt 0 ] || { remote_move_error "Profile '$tool/$profile' is not active on any configured device."; return 1; }
-  [ "$REMOTE_MOVE_OWNER_COUNT" -eq 1 ] || { remote_move_error "Profile '$tool/$profile' is active on more than one configured device."; return 1; }
+  [ "$REMOTE_MOVE_OWNER_COUNT" -eq 1 ] || { remote_move_error "Profile '$tool/$profile' is active on more than one participating device."; return 1; }
 }
 
 remote_move_transport() {
@@ -617,9 +636,11 @@ remote_move_execute() {
   [ "$(runtime_json_str '.account.mechanism' "$(adapter_path "$tool")")" = fileOverlay ] || {
     remote_move_fail_result unsupported_mechanism preflight_rejected unknown "Adapter '$tool' does not use filesystem credentials."; return 1;
   }
-  remote_move_locate_owner "$tool" "$profile" || { remote_move_fail_result ownership_unproven preflight_rejected unknown "$REMOTE_MOVE_MESSAGE"; return 1; }
+  if [ "$destination_device" != "$REMOTE_MOVE_THIS_DEVICE" ]; then
+    remote_move_find_device "$destination_device" || { remote_move_fail_result invalid_configuration preflight_rejected unknown "$REMOTE_MOVE_MESSAGE"; return 1; }
+  fi
+  remote_move_locate_owner "$tool" "$profile" "$destination_device" || { remote_move_fail_result ownership_unproven preflight_rejected unknown "$REMOTE_MOVE_MESSAGE"; return 1; }
   source_device="$REMOTE_MOVE_OWNER"
-  [ "$REMOTE_MOVE_OWNER" != "$destination_device" ] || { remote_move_fail_result destination_active preflight_rejected unknown "Profile '$spec' is already active on '$destination_device'."; return 1; }
 
   if [ "$REMOTE_MOVE_OWNER" = "$REMOTE_MOVE_THIS_DEVICE" ]; then
     source_location=local; source_ssh=''; source_root="$local_root"
@@ -635,7 +656,7 @@ remote_move_execute() {
     destination_location=remote; destination_ssh="$REMOTE_MOVE_FOUND_SSH"
     destination_root="$(remote_move_tool_root "$REMOTE_MOVE_FOUND_CONFIG_ROOT" "$tool")" || { remote_move_fail_result invalid_configuration preflight_rejected unknown "$REMOTE_MOVE_MESSAGE"; return 1; }
   fi
-  [ "$source_location" = local ] || [ "$destination_location" = local ] || {
+  [ "$source_device" = "$destination_device" ] || [ "$source_location" = local ] || [ "$destination_location" = local ] || {
     remote_move_fail_result remote_to_remote_unsupported preflight_rejected unknown "Move through '$REMOTE_MOVE_THIS_DEVICE' first."; return 1;
   }
 
@@ -644,7 +665,7 @@ remote_move_execute() {
     remote_digest="$(remote_move_call remote "$source_ssh" health "$tool" "$source_root" "$profile" unused)" || { remote_move_fail_result remote_health_failed preflight_rejected unknown "Source device '$REMOTE_MOVE_OWNER' failed its Nini Agents health check."; return 1; }
     [ "$remote_digest" = "$local_digest" ] || { remote_move_fail_result adapter_mismatch preflight_rejected unknown 'Source and controller adapters differ.'; return 1; }
   fi
-  if [ "$destination_location" = remote ]; then
+  if [ "$destination_location" = remote ] && [ "$source_device" != "$destination_device" ]; then
     remote_digest="$(remote_move_call remote "$destination_ssh" health "$tool" "$destination_root" "$profile" unused)" || { remote_move_fail_result remote_health_failed preflight_rejected unknown "Destination device '$destination_device' failed its Nini Agents health check."; return 1; }
     [ "$remote_digest" = "$local_digest" ] || { remote_move_fail_result adapter_mismatch preflight_rejected unknown 'Destination and controller adapters differ.'; return 1; }
   fi
@@ -657,6 +678,13 @@ remote_move_execute() {
   fi
   MOVE_PROFILE_FORMAT="${source_info%%|*}"
   MOVE_PROFILE_MODE="${source_info#*|}"
+  if [ "$source_device" = "$destination_device" ]; then
+    # A validated existing destination is a read-only no-op, including when it
+    # is in use. Do not reserve staging, acquire locks, or clean old backups.
+    move_set_result already_at_destination unchanged "$MOVE_PROFILE_FORMAT"
+    REMOTE_MOVE_MESSAGE="Profile '$spec' is already at destination '$destination_device'; no files were changed."
+    return 0
+  fi
   if remote_move_call "$source_location" "$source_ssh" probe "$tool" "$source_root" "$profile" unused >/dev/null 2>&1; then
     remote_move_fail_result process_active preflight_rejected "$MOVE_PROFILE_FORMAT" 'The source profile is in use; --force cannot bypass credential safety.'; return 1
   else rc=$?; [ "$rc" -eq 1 ] || { remote_move_fail_result process_probe_failed preflight_rejected "$MOVE_PROFILE_FORMAT" 'The source process probe was inconclusive.'; return 1; }; fi
@@ -700,7 +728,7 @@ remote_move_execute() {
     remote_move_fail_result transaction_locked staging_preserved "$MOVE_PROFILE_FORMAT" 'Could not acquire the destination ownership lock.'; return 1
   fi
 
-  if ! remote_move_locate_owner "$tool" "$profile" || [ "$REMOTE_MOVE_OWNER" != "$source_device" ]; then
+  if ! remote_move_locate_owner "$tool" "$profile" "$destination_device" || [ "$REMOTE_MOVE_OWNER" != "$source_device" ]; then
     remote_move_release_locks "$source_location" "$source_ssh" "$source_root" "$profile" "$tool" "$destination_location" "$destination_ssh" "$destination_root"
     remote_move_fail_result ownership_changed staging_preserved "$MOVE_PROFILE_FORMAT" 'Profile ownership changed during the transaction.'; return 1
   fi
