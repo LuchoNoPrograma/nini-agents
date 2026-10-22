@@ -11,6 +11,7 @@ setup() {
   printf '%s\n' '{"schemaVersion":2,"profileId":null,"adapterId":"codex","mode":"accountOverlay"}' \
     > "$MULTICLI_HOME/codex/work/.profile.json"
   printf '%s\n' '{"fixtureOnly":true}' > "$MULTICLI_HOME/codex/work/auth/auth.json"
+  : > "$MULTICLI_HOME/codex/empty/auth/auth.json"
   printf '%s\n' 'ordinary-state' > "$MULTICLI_HOME/cursor/personal/state.txt"
   mkdir -p "$MULTICLI_HOME/.templates/plain"
   printf '%s\n' 'template-state' > "$MULTICLI_HOME/.templates/plain/config.toml"

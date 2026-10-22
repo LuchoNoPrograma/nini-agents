@@ -39,6 +39,7 @@ Describe 'stable JSON CLI v1' {
         Set-Content -LiteralPath (Join-Path $codexEmpty '.profile.json') -Encoding UTF8 -Value '{"schemaVersion":2,"profileId":null,"adapterId":"codex","mode":"accountOverlay"}'
         Set-Content -LiteralPath (Join-Path $codex '.profile.json') -Encoding UTF8 -Value '{"schemaVersion":2,"profileId":null,"adapterId":"codex","mode":"accountOverlay"}'
         Set-Content -LiteralPath (Join-Path $codex 'auth\auth.json') -Encoding UTF8 -Value '{"fixtureOnly":true}'
+        New-Item -ItemType File -Force -Path (Join-Path $codexEmpty 'auth\auth.json') | Out-Null
         Set-Content -LiteralPath (Join-Path $cursor 'state.txt') -Encoding UTF8 -Value 'ordinary-state'
         $template = Join-Path $scratch.MultiCliHome '.templates\plain'
         New-Item -ItemType Directory -Force -Path $template | Out-Null

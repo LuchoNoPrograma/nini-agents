@@ -1694,7 +1694,8 @@ function Test-ProfileHasAuthFile {
                 break
             }
         }
-        if ($safe -and -not $item.PSIsContainer) { return $true }
+        # Profile creation seeds empty credential placeholders; only content counts.
+        if ($safe -and -not $item.PSIsContainer -and $item.Length -gt 0) { return $true }
     }
     return $false
 }

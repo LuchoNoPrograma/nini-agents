@@ -1902,7 +1902,8 @@ profile_has_auth_file() {
       current="$current/$component"
       [ ! -L "$current" ] || continue 2
     done
-    [ -f "$current" ] && return 0
+    # Profile creation seeds empty credential placeholders; only content counts.
+    [ -f "$current" ] && [ -s "$current" ] && return 0
   done
   return 1
 }
