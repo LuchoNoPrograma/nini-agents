@@ -35,7 +35,8 @@ Shared root: `%USERPROFILE%\.claude` (Windows), `~/.claude` (macOS/Linux).
 
 - Config: `CLAUDE.md`, `settings.json`, `keybindings.json`, `remote-settings.json`, `stats-cache.json`, `themes/`, `rules/`, `skills/`, `commands/`, `output-styles/`, `agents/`, `workflows/`, `agent-memory/`, `plugins/`.
 - Sessions: `projects/`, `history.jsonl`.
-- Ordinary state: `file-history/`, `plans/`, `debug/`, `paste-cache/`, `image-cache/`, `session-env/`, `tasks/`, `shell-snapshots/`, `backups/`, `feedback-bundles/`.
+- Ordinary state: `file-history/`, `plans/`, `debug/`, `paste-cache/`, `image-cache/`, `session-env/`, `tasks/`, `shell-snapshots/`, `feedback-bundles/`.
+- Profile-local runtime state: `.claude.json` (account, onboarding and per-project settings) and `backups/` (its backups) stay inside each profile's runtime and survive overlay rebuilds. `backups/` is not shared: a shared directory would offer one account's `.claude.json` backup to another profile.
 
 ## Known limitations
 

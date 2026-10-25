@@ -761,6 +761,35 @@ PROBE
   [[ "$output" == *"runtime link state/agents has the wrong target"* ]]
 }
 
+@test "overlay rebuild preserves profile-local runtime state written by the child" {
+  run multicli new fixture/account-a --no-seed
+  [ "$status" -eq 0 ]
+  run multicli launch fixture/account-a
+  [ "$status" -eq 0 ]
+
+  local runtime="$MULTICLI_HOME/fixture/account-a/.runtime"
+  printf '{"account":"a"}\n' > "$runtime/.fixture.json"
+  mkdir -p "$runtime/cache/nested"
+  printf 'cached\n' > "$runtime/cache/nested/item"
+
+  # Breaking a managed link forces a full rebuild on the next launch.
+  rm "$runtime/agents"
+  run multicli launch fixture/account-a
+  [ "$status" -eq 0 ]
+  [ -L "$runtime/agents" ]
+  [ "$(tr -d '\r' < "$runtime/.fixture.json")" = '{"account":"a"}' ]
+  [ "$(tr -d '\r' < "$runtime/cache/nested/item")" = "cached" ]
+
+  # A path dropped from sharedPaths stops being a link and does not leak back.
+  jq '.normalState.sharedPaths=["config.toml"]' "$TOOLS_ROOT/fixture/adapter.json" > "$TOOLS_ROOT/fixture/updated.json"
+  mv "$TOOLS_ROOT/fixture/updated.json" "$TOOLS_ROOT/fixture/adapter.json"
+  run multicli launch fixture/account-a
+  [ "$status" -eq 0 ]
+  [ ! -e "$runtime/agents" ] && [ ! -L "$runtime/agents" ]
+  [ "$(tr -d '\r' < "$runtime/.fixture.json")" = '{"account":"a"}' ]
+  [ -d "$HOME/.fixture/agents" ]
+}
+
 @test "matrix: legacy file-overlay launch keeps the whole root and does not migrate credentials (+2 related)" {
   # Case 1: legacy file-overlay launch keeps the whole root and does not migrate credentials
   local profile="$MULTICLI_HOME/fixture/legacy"

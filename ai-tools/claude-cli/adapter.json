@@ -30,7 +30,7 @@
       "CLAUDE.md", "settings.json", "keybindings.json", "themes", "rules", "skills",
       "commands", "output-styles", "agents", "workflows", "agent-memory", "plugins",
       "file-history", "plans", "debug", "paste-cache", "image-cache", "session-env",
-      "tasks", "shell-snapshots", "backups", "feedback-bundles", "stats-cache.json",
+      "tasks", "shell-snapshots", "feedback-bundles", "stats-cache.json",
       "remote-settings.json"
     ],
     "sessionPaths": ["projects", "history.jsonl"],
