@@ -179,7 +179,7 @@ codex resume
 
 ## Alias del shell
 
-Cada perfil recibe un atajo como `claude-cli-work`.
+Cada perfil recibe un atajo como `claude-work`.
 
 | Plataforma | Ubicación |
 |---|---|

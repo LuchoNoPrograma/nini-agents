@@ -179,7 +179,7 @@ codex resume
 
 ## Shell 别名
 
-每个配置文件都会获得一个类似 `claude-cli-work` 的快捷命令。
+每个配置文件都会获得一个类似 `claude-work` 的快捷命令。
 
 | 平台 | 位置 |
 |---|---|
