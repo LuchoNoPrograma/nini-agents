@@ -54,3 +54,26 @@ teardown() {
   [ "$(cat "$outside")" = "keep me" ]
   [ ! -e "$MULTICLI_HOME/bin/work" ]
 }
+
+@test "claude-cli profiles get a claude-<name> alias and removal clears the legacy one" {
+  mkdir -p "$MULTICLI_HOME/bin"
+  printf '#!/usr/bin/env bash\nexec nini-agents launch "claude-cli/work" "$@"\n' \
+    > "$MULTICLI_HOME/bin/claude-cli-work"
+
+  bash -c "
+    set -- help
+    source '$MULTICLI_BIN' >/dev/null 2>&1
+    create_shell_alias claude-cli work
+  "
+  [ -f "$MULTICLI_HOME/bin/claude-work" ]
+  grep -Fq 'launch "claude-cli/work"' "$MULTICLI_HOME/bin/claude-work"
+
+  bash -c "
+    set -- help
+    source '$MULTICLI_BIN' >/dev/null 2>&1
+    remove_shell_alias claude-cli work
+  "
+  [ ! -e "$MULTICLI_HOME/bin/claude-work" ]
+  [ ! -e "$MULTICLI_HOME/bin/claude-cli-work" ]
+  [ ! -e "$MULTICLI_HOME/bin/work" ]
+}
