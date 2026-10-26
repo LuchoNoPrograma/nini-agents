@@ -419,7 +419,7 @@ codex resume
 
 ## Shell aliases
 
-Each profile gets a shortcut such as `claude-cli-work`.
+Each profile gets a shortcut such as `claude-work`.
 
 | Platform | Location |
 |---|---|
