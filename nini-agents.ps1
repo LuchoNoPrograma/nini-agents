@@ -969,7 +969,7 @@ function New-Profile {
         if ($userPath -notlike "*$aliasDir*") {
             [Environment]::SetEnvironmentVariable('PATH', "$aliasDir;$userPath", 'User')
             $env:PATH = "$aliasDir;$env:PATH"
-            Write-Host "Added $aliasDir to user PATH. Restart your terminal to use '$($p.Name)' or '$($p.Tool)-$($p.Name)' as a command."
+            Write-Host "Added $aliasDir to user PATH. Restart your terminal to use '$($p.Name)' or '$(Get-AliasCommandName $p.Tool $p.Name)' as a command."
         } else {
             Write-Host "$aliasDir is already in PATH."
         }
@@ -1151,13 +1151,22 @@ function Copy-ProfileTo {
 # Aliases & shortcuts
 # =============================================================================
 
-# Write <tool>-<name>.cmd (and, if free, <name>.cmd) alias shims into the
-# alias dir; each runs this launcher with the profile spec.
+# Command name of a profile's canonical alias. Claude Code profiles drop the
+# "-cli" suffix so `claude-cli/work` is launched as `claude-work`.
+function Get-AliasCommandName {
+    param([string]$Tool, [string]$Name)
+    if ($Tool -eq 'claude-cli') { return "claude-$Name" }
+    return "$Tool-$Name"
+}
+
+# Write the canonical alias (see Get-AliasCommandName) and, if free,
+# <name>.cmd alias shims into the alias dir; each runs this launcher with the
+# profile spec.
 function New-AliasScript {
     param([string]$Tool, [string]$Name)
     $aliasDir = Get-AliasDir
     New-Item -ItemType Directory -Force -Path $aliasDir | Out-Null
-    $aliasPath = Join-Path $aliasDir "$Tool-$Name.cmd"
+    $aliasPath = Join-Path $aliasDir "$(Get-AliasCommandName $Tool $Name).cmd"
     $scriptPath = $PSCommandPath
     $profileRoot = $BASE -replace '%', '%%'
 @"
@@ -1180,8 +1189,16 @@ powershell.exe -ExecutionPolicy Bypass -File "$scriptPath" launch $Tool/$Name %*
 # profile (another tool may have claimed the same short name first).
 function Remove-AliasScript {
     param([string]$Tool, [string]$Name)
-    $aliasPath = Join-Path (Get-AliasDir) "$Tool-$Name.cmd"
+    $aliasPath = Join-Path (Get-AliasDir) "$(Get-AliasCommandName $Tool $Name).cmd"
     if (Test-Path $aliasPath) { Remove-Item -Force $aliasPath }
+    # Profiles created before Get-AliasCommandName keep a <tool>-<name> alias.
+    $legacyAliasPath = Join-Path (Get-AliasDir) "$Tool-$Name.cmd"
+    if ($legacyAliasPath -ne $aliasPath -and (Test-Path $legacyAliasPath)) {
+        $content = Get-Content $legacyAliasPath -Raw -ErrorAction SilentlyContinue
+        if ($content -and $content.Contains("$Tool/$Name")) {
+            Remove-Item -Force $legacyAliasPath
+        }
+    }
     $shortAliasPath = Join-Path (Get-AliasDir) "$Name.cmd"
     if (Test-Path $shortAliasPath) {
         $content = Get-Content $shortAliasPath -Raw -ErrorAction SilentlyContinue
@@ -2517,7 +2534,7 @@ EXAMPLES
   nini-agents launch codex/acme -- exec --search "fix the build"
   nini-agents exec codex/acme -- app-server --stdio
   nini-agents continue codex rate-limited fresh-account   # resume a chat under another account
-  claude-cli-work          # via auto-generated alias on `$PATH
+  claude-work              # via auto-generated alias on `$PATH
 
 "@ | Write-Host
 }

@@ -1116,7 +1116,7 @@ cmd_new() {
   echo "Created profile $spec ($display, strategy=$strategy$mode_note)"
   if ! alias_dir_in_path; then
     echo ""
-    echo "Tip: add $(alias_dir) to PATH to use '$TOOL-$NAME' as a command."
+    echo "Tip: add $(alias_dir) to PATH to use '$(alias_command_name "$TOOL" "$NAME")' as a command."
   fi
 }
 
@@ -1308,14 +1308,24 @@ cmd_auth() {
 # Aliases & shortcuts
 # =============================================================================
 
-# Write <tool>-<name> (and, if free, <name>) alias scripts into the alias dir.
+# Command name of a profile's canonical alias. Claude Code profiles drop the
+# "-cli" suffix so `claude-cli/work` is launched as `claude-work`.
+alias_command_name() {
+  case "$1" in
+    claude-cli) printf 'claude-%s\n' "$2" ;;
+    *) printf '%s-%s\n' "$1" "$2" ;;
+  esac
+}
+
+# Write the canonical alias (see alias_command_name) and, if free, <name>
+# alias scripts into the alias dir.
 # The generated script execs this launcher with the profile spec. Paths are
 # written inside double quotes -- never printf %q, which backslash-escapes
 # spaces that bash then passes through literally inside "...".
 create_shell_alias() {
   local tool="$1" name="$2"
   local adir="$(alias_dir)"
-  local apath="$adir/$tool-$name"
+  local apath="$adir/$(alias_command_name "$tool" "$name")"
   local launcher="$SCRIPT_DIR/nini-agents"
   local short_alias="$adir/$name" temporary
   [ ! -L "$adir" ] || { echo "Alias directory is a symbolic link: $adir" >&2; return 1; }
@@ -1356,8 +1366,15 @@ ALIAS
 
 remove_shell_alias() {
   local tool="$1" name="$2"
-  local apath="$(alias_dir)/$tool-$name"
+  local apath="$(alias_dir)/$(alias_command_name "$tool" "$name")"
   [ -f "$apath" ] && rm -f "$apath"
+
+  # Profiles created before alias_command_name keep a <tool>-<name> alias.
+  local legacy_alias="$(alias_dir)/$tool-$name"
+  if [ "$legacy_alias" != "$apath" ] && [ -f "$legacy_alias" ] &&
+    grep -qF "$tool/$name" "$legacy_alias" 2>/dev/null; then
+    rm -f "$legacy_alias"
+  fi
 
   local short_alias="$(alias_dir)/$name"
   if [ -f "$short_alias" ] && grep -qF "$tool/$name" "$short_alias" 2>/dev/null; then
@@ -2668,7 +2685,7 @@ EXAMPLES
   nini-agents launch codex/acme -- exec --search "fix the build"
   nini-agents exec codex/acme -- app-server --stdio
   nini-agents continue codex acme backup   # resume a rate-limited chat under another profile
-  claude-cli-work          # via auto-generated alias on \$PATH
+  claude-work              # via auto-generated alias on \$PATH
 
 HELP
 }
